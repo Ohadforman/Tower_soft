@@ -1,0 +1,14 @@
+{
+    "Coat A": {
+        "density": 1.05,
+        "viscosity_function": "lambda T: 1.5 - 0.01 * T + 0.00002 * T ** 2"
+    },
+    "Coat B": {
+        "density": 1.12,
+        "viscosity_function": "lambda T: 2.0 - 0.015 * T + 0.00003 * T ** 2"
+    },
+    "Coat C": {
+        "density": 1.08,
+        "viscosity_function": "lambda T: 1.8 - 0.012 * T + 0.000025 * T ** 2"
+    }
+}

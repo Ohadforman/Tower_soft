@@ -1,0 +1,19 @@
+{
+    "logs_directory": "./logs",
+    "output_folders": "./output_folders",
+    "coating_data_csv": "./coating_data_log.csv",
+    "coating_report_pdf": "coating_report.pdf",
+    "correlation_csv": "./correlation_matrix.csv",
+    "recent_csv": "./recent_csv.py",
+    "plot_logs": "./plot_log_col.py",
+    "good_fiber": "./good_fiber.py",
+    "create_folder": "./create_folder.py",
+    "csv_col_nam_map": "./csv_col_nam_map.py",
+    "run_scripts": "./run_end_draw_scripts.py",
+    "correlation_script": "./corr_map.py",
+    "fiber_report_pdf": "fiber_report.pdf",
+    "correlation_logs_directory": "./",
+    "correlation_report_pdf": "correlation_tower_data.pdf",
+    "final_merged_pdf": "final_merged.pdf",
+    "parts_directory": "./parts"
+}
