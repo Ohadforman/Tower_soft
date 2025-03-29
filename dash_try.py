@@ -25,7 +25,8 @@ tab_labels = [
     "🔍 Iris Selection",
     "📊 Dashboard",
     "📝 History Log",
-    "✅ Closed Processes"
+    "✅ Closed Processes",
+    "📋 Protocols"
 ]
 if "selected_tab" not in st.session_state:
     st.session_state["selected_tab"] = None
@@ -112,7 +113,8 @@ tab_labels = [
     "🔍 Iris Selection",
     "📊 Dashboard",
     "📝 History Log",
-    "✅ Closed Processes"
+    "✅ Closed Processes",
+    "📋 Protocols"
 ]
 
 if st.session_state.get("selected_tab"):
@@ -976,7 +978,7 @@ elif tab_selection == "📝 History Log":
 
                         st.sidebar.success("Event added to schedule!")
 # ------------------ Schedule Tab ------------------
-if tab_selection == "📅 Schedule":
+elif tab_selection == "📅 Schedule":
     st.title("📅 Tower Schedule")
     st.sidebar.title("Schedule Management")
 
@@ -1249,7 +1251,7 @@ elif tab_selection == "🔍 Iris Selection":
     else:
         st.info("Please enter a preform diameter and provide valid iris diameters.")
 # ------------------ Development Tab ------------------
-if tab_selection == "🧪 Development Process":
+elif tab_selection == "🧪 Development Process":
     st.title("🧪 Development Process")
     st.sidebar.title("Manage R&D Projects")
     st.subheader("📦 Archived Projects")
@@ -1474,3 +1476,93 @@ if tab_selection == "🧪 Development Process":
         st.subheader("📢 Project Conclusion")
         conclusion = st.text_area("Enter conclusion and final summary for this project",
                                   key=f"conclusion_{selected_project}")
+# ------------------ Protocols Tab ------------------
+PROTOCOLS_FILE = "protocols.json"
+if os.path.exists(PROTOCOLS_FILE):
+    with open(PROTOCOLS_FILE, "r") as file:
+        st.session_state["protocols"] = json.load(file)
+
+if tab_selection == "📋 Protocols":
+    st.title("📋 Protocols")
+    st.subheader("Manage Tower Protocols")
+
+    if "protocols" not in st.session_state:
+        st.session_state["protocols"] = []
+
+    # Load protocols from file if they exist
+    if os.path.exists(PROTOCOLS_FILE):
+        with open(PROTOCOLS_FILE, "r") as file:
+            st.session_state["protocols"] = json.load(file)
+
+    selected_protocol = ""
+    if st.session_state["protocols"]:
+        selected_protocol = st.selectbox("Select a Protocol", [""] + [p["name"] for p in st.session_state["protocols"]])
+        if selected_protocol:
+            protocol = next(p for p in st.session_state["protocols"] if p["name"] == selected_protocol)
+            st.markdown(f"**{protocol['name']}**")
+            st.write(f"Type: {protocol['type']}")
+            if protocol["type"] == "Checklist":
+                checklist_items = [item.strip() for item in protocol["instructions"].split("\n") if item.strip()]
+                if checklist_items:
+                    checkbox_values = [st.checkbox(item) for item in checklist_items]
+                    if all(checkbox_values):
+                        st.success(f"All items in {protocol['name']} checklist are completed!")
+                else:
+                    st.info("No checklist items available.")
+            else:
+                st.markdown("Instructions:\n" + protocol["instructions"].replace("\n", "  \n"))
+
+    if selected_protocol:
+        st.markdown("---")
+        update_protocol = st.checkbox("Update Protocol", key="update_protocol_checkbox")
+        if update_protocol:
+            with st.form(key="update_protocol_form"):
+                new_protocol_name = st.text_input("New Protocol Name", value=protocol["name"])
+                new_protocol_type = st.radio("New Protocol Type", ["Checklist", "Instructions"],
+                                             index=["Checklist", "Instructions"].index(protocol["type"]))
+                new_protocol_instructions = st.text_area("New Protocol Instructions", value=protocol["instructions"])
+                update_button = st.form_submit_button(label="Update Protocol")
+                if update_button:
+                    protocol["name"] = new_protocol_name
+                    protocol["type"] = new_protocol_type
+                    protocol["instructions"] = new_protocol_instructions
+                    # Save updated protocols list to file
+                    with open(PROTOCOLS_FILE, "w") as file:
+                        json.dump(st.session_state["protocols"], file, indent=4)
+                    st.success(f"Protocol '{new_protocol_name}' updated successfully!")
+                    st.rerun()  # Immediately refresh the list
+
+        delete_protocol = st.checkbox("Delete Protocol", key="delete_protocol_checkbox")
+        if delete_protocol:
+            if st.button(f"Delete {protocol['name']}"):
+                st.session_state["protocols"].remove(protocol)
+                # Save updated protocols list to file
+                with open(PROTOCOLS_FILE, "w") as file:
+                    json.dump(st.session_state["protocols"], file, indent=4)
+                st.success(f"Protocol '{protocol['name']}' deleted successfully!")
+                st.rerun()  # Immediately refresh the list
+
+    else:
+        st.info("No protocols available.")
+
+    if not selected_protocol:
+        create_new = st.checkbox("Create New Protocol", key="create_new_protocol_checkbox")
+        if create_new:
+            with st.form(key="new_protocol_form"):
+                protocol_name = st.text_input("Enter Protocol Name")
+                protocol_type = st.radio("Select Protocol Type", ["Checklist", "Instructions"])
+                protocol_instructions = st.text_area("Enter Protocol Instructions")
+                submit_button = st.form_submit_button(label="Add Protocol")
+                if submit_button:
+                    if protocol_name and protocol_instructions:
+                        new_protocol = {"name": protocol_name, "type": protocol_type, "instructions": protocol_instructions}
+                        st.session_state["protocols"].append(new_protocol)
+                        # Save updated protocols list to file
+                        with open(PROTOCOLS_FILE, "w") as file:
+                            json.dump(st.session_state["protocols"], file, indent=4)
+                        # Immediately update the protocols list without page refresh
+                        st.session_state["protocols"] = st.session_state["protocols"]
+                        st.success(f"Protocol '{protocol_name}' added successfully!")
+                        st.rerun()  # Immediately refresh the list
+                    else:
+                        st.error("Please fill out all fields.")
