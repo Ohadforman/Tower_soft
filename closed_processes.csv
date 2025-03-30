@@ -1,1 +1,2 @@
-Product Name,Temperature (°C),Velocity (m/s),Tension (N),Entry Diameter (µm),First Coating Diameter (µm),Second Coating Diameter (µm),Additional Info
+Product Name,Temperature (°C),Velocity (m/s),Tension (N),Entry Diameter (µm),First Coating Diameter (µm),Second Coating Diameter (µm),Additional Info,Furnace Temperature (°C),Tension (g),Drawing Speed (m/min),Coating Type (Main),Coating Type (Secondary),Entry Die (Main),Entry Die (Secondary),Primary Die (Main),Primary Die (Secondary),Coating Diameter,Coating Temperature,Fiber Diameter,P Gain for Diameter Control,I Gain for Diameter Control,Process Description,Recipe Name
+tiger,,,,,,,,2200.0,20.0,98.0,1,2,200.0,300.0,200.0,297.1,110.0,47.0,40.0,1.0,1.0,1,1

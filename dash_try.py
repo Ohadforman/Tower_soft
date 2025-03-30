@@ -19,6 +19,7 @@ tab_labels = [
     #"📊 Logs & Visualization",
     "📅 Schedule",
     "🛠️ Tower Parts",
+    "🍃 Consumables",
     "🧪 Development Process",
     #"📂 Archive",
     "💧 Coating",
@@ -107,6 +108,7 @@ tab_labels = [
     #"📊 Logs & Visualization",
     "📅 Schedule",
     "🛠️ Tower Parts",
+    "🍃 Consumables",
     "🧪 Development Process",
     #"📂 Archive",
     "💧 Coating",
@@ -128,6 +130,7 @@ else:
         st.session_state["last_tab"] = default_tab
     tab_selection = st.sidebar.radio("Navigation", tab_labels, key="tab_select", index=tab_labels.index(default_tab))
 ## Parent Tab Quick Links Navigation
+
 if tab_selection == "📐 Calculators":
     st.title("📐 Calculators")
     st.subheader("Select a tool to perform calculations")
@@ -1082,13 +1085,22 @@ elif tab_selection == "📅 Schedule":
 elif tab_selection == "✅ Closed Processes":
     st.title("✅ Closed Processes")
     st.write("Manage products that are finalized and ready for drawing.")
-
     CLOSED_PROCESSES_FILE = "closed_processes.csv"
+    with open("config_coating.json", "r") as config_file:
+        config = json.load(config_file)
 
+    dies = config.get("dies", {})
+    coatings = config.get("coatings", {})
     if not os.path.exists(CLOSED_PROCESSES_FILE):
         pd.DataFrame(columns=[
-            "Product Name", "Temperature (°C)", "Velocity (m/s)", "Tension (N)",
-            "Entry Diameter (µm)", "First Coating Diameter (µm)", "Second Coating Diameter (µm)", "Additional Info"
+            "Product Name", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
+            "Coating Type (Main)", "Coating Type (Secondary)",
+            "Entry Die (Main)", "Entry Die (Secondary)",
+            "Primary Die (Main)", "Primary Die (Secondary)",
+            "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)",
+            "Coating Temperature (Main, °C)", "Coating Temperature (Secondary, °C)",
+            "Fiber Diameter (µm)", "P Gain for Diameter Control", "I Gain for Diameter Control",
+            "Process Description", "Recipe Name"
         ]).to_csv(CLOSED_PROCESSES_FILE, index=False)
 
     closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
@@ -1098,30 +1110,64 @@ elif tab_selection == "✅ Closed Processes":
 
     st.sidebar.subheader("Add New Closed Process")
     product_name = st.sidebar.text_input("Product Name")
-    temperature = st.sidebar.number_input("Temperature (°C)", min_value=0.0, step=0.1)
-    velocity = st.sidebar.number_input("Velocity (m/s)", min_value=0.0, step=0.1)
-    tension = st.sidebar.number_input("Tension (N)", min_value=0.0, step=0.1)
-    entry_diameter = st.sidebar.number_input("Entry Diameter (µm)", min_value=0.0, step=0.1)
-    first_coating_diameter = st.sidebar.number_input("First Coating Diameter (µm)", min_value=0.0, step=0.1)
-    second_coating_diameter = st.sidebar.number_input("Second Coating Diameter (µm)", min_value=0.0, step=0.1)
-    additional_info = st.sidebar.text_area("Additional Info")
+    furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1)
+    tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1)
+    drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1)
+
+    # Main and Secondary Coating Type Inputs
+    coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()))
+    coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
+
+    # Die Inputs (Entry and Primary Dies)
+    entry_die_main = st.sidebar.number_input("Entry Die (Main)", min_value=0.0, step=0.1)
+    entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary)", min_value=0.0, step=0.1)
+    primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
+    primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
+
+    # Coating Diameter Inputs
+    coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1)
+    coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0, step=0.1)
+
+    # Coating Temperature Inputs
+    coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0, step=0.1)
+    coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)", min_value=0.0,
+                                                            step=0.1)
+
+    # Fiber Diameter and Control Inputs
+    fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
+    p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1)
+    i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1)
+
+    # Process Description and Recipe Name
+    process_description = st.sidebar.text_area("Process Description")
+    recipe_name = st.sidebar.text_input("Recipe Name")
 
     if st.sidebar.button("Add Product"):
         new_entry = pd.DataFrame([{
             "Product Name": product_name,
-            "Temperature (°C)": temperature,
-            "Velocity (m/s)": velocity,
-            "Tension (N)": tension,
-            "Entry Diameter (µm)": entry_diameter,
-            "First Coating Diameter (µm)": first_coating_diameter,
-            "Second Coating Diameter (µm)": second_coating_diameter,
-            "Additional Info": additional_info
+            "Furnace Temperature (°C)": furnace_temperature,
+            "Tension (g)": tension,
+            "Drawing Speed (m/min)": drawing_speed,
+            "Coating Type (Main)": coating_type_main,
+            "Coating Type (Secondary)": coating_type_secondary,
+            "Entry Die (Main)": entry_die_main,
+            "Entry Die (Secondary)": entry_die_secondary,
+            "Primary Die (Main)": primary_die_main,
+            "Primary Die (Secondary)": primary_die_secondary,
+            "Coating Diameter (Main, µm)": coating_diameter_main,
+            "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
+            "Coating Temperature (Main, °C)": coating_temperature_main,
+            "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
+            "Fiber Diameter (µm)": fiber_diameter,
+            "P Gain for Diameter Control": p_gain,
+            "I Gain for Diameter Control": i_gain,
+            "Process Description": process_description,
+            "Recipe Name": recipe_name
         }])
 
         closed_df = pd.concat([closed_df, new_entry], ignore_index=True)
         closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
         st.sidebar.success("Product added successfully!")
-        #st.rerun()
 
     st.sidebar.subheader("Delete Closed Process")
     if not closed_df.empty:
@@ -1130,7 +1176,6 @@ elif tab_selection == "✅ Closed Processes":
             closed_df = closed_df[closed_df["Product Name"] != delete_product]
             closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
             st.sidebar.success("Product deleted successfully!")
-            #st.rerun()
     else:
         st.sidebar.info("No products available for deletion.")
 # ------------------ Tower Parts Tab ------------------
@@ -1566,3 +1611,63 @@ if tab_selection == "📋 Protocols":
                         st.rerun()  # Immediately refresh the list
                     else:
                         st.error("Please fill out all fields.")
+# ------------------ Consumables Tab ------------------
+elif tab_selection == "🍃 Consumables":
+    st.title("🍃 Consumables")
+    st.subheader("Manage Gases and Coatings Stock")
+
+    # Input for gases and coating stock
+    st.sidebar.subheader("Consumables Management")
+    gas_stock = st.sidebar.number_input("Gas Stock (kg)", min_value=0.0, step=0.1)
+    coating_stock = st.sidebar.number_input("Coating Stock (kg)", min_value=0.0, step=0.1)
+
+    # List the available log files from the logs directory
+    log_folder = "logs"  # Directory containing log files
+    log_files = [f for f in os.listdir(log_folder) if f.endswith(('.csv', '.xlsx'))]
+
+    st.sidebar.subheader("Log Data Selection")
+    if log_files:
+        log_file = st.sidebar.selectbox("Select a Log File", log_files)
+    else:
+        log_file = None
+        st.info("No log files found in the logs directory.")
+
+    if log_file:
+        # Load the selected log file
+        file_path = os.path.join(log_folder, log_file)
+        if log_file.endswith(".csv"):
+            log_data = pd.read_csv(file_path)
+        else:
+            log_data = pd.read_excel(file_path)
+
+        st.write("### Log Data")
+        st.dataframe(log_data)
+
+        # Assuming the log data contains necessary columns for calculation
+        # Columns: 'First Coating Diameter', 'Secondary Coating Diameter', 'Length', 'Gas Consumption'
+
+        # Calculate coating consumption (example: volume of coating used)
+        log_data['Coating Consumption (kg)'] = (
+            3.14159 * ((log_data['First Coating Diameter'] / 2) ** 2 - (log_data['Secondary Coating Diameter'] / 2) ** 2) *
+            log_data['Length'] * 0.001  # Adjust for scale, assuming coating density = 1 kg/m^3 for simplicity
+        )
+
+        # Calculate total coating consumption
+        total_coating_consumption = log_data['Coating Consumption (kg)'].sum()
+
+        # Calculate total gas consumption (sum over time)
+        total_gas_consumption = log_data['Gas Consumption'].sum()
+
+        # Display calculated consumption
+        st.write(f"### Total Coating Consumption: {total_coating_consumption:.2f} kg")
+        st.write(f"### Total Gas Consumption: {total_gas_consumption:.2f} kg")
+
+        # Update consumables stock
+        remaining_gas = gas_stock - total_gas_consumption
+        remaining_coating = coating_stock - total_coating_consumption
+
+        st.write(f"### Remaining Gas Stock: {remaining_gas:.2f} kg")
+        st.write(f"### Remaining Coating Stock: {remaining_coating:.2f} kg")
+
+    else:
+        st.info("Please select a log file to calculate consumption.")
