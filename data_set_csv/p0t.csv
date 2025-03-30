@@ -1,0 +1,17 @@
+Parameter Name,Value,Units
+Log File Name,modified_Training2_19112024_144443.csv,
+Zone 1 Start,2024-11-19 12:59:13.817000,
+Zone 1 End,2024-11-19 12:59:13.817000,
+zone 1 Fibre Length at Start,0.0,km
+zone 1 Fibre Length at End,0.0,km
+zone 1 Pf Process Position at Start,-9999.0,mm
+zone 1 Pf Process Position at End,-9999.0,mm
+Zone 1 Avg (Bare Fibre Diameter),400.010009765625,µm
+Zone 1 Min (Bare Fibre Diameter),400.010009765625,µm
+Zone 1 Max (Bare Fibre Diameter),400.010009765625,µm
+Zone 1 Avg (Coated Inner Diameter),1.0,µm
+Zone 1 Min (Coated Inner Diameter),1.0,µm
+Zone 1 Max (Coated Inner Diameter),1.0,µm
+Zone 1 Avg (Coated Outer Diameter),2.0,µm
+Zone 1 Min (Coated Outer Diameter),2,µm
+Zone 1 Max (Coated Outer Diameter),2,µm

@@ -238,6 +238,36 @@ if tab_selection == "🏠 Home":
     st.title("️ Tower Management Software")
     st.subheader("A Smart Way to Manage Tower Operations Efficiently")
 
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    # In your Home tab (Main Tab), modify the CSV creation process:
+    csv_name = st.text_input("Enter Unique CSV Name", "")  # User enters name here
+
+    if st.button("Create New CSV for Data Program", key="create_csv"):
+        if csv_name:  # Only proceed if the name is provided
+            # Create the folder if it does not exist
+            if not os.path.exists('data_set_csv'):
+                os.makedirs('data_set_csv')
+
+            # Define the CSV path
+            csv_path = os.path.join('data_set_csv', csv_name)
+
+            # Check if the CSV already exists, and provide feedback
+            if os.path.exists(csv_path):
+                st.warning(f"CSV file '{csv_name}' already exists.")
+            else:
+                # Create the DataFrame with the necessary columns
+                columns = ["Parameter Name", "Value", "Units"]
+                df_new = pd.DataFrame(columns=columns)
+
+                # Save the empty CSV file
+                df_new.to_csv(csv_path, index=False)
+                st.success(f"New CSV '{csv_name}' created in the 'data_set_csv' folder!")
+        else:
+            st.warning("Please enter a valid name for the CSV file.")
     st.markdown(
         f"""
         <style>
@@ -501,10 +531,96 @@ elif tab_selection == "📊 Dashboard":
         summary_df = pd.DataFrame(summary_data)
         st.dataframe(summary_df)
 
-        if st.button("Save Zone Summary"):
-            summary_df.to_csv("good_zone_summary.csv", index=False)
-            st.success("Zone summary saved to good_zone_summary.csv")
+        # Select CSV file before saving
+        recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
+        selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
 
+        # Proceed with the rest of the dashboard only after selecting a CSV
+        if selected_csv:
+            st.write(f"Selected CSV: {selected_csv}")
+
+            # Now, the user can click the button to save the data
+            if st.button("Save Zone's Summary after finishing mark all zones"):
+                # Prepare the data to log (e.g., good zones data) in the format you mentioned
+                data_to_add = []
+                log_file_name = selected_file  # Assuming this is the log file the user selected
+
+                # Add Log File Name to the data
+                data_to_add.append({
+                    "Parameter Name": "Log File Name",
+                    "Value": log_file_name,
+                    "Units": ""
+                })
+
+                # Iterate over the good zones and add the relevant data
+                for i, (start, end) in enumerate(st.session_state["good_zones"]):
+                    # Add Zone as a parameter
+                    data_to_add.append({
+                        "Parameter Name": f"Zone {i + 1} Start",
+                        "Value": start,
+                        "Units": ""
+                    })
+                    data_to_add.append({
+                        "Parameter Name": f"Zone {i + 1} End",
+                        "Value": end,
+                        "Units": ""
+                    })
+
+                    zone_data = df[(df["Date/Time"] >= pd.to_datetime(start)) & (df["Date/Time"] <= pd.to_datetime(end))]
+                    if not zone_data.empty:
+                        for param in ["Fibre Length", "Pf Process Position"]:
+                            if param in zone_data.columns:
+                                start_value = zone_data.iloc[0][param]
+                                end_value = zone_data.iloc[-1][param]
+                                data_to_add.append({
+                                    "Parameter Name": f"Zone {i+1} {param} at Start",
+                                    "Value": start_value,
+                                    "Units": "km" if param == "Fibre Length" else "mm"
+                                })
+                                data_to_add.append({
+                                    "Parameter Name": f"Zone {i+1} {param} at End",
+                                    "Value": end_value,
+                                    "Units": "km" if param == "Fibre Length" else "mm"
+                                })
+                        # Calculate avg, min, max for Bare Fibre Diameter, Coated Inner Diameter, and Coated Outer Diameter
+                        for param in ["Bare Fibre Diameter", "Coated Inner Diameter", "Coated Outer Diameter"]:
+                            if param in zone_data.columns:
+                                avg_value = zone_data[param].mean()
+                                min_value = zone_data[param].min()
+                                max_value = zone_data[param].max()
+                                data_to_add.append({
+                                    "Parameter Name": f"Zone {i + 1} Avg ({param})",
+                                    "Value": avg_value,
+                                    "Units": "µm"
+                                })
+                                data_to_add.append({
+                                    "Parameter Name": f"Zone {i + 1} Min ({param})",
+                                    "Value": min_value,
+                                    "Units": "µm"
+                                })
+                                data_to_add.append({
+                                    "Parameter Name": f"Zone {i + 1} Max ({param})",
+                                    "Value": max_value,
+                                    "Units": "µm"
+                                })
+
+                # Load the selected CSV
+                csv_path = os.path.join('data_set_csv', selected_csv)
+                try:
+                    df_csv = pd.read_csv(csv_path)
+                except FileNotFoundError:
+                    st.error(f"CSV file '{selected_csv}' not found.")
+                    st.stop()
+
+                # Append the new data to the CSV
+                new_rows = pd.DataFrame(data_to_add)
+                df_csv = pd.concat([df_csv, new_rows], ignore_index=True)
+
+                # Save the updated CSV
+                df_csv.to_csv(csv_path, index=False)
+                st.success(f"CSV '{selected_csv}' updated with new good zones data!")
+        else:
+            st.warning("Please select a valid CSV file before saving.")
     # Display log data
     st.write("### Log Data")
     st.data_editor(df, height=300, width=1000, use_container_width=True)
@@ -523,7 +639,190 @@ elif tab_selection == "📊 Dashboard":
             st.pyplot(fig_corr)
         else:
             st.warning("No numerical columns available for correlation analysis.")
-# ------------------ Coating Log Tab ------------------
+elif tab_selection == "🍃 Consumables":
+    # Load saved stock levels if they exist
+    stock_path = "stock_levels.json"
+    if os.path.exists(stock_path):
+        with open(stock_path, "r") as f:
+            try:
+                saved_stock = json.load(f)
+                gas_stock = saved_stock.get("gas_stock", 0.0)
+                coating_stock = saved_stock.get("coating_stock", 0.0)
+            except Exception:
+                gas_stock = 0.0
+                coating_stock = 0.0
+    else:
+        gas_stock = 0.0
+        coating_stock = 0.0
+
+    st.title("🍃 Consumables")
+    st.subheader("Coating Containers & Argon Vessel Visualization")
+    with open("config_coating.json", "r") as config_file:
+        config = json.load(config_file)
+    coatings = config.get("coatings", {})
+
+    st.markdown("---")
+    st.subheader("🏷️ Coating Stock by Type")
+
+    # Load or initialize stock levels for each coating type
+    stock_file = "coating_type_stock.json"
+    if os.path.exists(stock_file):
+        with open(stock_file, "r") as f:
+            try:
+                coating_type_stock = json.load(f)
+            except Exception:
+                coating_type_stock = {ctype: 0.0 for ctype in coatings.keys()}
+    else:
+        coating_type_stock = {ctype: 0.0 for ctype in coatings.keys()}
+
+    # Display and update coating stock per type with vessel-style visuals
+    coating_types = list(coatings.keys())
+    rows = [coating_types[i:i + 4] for i in range(0, len(coating_types), 4)]
+    updated_stock = {}
+
+    for row in rows:
+        cols = st.columns(len(row))
+        for i, coating_type in enumerate(row):
+            with cols[i]:
+                current_value = coating_type_stock.get(coating_type, 0.0)
+                updated_stock[coating_type] = st.slider(
+                    f"{coating_type}", min_value=0.0, max_value=40.0, value=float(current_value), step=0.1, key=f"stock_{coating_type}"
+                )
+                fill_height = int((updated_stock[coating_type] / 40) * 100)
+                st.markdown(
+                    f"""
+                    <div style='height: 120px; width: 30px; border: 1px solid black; margin: auto; position: relative; background: #eee;'>
+                        <div style='position: absolute; bottom: 0; height: {fill_height}%; width: 100%; background: #4CAF50;'></div>
+                    </div>
+                <p style='text-align: center;'>{updated_stock[coating_type]:.1f} kg</p>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+    if st.button("💾 Save Coating Stock by Type"):
+        with open(stock_file, "w") as f:
+            json.dump(updated_stock, f, indent=4)
+        st.success("Coating stock levels saved!")
+
+    st.markdown("### 🧪 Coating Containers (A, B, C, D)")
+    container_cols = st.columns(4)
+    container_labels = ["A", "B", "C", "D"]
+    container_levels = {}
+    container_temps = {}
+
+    import os
+
+    CONFIG_PATH = "container_config.json"
+
+    # Load saved configuration if it exists
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r") as f:
+            try:
+                saved_config = json.load(f)
+                if not isinstance(saved_config, dict):
+                    saved_config = {}
+            except Exception:
+                saved_config = {}
+    else:
+        saved_config = {}
+
+    # Use saved values if available
+    for label in container_labels:
+        st.session_state.setdefault(f"level_{label}", saved_config.get(label, {}).get("level", 50))
+        st.session_state.setdefault(f"coating_type_{label}", saved_config.get(label, {}).get("type", ""))
+        st.session_state.setdefault(f"temp_{label}", saved_config.get(label, {}).get("temp", 25.0))
+
+    for col, label in zip(container_cols, container_labels):
+        with col:
+            st.markdown(f"**Container {label}**")
+            level_key = f"level_{label}"
+            type_key = f"coating_type_{label}"
+            temp_key = f"temp_{label}"
+
+            # Input controls managed by Streamlit defaults
+            default_level = updated_stock.get(label, saved_config.get(label, {}).get("level", 0.0))
+            level = st.slider(f"Fill Level {label} (kg)", min_value=0.0, max_value=4.0, value=float(default_level), step=0.1, key=level_key)
+            coating_options = list(coatings.keys())
+            default_type = st.session_state.get(type_key, "")
+            if default_type not in coating_options:
+                default_type = coating_options[0] if coating_options else ""
+            st.session_state[type_key] = default_type
+            coating_type = st.selectbox(f"Coating Type for {label}", options=coating_options, key=type_key)
+            temperature = st.number_input(f"Temperature for {label} (°C)", min_value=0.0, step=0.1, key=temp_key)
+
+            # Store values
+            container_levels[label] = level
+            container_temps[label] = temperature
+
+            # Progress bar
+            fill_height = int((level / 4.0) * 100)
+            st.markdown(
+                f"""
+                <div style='height: 120px; width: 30px; border: 1px solid black; margin: auto; position: relative; background: #eee;'>
+                    <div style='position: absolute; bottom: 0; height: {fill_height}%; width: 100%; background: #4CAF50;'></div>
+                </div>
+                <p style='text-align: center;'>{level:.1f} kg</p>
+                """,
+                unsafe_allow_html=True
+            )
+            refill_checkbox = st.checkbox(f"Refill Container {label}?", key=f"refill_{label}")
+            if refill_checkbox:
+                refill_kg = st.number_input(f"Amount to Refill (kg)", min_value=0.0, step=0.1, key=f"refill_kg_{label}")
+                if st.button(f"💾 Confirm Refill {label}"):
+
+                    coating_type = st.session_state[type_key]
+                    stock_file = "coating_type_stock.json"
+                    if os.path.exists(stock_file):
+                        with open(stock_file, "r") as f:
+                            coating_type_stock = json.load(f)
+                    else:
+                        coating_type_stock = {}
+
+                    current_stock = coating_type_stock.get(coating_type, 0.0)
+                    coating_type_stock[coating_type] = max(0.0, current_stock - refill_kg)
+
+                    with open(stock_file, "w") as f:
+                        json.dump(coating_type_stock, f, indent=4)
+                    updated_stock[coating_type] = coating_type_stock[coating_type]
+                    # Save refill info to config and update session state
+                    if os.path.exists(CONFIG_PATH):
+                        with open(CONFIG_PATH, "r") as f:
+                            config_data = json.load(f)
+                    else:
+                        config_data = {}
+
+                    new_level = min(4.0, st.session_state[level_key] + refill_kg)
+                    config_data[label] = {
+                        "level": new_level,
+                        "type": coating_type,
+                        "temp": st.session_state[temp_key]
+                    }
+                    with open(CONFIG_PATH, "w") as f:
+                        json.dump(config_data, f, indent=4)
+
+                    # Instead of trying to assign to st.session_state[level_key], assign to updated_stock
+                    updated_stock[label] = new_level
+
+                    st.rerun()
+    if st.button("💾 Save Container Configuration"):
+        config_to_save = {
+            label: {
+                "level": container_levels[label],
+                "type": st.session_state[f"coating_type_{label}"],
+                "temp": container_temps[label]
+            }
+            for label in container_labels
+        }
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config_to_save, f, indent=4)
+        st.success("Container configuration saved!")
+
+    st.markdown("---")
+    st.markdown("### 🧯 Argon Vessel")
+    argon_level = st.slider("Argon Fill Level (%)", min_value=0, max_value=100, value=60, key="argon_level")
+    st.progress(argon_level / 100.0, text=f"{argon_level}%")
+
+
 elif tab_selection == "💧 Coating":
     st.title("💧 Coating Calculation")
 
@@ -649,6 +948,28 @@ elif tab_selection == "💧 Coating":
                 """,
                 unsafe_allow_html=True
             )
+    if st.button("Update Dataset CSV", key="update_dataset_csv"):
+        recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
+        selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
+        if selected_csv:
+            st.write(f"Selected CSV: {selected_csv}")
+            data_to_add = [
+                {"Parameter Name": "Entry Fiber Diameter", "Value": entry_fiber_diameter, "Units": "µm"},
+                {"Parameter Name": "First Coating Diameter", "Value": FC_diameter, "Units": "µm"},
+                {"Parameter Name": "Second Coating Diameter", "Value": SC_diameter, "Units": "µm"},
+                {"Parameter Name": "Primary Coating", "Value": primary_coating, "Units": ""},
+                {"Parameter Name": "Secondary Coating", "Value": secondary_coating, "Units": ""}
+            ]
+            csv_path = os.path.join('data_set_csv', selected_csv)
+            try:
+                df_csv = pd.read_csv(csv_path)
+            except FileNotFoundError:
+                st.error(f"CSV file '{selected_csv}' not found.")
+                st.stop()
+            new_rows = pd.DataFrame(data_to_add)
+            df_csv = pd.concat([df_csv, new_rows], ignore_index=True)
+            df_csv.to_csv(csv_path, index=False)
+            st.success(f"CSV '{selected_csv}' updated with new data!")
 # ------------------ History Log Tab ------------------
 elif tab_selection == "📝 History Log":
     st.title("📝 History Log")
@@ -1237,8 +1558,65 @@ elif tab_selection == "🛠️ Tower Parts":
                 st.sidebar.success("Order updated!")
 
     st.write("### Order Tracking")
+
     if not orders_df.empty:
-        st.data_editor(orders_df, height=400, use_container_width=True)
+        # Move Status column to the first position
+        columns_order = ["Status"] + [col for col in orders_df.columns if col != "Status"]
+        orders_df = orders_df[columns_order]
+
+        # Add a delete option
+        delete_row = st.selectbox("Select a part to delete", orders_df["Part Name"].tolist(), key="delete_part")
+        if st.button("Delete Selected Part"):
+            orders_df = orders_df[orders_df["Part Name"] != delete_row]
+            orders_df.to_csv(ORDER_FILE, index=False)
+            st.success(f"Deleted part: {delete_row}")
+
+        # Archive installed parts
+        if st.button("📦 Archive Installed Orders"):
+            archive_file = "archived_orders.csv"
+            installed_df = orders_df[orders_df["Status"].str.strip().str.lower() == "installed"]
+            remaining_df = orders_df[orders_df["Status"].str.strip().str.lower() != "installed"]
+
+            if not installed_df.empty:
+                if os.path.exists(archive_file):
+                    archived_df = pd.read_csv(archive_file)
+                    archived_df = pd.concat([archived_df, installed_df], ignore_index=True)
+                else:
+                    archived_df = installed_df
+
+                archived_df.to_csv(archive_file, index=False)
+                remaining_df.to_csv(ORDER_FILE, index=False)
+                orders_df = remaining_df
+                st.success(f"{len(installed_df)} installed order(s) archived.")
+            else:
+                st.info("No installed parts to archive.")
+
+        # Button to view archived orders
+        if st.button("📂 View Archived Orders"):
+            archive_file = "archived_orders.csv"
+            if os.path.exists(archive_file):
+                archived_df = pd.read_csv(archive_file)
+                if not archived_df.empty:
+                    st.write("### Archived Orders")
+                    st.dataframe(archived_df, height=300, use_container_width=True)
+                else:
+                    st.info("The archive is currently empty.")
+            else:
+                st.info("Archive file does not exist yet.")
+
+        # Color-coding based on Status
+        def highlight_status(row):
+            color_map = {
+            "Needed": "background-color: lightcoral; color: black",
+            "Ordered": "background-color: lightyellow; color: black",
+            "Shipped": "background-color: lightblue; color: black",
+            "Received": "background-color: lightgreen; color: black",
+            "Installed": "background-color: lightgray; color: black",
+            }
+            return [color_map.get(row["Status"], "")] + [""] * (len(row) - 1)
+
+        st.dataframe(orders_df.style.apply(highlight_status, axis=1), height=400, use_container_width=True)
+
     else:
         st.warning("No orders have been placed yet.")
 
@@ -1277,20 +1655,68 @@ elif tab_selection == "🛠️ Tower Parts":
     if os.path.exists(PARTS_DIRECTORY) and os.listdir(PARTS_DIRECTORY):
         display_directory(PARTS_DIRECTORY)
 # ------------------ Draw Archive Tab ------------------
-elif tab_selection == "🔍 Iris Selection":
+if tab_selection == "🔍 Iris Selection":
     st.title("🔍 Iris Selection")
     st.subheader("Iris Selection Tool")
+
+    # Input Preform Diameter
     preform_diameter = st.number_input("Enter Preform Diameter (mm)", min_value=0.0, step=0.1, format="%.2f")
 
-    iris_diameters = [round(x * 0.5, 1) for x in range(20, 91)]
+    iris_diameters = [round(x * 0.5, 1) for x in range(20, 91)]  # Iris diameters from 10 mm to 45 mm
 
+    # Validate and compute the best iris diameter based on the preform diameter
     if preform_diameter > 0 and iris_diameters:
         valid_iris = [d for d in iris_diameters if d > preform_diameter]
         if valid_iris:
+            # Calculate the best iris diameter that gives the closest gap to 0.2 mm
             results = [(d, (d - preform_diameter) / 2) for d in valid_iris]
-            best = min(results, key=lambda x: abs(x[1] - 0.2))
-            st.write(f"Best Matching Iris Diameter: {best[0]:.2f} mm")
-            st.write(f"Calculated Free Space: {best[1]:.2f} mm")
+            best = min(results, key=lambda x: abs(x[1] - 0.2))  # Find the iris diameter with gap closest to 0.2 mm
+
+            # Display the best matching iris diameter
+            st.write(f"**Best Matching Iris Diameter:** {best[0]:.2f} mm")
+            st.write(f"**Calculated Free Space:** {best[1]:.2f} mm")
+
+            # Allow manual override of iris selection
+            selected_iris = st.selectbox("Or select a different iris diameter", valid_iris,
+                                         index=valid_iris.index(best[0]))
+            manual_free_space = (selected_iris - preform_diameter) / 2
+            st.write(
+                f"**Manual Selection - Iris Diameter:** {selected_iris:.2f} mm, **Free Space:** {manual_free_space:.2f} mm")
+
+            # Display the Preform Diameter and Selected Iris Data
+            st.write(f"**Preform Diameter:** {preform_diameter:.2f} mm")
+            st.write(f"**Selected Iris Diameter (Manual):** {selected_iris:.2f} mm")
+            st.write(f"**Manual Free Space:** {manual_free_space:.2f} mm")
+
+            # Allow user to select the CSV to update
+            recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
+            selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
+
+            # Show update button only after CSV is selected
+            if selected_csv:
+                if st.button("Update Dataset CSV", key="update_dataset_csv"):
+                    st.write(f"Selected CSV: {selected_csv}")
+                    data_to_add = [
+                        {"Parameter Name": "Preform Diameter", "Value": preform_diameter, "Units": "mm"},
+                        {"Parameter Name": "Selected Iris Diameter", "Value": selected_iris, "Units": "mm"},
+                        {"Parameter Name": "Manual Free Space", "Value": manual_free_space, "Units": "mm"}
+                    ]
+
+                    # Load the selected CSV
+                    csv_path = os.path.join('data_set_csv', selected_csv)
+                    try:
+                        df = pd.read_csv(csv_path)
+                    except FileNotFoundError:
+                        st.error(f"CSV file '{selected_csv}' not found.")
+                        st.stop()
+
+                    # Append new rows with the data
+                    new_rows = pd.DataFrame(data_to_add)
+                    df = pd.concat([df, new_rows], ignore_index=True)
+
+                    # Save the updated CSV back to the 'data_set_csv' folder
+                    df.to_csv(csv_path, index=False)
+                    st.success(f"CSV '{selected_csv}' updated with new data!")
         else:
             st.warning("No iris diameter is larger than the preform diameter.")
     else:
@@ -1522,15 +1948,14 @@ elif tab_selection == "🧪 Development Process":
         conclusion = st.text_area("Enter conclusion and final summary for this project",
                                   key=f"conclusion_{selected_project}")
 # ------------------ Protocols Tab ------------------
-PROTOCOLS_FILE = "protocols.json"
-if os.path.exists(PROTOCOLS_FILE):
-    with open(PROTOCOLS_FILE, "r") as file:
-        st.session_state["protocols"] = json.load(file)
 
 if tab_selection == "📋 Protocols":
     st.title("📋 Protocols")
     st.subheader("Manage Tower Protocols")
-
+    PROTOCOLS_FILE = "protocols.json"
+    if os.path.exists(PROTOCOLS_FILE):
+        with open(PROTOCOLS_FILE, "r") as file:
+            st.session_state["protocols"] = json.load(file)
     if "protocols" not in st.session_state:
         st.session_state["protocols"] = []
 
@@ -1617,9 +2042,6 @@ elif tab_selection == "🍃 Consumables":
     st.subheader("Manage Gases and Coatings Stock")
 
     # Input for gases and coating stock
-    st.sidebar.subheader("Consumables Management")
-    gas_stock = st.sidebar.number_input("Gas Stock (kg)", min_value=0.0, step=0.1)
-    coating_stock = st.sidebar.number_input("Coating Stock (kg)", min_value=0.0, step=0.1)
 
     # List the available log files from the logs directory
     log_folder = "logs"  # Directory containing log files
@@ -1640,23 +2062,76 @@ elif tab_selection == "🍃 Consumables":
         else:
             log_data = pd.read_excel(file_path)
 
-        st.write("### Log Data")
-        st.dataframe(log_data)
+    st.write("### Log Data")
+    st.dataframe(log_data)
 
-        # Assuming the log data contains necessary columns for calculation
-        # Columns: 'First Coating Diameter', 'Secondary Coating Diameter', 'Length', 'Gas Consumption'
+    # Try to identify a usable time column
+    possible_time_cols = ["Date/Time", "Timestamp"]
+    time_col = next((col for col in possible_time_cols if col in log_data.columns), None)
+
+    if time_col:
+        log_data[time_col] = pd.to_datetime(log_data[time_col], errors='coerce')
+        sorted_log = log_data.dropna(subset=[time_col]).sort_values(by=time_col)
+        if sorted_log.empty:
+            st.warning("⚠️ Log data has no valid timestamps after parsing. Skipping duration calculation.")
+            duration_minutes = 0
+        else:
+            duration_minutes = (sorted_log[time_col].iloc[-1] - sorted_log[time_col].iloc[0]).total_seconds() / 60
+    else:
+        st.warning("⚠️ No time column ('Date/Time' or 'Timestamp') found in log file.")
+        duration_minutes = 0
+
+    # Compute total flow from MFC1-4 Actual (in L/min)
+    mfc_cols = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
+    if all(col in log_data.columns for col in mfc_cols):
+        log_data["argon_total_lpm"] = log_data[mfc_cols].sum(axis=1)
+        if not log_data["argon_total_lpm"].isna().all():
+            average_flow_lpm = log_data["argon_total_lpm"].mean()
+            if duration_minutes > 0:
+                total_argon_liters = average_flow_lpm * duration_minutes
+            else:
+                total_argon_liters = average_flow_lpm * len(log_data)  # fallback: treat each row as 1 minute
+            total_gas_consumption = total_argon_liters
+            st.markdown(f"### 🧯 Total Argon Used: **{total_argon_liters:.2f} liters**")
+        else:
+            total_gas_consumption = 0
+            st.warning("Gas flow columns contain only NaN values.")
+    else:
+        total_gas_consumption = 0
+        st.warning("Missing columns for argon usage calculation.")
+
+    # Assuming the log data contains necessary columns for calculation
+    # Columns: 'First Coating Diameter', 'Secondary Coating Diameter', 'Length', 'Gas Consumption'
 
         # Calculate coating consumption (example: volume of coating used)
         log_data['Coating Consumption (kg)'] = (
-            3.14159 * ((log_data['First Coating Diameter'] / 2) ** 2 - (log_data['Secondary Coating Diameter'] / 2) ** 2) *
-            log_data['Length'] * 0.001  # Adjust for scale, assuming coating density = 1 kg/m^3 for simplicity
+                3.14159 * (
+                    (log_data['Coated Outer Diameter'] / 2) ** 2 - (log_data['Coated Inner Diameter'] / 2) ** 2) *
+                log_data['Fibre Length'] * 1e-12  # Converts µm²·mm to m³ assuming coating density ~1 kg/m³
         )
 
         # Calculate total coating consumption
         total_coating_consumption = log_data['Coating Consumption (kg)'].sum()
+        if 'total_gas_consumption' not in locals():
+            total_gas_consumption = 0
+        # Calculate total gas consumption using total argon liters (after total_argon_liters is computed)
 
-        # Calculate total gas consumption (sum over time)
-        total_gas_consumption = log_data['Gas Consumption'].sum()
+        # Calculate coating consumption if required columns exist
+        required_cols = ['Coated Outer Diameter', 'Coated Inner Diameter', 'Fibre Length']
+        if all(col in log_data.columns for col in required_cols):
+            log_data['Coating Consumption (kg)'] = (
+                    3.14159 * (
+                        (log_data['Coated Outer Diameter'] / 2) ** 2 - (log_data['Coated Inner Diameter'] / 2) ** 2) *
+                    log_data['Fibre Length'] * 1e-12
+            )
+            total_coating_consumption = log_data['Coating Consumption (kg)'].sum()
+        else:
+            total_coating_consumption = 0
+            st.warning("Missing columns for coating consumption calculation.")
+
+        # Set gas consumption to 0 if not calculated earlier
+        if 'total_gas_consumption' not in locals():
+            total_gas_consumption = 0
 
         # Display calculated consumption
         st.write(f"### Total Coating Consumption: {total_coating_consumption:.2f} kg")
@@ -1668,6 +2143,3 @@ elif tab_selection == "🍃 Consumables":
 
         st.write(f"### Remaining Gas Stock: {remaining_gas:.2f} kg")
         st.write(f"### Remaining Coating Stock: {remaining_coating:.2f} kg")
-
-    else:
-        st.info("Please select a log file to calculate consumption.")
