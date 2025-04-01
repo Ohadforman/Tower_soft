@@ -16,3 +16,9 @@ estimated_theoretical = real_input / (1 + avg_error_decimal)
 
 print(f"Average error: {avg_error_percent:.2f}%")
 print(f"Estimated theoretical value: {estimated_theoretical:.2f}")
+
+'''Entry fiber diameter: 220.0μm
+
+First coating diameter: 280.16μm, using Die: Die_345 and Coating: DP-1032
+
+Secondary coating diameter: 325.95μm, using Die: Die_374 and Coating: DS-2015'''

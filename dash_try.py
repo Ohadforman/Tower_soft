@@ -2065,81 +2065,126 @@ elif tab_selection == "🍃 Consumables":
     st.write("### Log Data")
     st.dataframe(log_data)
 
-    # Try to identify a usable time column
-    possible_time_cols = ["Date/Time", "Timestamp"]
-    time_col = next((col for col in possible_time_cols if col in log_data.columns), None)
-
-    if time_col:
-        log_data[time_col] = pd.to_datetime(log_data[time_col], errors='coerce')
-        sorted_log = log_data.dropna(subset=[time_col]).sort_values(by=time_col)
-        if sorted_log.empty:
-            st.warning("⚠️ Log data has no valid timestamps after parsing. Skipping duration calculation.")
-            duration_minutes = 0
-        else:
-            duration_minutes = (sorted_log[time_col].iloc[-1] - sorted_log[time_col].iloc[0]).total_seconds() / 60
-    else:
-        st.warning("⚠️ No time column ('Date/Time' or 'Timestamp') found in log file.")
-        duration_minutes = 0
-
-    # Compute total flow from MFC1-4 Actual (in L/min)
-    mfc_cols = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
-    if all(col in log_data.columns for col in mfc_cols):
-        log_data["argon_total_lpm"] = log_data[mfc_cols].sum(axis=1)
-        if not log_data["argon_total_lpm"].isna().all():
-            average_flow_lpm = log_data["argon_total_lpm"].mean()
-            if duration_minutes > 0:
-                total_argon_liters = average_flow_lpm * duration_minutes
+    # Add a button to trigger gas calculation
+    if st.button("Calculate Gas Spent"):
+        if log_file:
+            file_path = os.path.join(log_folder, log_file)
+            if log_file.endswith(".csv"):
+                log_data = pd.read_csv(file_path)
             else:
-                total_argon_liters = average_flow_lpm * len(log_data)  # fallback: treat each row as 1 minute
-            total_gas_consumption = total_argon_liters
-            st.markdown(f"### 🧯 Total Argon Used: **{total_argon_liters:.2f} liters**")
+                log_data = pd.read_excel(file_path)
+
+            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
+            if all(col in log_data.columns for col in mfc_columns):
+                log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
+                time_column = "Date/Time"
+                def try_parse_datetime(dt_str):
+                    if isinstance(dt_str, str):
+                        dt_str = dt_str[:19]  # Clean extra characters beyond seconds
+                    date_formats = [
+                        "%d/%m/%Y %H:%M:%S",
+                        "%Y-%m-%d %H:%M:%S",
+                        "%m/%d/%Y %H:%M:%S",
+                        "%d-%m-%Y %H:%M:%S"
+                    ]
+                    for fmt in date_formats:
+                        try:
+                            parsed = pd.to_datetime(dt_str, format=fmt, errors='coerce')
+                            if pd.notnull(parsed):
+                                return parsed
+                        except Exception:
+                            continue
+                    return pd.NaT
+
+                log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
+
+                if log_data[time_column].isna().all():
+                    st.error("No valid timestamps found in the log data. Please inspect the data below.")
+                    st.dataframe(log_data)
+                else:
+                    log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
+
+                    # Use Simpson's Rule if sufficient data exists, else fallback to Trapezoidal Rule
+                    def simpson_rule(y, h):
+                        n = len(y) - 1
+                        if n % 2 == 1:
+                            # For odd number of intervals, apply Simpson's rule on first n-1 intervals and trapezoidal for last
+                            S = simpson_rule(y[:-1], h) + (y.iloc[-2] + y.iloc[-1]) * h / 2
+                        else:
+                            S = y.iloc[0] + y.iloc[-1] + 4 * y.iloc[1:-1:2].sum() + 2 * y.iloc[2:-2:2].sum()
+                            S = S * h / 3
+                        return S
+
+                    time_diffs = log_data['Time Difference'].dropna().reset_index(drop=True)
+                    flow_values = log_data['Total Flow'].dropna().reset_index(drop=True)
+                    if len(time_diffs) >= 3:
+                        # Approximate uniform spacing using median time difference
+                        h = time_diffs.median()
+                        total_gas = simpson_rule(flow_values, h)
+                    else:
+                        total_gas = 0
+                        for i in range(1, len(log_data)):
+                            flow_avg = (log_data['Total Flow'].iloc[i-1] + log_data['Total Flow'].iloc[i]) / 2
+                            time_diff = log_data['Time Difference'].iloc[i]
+                            total_gas += flow_avg * time_diff
+
+    st.write(f"### 🧯 Total Argon Used: {total_gas:.2f} liters")
+    # Add a button to save the calculated total gas to the selected CSV
+    if st.button("Save Total Gas Spent to CSV"):
+        if log_file:
+            file_path = os.path.join(log_folder, log_file)
+            if log_file.endswith(".csv"):
+                log_data = pd.read_csv(file_path)
+            else:
+                log_data = pd.read_excel(file_path)
+
+            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
+            log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
+            time_column = "Date/Time"
+            log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
+
+            if log_data[time_column].isna().all():
+                st.error("No valid timestamps found in the log data. Please inspect the data below.")
+                st.dataframe(log_data)
+            else:
+                log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
+
+                def simpson_rule(y, h):
+                    n = len(y) - 1
+                    if n % 2 == 1:
+                        S = simpson_rule(y[:-1], h) + (y.iloc[-2] + y.iloc[-1]) * h / 2
+                    else:
+                        S = y.iloc[0] + y.iloc[-1] + 4 * y.iloc[1:-1:2].sum() + 2 * y.iloc[2:-2:2].sum()
+                        S = S * h / 3
+                    return S
+
+                time_diffs = log_data['Time Difference'].dropna().reset_index(drop=True)
+                flow_values = log_data['Total Flow'].dropna().reset_index(drop=True)
+                if len(time_diffs) >= 3:
+                    h = time_diffs.median()
+                    total_gas = simpson_rule(flow_values, h)
+                else:
+                    total_gas = 0
+                    for i in range(1, len(log_data)):
+                        flow_avg = (log_data['Total Flow'].iloc[i-1] + log_data['Total Flow'].iloc[i]) / 2
+                        time_diff = log_data['Time Difference'].iloc[i]
+                        total_gas += flow_avg * time_diff
+
+                selected_csv = st.selectbox("Select CSV to Save Total Gas Spent", [f for f in os.listdir('data_set_csv') if f.endswith(".csv")])
+                if selected_csv:
+                    csv_path = os.path.join('data_set_csv', selected_csv)
+                    df_csv = pd.read_csv(csv_path)
+                    new_row = pd.DataFrame([{
+                        "Parameter Name": "Total Gas Spent",
+                        "Value": total_gas,
+                        "Units": "liters"
+                    }])
+                    df_csv = pd.concat([df_csv, new_row], ignore_index=True)
+                    df_csv.to_csv(csv_path, index=False)
+                    st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
+                else:
+                    st.warning("Please select a valid CSV file to save the total gas spent.")
         else:
-            total_gas_consumption = 0
-            st.warning("Gas flow columns contain only NaN values.")
+                st.warning("Missing one or more MFC columns (Furnace MFC1 Actual, Furnace MFC2 Actual, Furnace MFC3 Actual, Furnace MFC4 Actual).")
     else:
-        total_gas_consumption = 0
-        st.warning("Missing columns for argon usage calculation.")
-
-    # Assuming the log data contains necessary columns for calculation
-    # Columns: 'First Coating Diameter', 'Secondary Coating Diameter', 'Length', 'Gas Consumption'
-
-        # Calculate coating consumption (example: volume of coating used)
-        log_data['Coating Consumption (kg)'] = (
-                3.14159 * (
-                    (log_data['Coated Outer Diameter'] / 2) ** 2 - (log_data['Coated Inner Diameter'] / 2) ** 2) *
-                log_data['Fibre Length'] * 1e-12  # Converts µm²·mm to m³ assuming coating density ~1 kg/m³
-        )
-
-        # Calculate total coating consumption
-        total_coating_consumption = log_data['Coating Consumption (kg)'].sum()
-        if 'total_gas_consumption' not in locals():
-            total_gas_consumption = 0
-        # Calculate total gas consumption using total argon liters (after total_argon_liters is computed)
-
-        # Calculate coating consumption if required columns exist
-        required_cols = ['Coated Outer Diameter', 'Coated Inner Diameter', 'Fibre Length']
-        if all(col in log_data.columns for col in required_cols):
-            log_data['Coating Consumption (kg)'] = (
-                    3.14159 * (
-                        (log_data['Coated Outer Diameter'] / 2) ** 2 - (log_data['Coated Inner Diameter'] / 2) ** 2) *
-                    log_data['Fibre Length'] * 1e-12
-            )
-            total_coating_consumption = log_data['Coating Consumption (kg)'].sum()
-        else:
-            total_coating_consumption = 0
-            st.warning("Missing columns for coating consumption calculation.")
-
-        # Set gas consumption to 0 if not calculated earlier
-        if 'total_gas_consumption' not in locals():
-            total_gas_consumption = 0
-
-        # Display calculated consumption
-        st.write(f"### Total Coating Consumption: {total_coating_consumption:.2f} kg")
-        st.write(f"### Total Gas Consumption: {total_gas_consumption:.2f} kg")
-
-        # Update consumables stock
-        remaining_gas = gas_stock - total_gas_consumption
-        remaining_coating = coating_stock - total_coating_consumption
-
-        st.write(f"### Remaining Gas Stock: {remaining_gas:.2f} kg")
-        st.write(f"### Remaining Coating Stock: {remaining_coating:.2f} kg")
+            st.warning("Please upload a valid log file to calculate gas spent.")
