@@ -10,18 +10,25 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import math
 
+# Load coatings and dies from the configuration file
+with open("config_coating.json", "r") as config_file:
+    config = json.load(config_file)
 
-DEVELOPMENT_FILE = "development_process.csv"
+coatings = config.get("coatings", {})
+dies = config.get("dies", {})
+
+# Ensure coatings and dies are properly loaded
+if not coatings or not dies:
+    st.error("Coatings and/or Dies not configured in config_coating.json")
+    st.stop()
+
 
 tab_labels = [
     "🏠 Home",
-    #"📐 Calculators",
-    #"📊 Logs & Visualization",
     "📅 Schedule",
     "🛠️ Tower Parts",
     "🍃 Consumables",
     "🧪 Development Process",
-    #"📂 Archive",
     "💧 Coating",
     "🔍 Iris Selection",
     "📊 Dashboard",
@@ -29,6 +36,7 @@ tab_labels = [
     "✅ Closed Processes",
     "📋 Protocols"
 ]
+
 if "selected_tab" not in st.session_state:
     st.session_state["selected_tab"] = None
 
@@ -56,7 +64,6 @@ def switch_tab(tab_name, parent_tab=None):
         st.session_state["last_tab"] = tab_name
     st.session_state["selected_tab"] = tab_name
     st.rerun()
-
 def get_base64_image(image_path):
     """Encodes an image to base64 format for inline CSS."""
     with open(image_path, "rb") as img_file:
@@ -85,7 +92,6 @@ def calculate_coating_thickness(entry_fiber_diameter, die_diameter, mu, rho, L, 
 
     coated_fiber_diameter = entry_fiber_diameter + (t * 2 * 1e6)  # Convert thickness to microns
     return coated_fiber_diameter
-
 def evaluate_viscosity(T, function_str):
     """Computes viscosity by evaluating the stored function string from config."""
     try:
@@ -93,7 +99,6 @@ def evaluate_viscosity(T, function_str):
     except Exception as e:
         st.error(f"Error evaluating viscosity function: {e}")
         return None
-
 # Load configuration
 with open("config_coating.json", "r") as config_file:
     config = json.load(config_file)
@@ -101,23 +106,7 @@ with open("config_coating.json", "r") as config_file:
 DATA_FOLDER = config.get("logs_directory", "./logs")
 HISTORY_FILE = "history_log.csv"
 PARTS_DIRECTORY = config.get("parts_directory", "./parts")
-
-tab_labels = [
-    "🏠 Home",
-    #"📐 Calculators",
-    #"📊 Logs & Visualization",
-    "📅 Schedule",
-    "🛠️ Tower Parts",
-    "🍃 Consumables",
-    "🧪 Development Process",
-    #"📂 Archive",
-    "💧 Coating",
-    "🔍 Iris Selection",
-    "📊 Dashboard",
-    "📝 History Log",
-    "✅ Closed Processes",
-    "📋 Protocols"
-]
+DEVELOPMENT_FILE = "development_process.csv"
 
 if st.session_state.get("selected_tab"):
     tab_selection = st.session_state["selected_tab"]
@@ -129,79 +118,6 @@ else:
         default_tab = "🏠 Home"
         st.session_state["last_tab"] = default_tab
     tab_selection = st.sidebar.radio("Navigation", tab_labels, key="tab_select", index=tab_labels.index(default_tab))
-## Parent Tab Quick Links Navigation
-
-if tab_selection == "📐 Calculators":
-    st.title("📐 Calculators")
-    st.subheader("Select a tool to perform calculations")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("💧 Coating Calculation", key="btn_coating"):
-            switch_tab("💧 Coating", parent_tab="📐 Calculators")
-    with col2:
-        if st.button("🔍 Iris Selection", key="btn_iris"):
-            switch_tab("🔍 Iris Selection", parent_tab="📐 Calculators")
-elif tab_selection == "📊 Logs & Visualization":
-    st.title("📊 Logs & Visualization")
-    st.subheader("Analyze and visualize tower operations")
-    if st.button("📊 Open Dashboard", key="btn_dashboard"):
-        switch_tab("📊 Dashboard", parent_tab="📊 Logs & Visualization")
-
-elif tab_selection == "📂 Archive":
-    st.title("📂 Archive")
-    st.subheader("View historical records and closed processes")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📝 View History Log", key="btn_history"):
-            switch_tab("📝 History Log", parent_tab="📂 Archive")
-    with col2:
-        if st.button("✅ View Closed Processes", key="btn_closed"):
-            switch_tab("✅ Closed Processes", parent_tab="📂 Archive")
-
-    st.subheader("📦 Archived Projects")
-    archived_file = "archived_projects.csv"
-
-    # Render quick access buttons to archived project views
-    if os.path.exists(archived_file):
-        archived_projects_df = pd.read_csv(archived_file)
-        archived_projects = archived_projects_df["Project Name"].unique().tolist()
-        selected_archived = st.selectbox("Select Archived Project", [""] + archived_projects, key="archived_project_select")
-        if selected_archived:
-            st.markdown(f"## 📋 Project Details: {selected_archived}")
-            archived_project_data = archived_projects_df[archived_projects_df["Project Name"] == selected_archived]
-            if not archived_project_data.empty:
-                first_entry = archived_project_data.iloc[0]
-                st.markdown(f"**Project Purpose:** {first_entry.get('Project Purpose', 'N/A')}")
-                st.markdown(f"**Target:** {first_entry.get('Target', 'N/A')}")
-
-                experiments = archived_project_data[
-                    archived_project_data["Experiment Title"].notna() &
-                    archived_project_data["Date"].notna()
-                ]
-                if not experiments.empty:
-                    st.subheader("🔬 Archived Experiments")
-                    for _, exp in experiments.iterrows():
-                        with st.expander(f"🧪 {exp['Experiment Title']} ({exp['Date']})"):
-                            st.markdown(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
-                            st.markdown(f"**Methods:** {exp.get('Methods', 'N/A')}")
-                            st.markdown(f"**Purpose:** {exp.get('Purpose', 'N/A')}")
-                            st.markdown(f"**Observations:** {exp.get('Observations', 'N/A')}")
-                            st.markdown(f"**Results:** {exp.get('Results', 'N/A')}")
-            else:
-                st.warning("No data found for selected archived project.")
-    else:
-        st.info("No archived projects file available.")
-
-# ------------------ Quick Link Sections Return Button ------------------
-if tab_selection in ["💧 Coating", "🔍 Iris Selection", "📊 Dashboard", "📝 History Log", "✅ Closed Processes"]:
-    parent_tab = st.session_state.get("parent_tab", None)
-    if parent_tab:
-        if st.button(f"⬅️ Return to {parent_tab}", key=f"return_{parent_tab}"):
-            st.session_state["selected_tab"] = parent_tab
-            st.session_state["last_tab"] = parent_tab
-            st.session_state["tab_select"] = parent_tab
-            del st.session_state["parent_tab"]  # Remove after successful navigation
-            st.rerun()
 
 df = pd.DataFrame()  # Initialize an empty DataFrame to avoid NameError
 
@@ -639,6 +555,7 @@ elif tab_selection == "📊 Dashboard":
             st.pyplot(fig_corr)
         else:
             st.warning("No numerical columns available for correlation analysis.")
+# ------------------ Consumables Tab ------------------
 elif tab_selection == "🍃 Consumables":
     # Load saved stock levels if they exist
     stock_path = "stock_levels.json"
@@ -821,8 +738,7 @@ elif tab_selection == "🍃 Consumables":
     st.markdown("### 🧯 Argon Vessel")
     argon_level = st.slider("Argon Fill Level (%)", min_value=0, max_value=100, value=60, key="argon_level")
     st.progress(argon_level / 100.0, text=f"{argon_level}%")
-
-
+# ------------------ Coating Tab ------------------
 elif tab_selection == "💧 Coating":
     st.title("💧 Coating Calculation")
 
@@ -856,6 +772,8 @@ elif tab_selection == "💧 Coating":
 
     primary_coating = st.selectbox("Select Primary Coating", coatings.keys())
     secondary_coating = st.selectbox("Select Secondary Coating", coatings.keys())
+    first_entry_die = st.number_input("First Coating Entry Die (µm)", min_value=0.0, step=0.1)
+    second_entry_die = st.number_input("Second Coating Entry Die (µm)", min_value=0.0, step=0.1)
 
     # **Load Selected Die and Coating Data**
     primary_die_config = dies[primary_die]
@@ -953,12 +871,25 @@ elif tab_selection == "💧 Coating":
         selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
         if selected_csv:
             st.write(f"Selected CSV: {selected_csv}")
+            # **Dropdowns for Die and Coating Selection**
+            # **Dropdowns for Die Selection**
+            # Use calculated die diameters from the coating calculation
+            primary_die_main_diameter = primary_die_diameter
+            secondary_die_main_diameter = secondary_die_diameter
+
             data_to_add = [
                 {"Parameter Name": "Entry Fiber Diameter", "Value": entry_fiber_diameter, "Units": "µm"},
-                {"Parameter Name": "First Coating Diameter", "Value": FC_diameter, "Units": "µm"},
-                {"Parameter Name": "Second Coating Diameter", "Value": SC_diameter, "Units": "µm"},
+                {"Parameter Name": "First Coating Diameter (Theoretical)", "Value": FC_diameter, "Units": "µm"},
+                {"Parameter Name": "Second Coating Diameter (Theoretical)", "Value": SC_diameter, "Units": "µm"},
                 {"Parameter Name": "Primary Coating", "Value": primary_coating, "Units": ""},
-                {"Parameter Name": "Secondary Coating", "Value": secondary_coating, "Units": ""}
+                {"Parameter Name": "Secondary Coating", "Value": secondary_coating, "Units": ""},
+                {"Parameter Name": "First Coating Entry Die", "Value": first_entry_die, "Units": "µm"},
+                {"Parameter Name": "Second Coating Entry Die", "Value": second_entry_die, "Units": "µm"},
+                {"Parameter Name": "Primary Coating Temperature", "Value": primary_temperature, "Units": "°C"},
+                {"Parameter Name": "Secondary Coating Temperature", "Value": secondary_temperature, "Units": "°C"},
+                {"Parameter Name": "Primary Die Diameter", "Value": primary_die_main_diameter, "Units": "µm"},
+                {"Parameter Name": "Secondary Die Diameter", "Value": secondary_die_main_diameter,
+                 "Units": "µm"},
             ]
             csv_path = os.path.join('data_set_csv', selected_csv)
             try:
@@ -1079,8 +1010,8 @@ elif tab_selection == "📝 History Log":
             second_coating_temp = st.sidebar.number_input("Second Coating Temperature (°C)", min_value=0.0, step=0.1)
             second_die = st.sidebar.selectbox("Select Second Die", list(dies.keys()))
             fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
-            first_entry_die = st.sidebar.number_input("First Coating Entry Die (mm)", min_value=0.0, step=0.1)
-            second_entry_die = st.sidebar.number_input("Second Coating Entry Die (mm)", min_value=0.0, step=0.1)
+            first_entry_die = st.sidebar.number_input("First Coating Entry Die (µm)", min_value=0.0, step=0.1)
+            second_entry_die = st.sidebar.number_input("Second Coating Entry Die (µm)", min_value=0.0, step=0.1)
 
             if st.sidebar.button("Save Draw History"):
                 new_entry = pd.DataFrame([{
@@ -1440,8 +1371,8 @@ elif tab_selection == "✅ Closed Processes":
     coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
 
     # Die Inputs (Entry and Primary Dies)
-    entry_die_main = st.sidebar.number_input("Entry Die (Main)", min_value=0.0, step=0.1)
-    entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary)", min_value=0.0, step=0.1)
+    entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1)
+    entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1)
     primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
     primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
 
@@ -1655,7 +1586,7 @@ elif tab_selection == "🛠️ Tower Parts":
     if os.path.exists(PARTS_DIRECTORY) and os.listdir(PARTS_DIRECTORY):
         display_directory(PARTS_DIRECTORY)
 # ------------------ Draw Archive Tab ------------------
-if tab_selection == "🔍 Iris Selection":
+elif tab_selection == "🔍 Iris Selection":
     st.title("🔍 Iris Selection")
     st.subheader("Iris Selection Tool")
 
@@ -1879,6 +1810,92 @@ elif tab_selection == "🧪 Development Process":
             researcher = st.text_input("Researcher Name")
             observations = st.text_area("Observations")
             results = st.text_area("Results")
+            show_drawing = st.checkbox("Is this a Drawing?", key=f"show_drawing_{selected_project}")
+            if show_drawing:
+                drawing_details = st.text_area("Enter Drawing Details", key=f"drawing_details_{selected_project}")
+            else:
+                drawing_details = ""
+            if show_drawing:
+                st.subheader("Add Draw Entry")
+
+                # Drawing details input fields
+                draw_name = st.text_input("Draw Name")
+                first_coating = st.selectbox("Select First Coating", coatings.keys())
+                first_coating_temp = st.number_input("First Coating Temperature (°C)", value=25.0, step=0.1)
+                first_die = st.selectbox("Select First Die", dies.keys())
+
+                second_coating = st.selectbox("Select Second Coating", coatings.keys())
+                second_coating_temp = st.number_input("Second Coating Temperature (°C)", value=25.0, step=0.1)
+                second_die = st.selectbox("Select Second Die", dies.keys())
+
+                fiber_diameter = st.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
+
+                first_entry_die = st.number_input("First Coating Entry Die (mm)", min_value=0.0, step=0.1)
+                second_entry_die = st.number_input("Second Coating Entry Die (mm)", min_value=0.0, step=0.1)
+
+                # Save button for both experiment and history
+                if st.button("Save Draw History"):
+                    if draw_name and first_coating and first_die and second_coating and second_die:
+                        new_experiment = pd.DataFrame([{
+                            "Project Name": selected_project,
+                            "Experiment Title": experiment_title,
+                            "Methods": methods,
+                            "Purpose": purpose,
+                            "Date": date.strftime("%Y-%m-%d"),
+                            "Researcher": researcher,
+                            "Observations": observations,
+                            "Results": results,
+                            "Is Drawing": True,
+                            "Drawing Name": draw_name,
+                            "First Coating": first_coating,
+                            "First Coating Temperature": first_coating_temp,
+                            "First Coating Die": first_die,
+                            "Second Coating": second_coating,
+                            "Second Coating Temperature": second_coating_temp,
+                            "Second Coating Die": second_die,
+                            "Fiber Diameter": fiber_diameter,
+                            "First Coating Entry Die": first_entry_die,
+                            "Second Coating Entry Die": second_entry_die,
+                            "Drawing Details": drawing_details if show_drawing else ""
+                        }])
+
+                        # Save the new experiment to the development file
+                        dev_df = pd.concat([dev_df, new_experiment], ignore_index=True)
+                        dev_df.to_csv(DEVELOPMENT_FILE, index=False)
+
+                        # Save the draw details to the history log
+                        history_entry = {
+                            "Timestamp": pd.Timestamp.now(),
+                            "Type": "Drawing History",
+                            "Project Name": selected_project,
+                            "Experiment Title": experiment_title,
+                            "Methods": methods,
+                            "Purpose": purpose,
+                            "Date": date.strftime("%Y-%m-%d"),
+                            "Researcher": researcher,
+                            "Observations": observations,
+                            "Results": results,
+                            "Draw Name": draw_name,
+                            "First Coating": first_coating,
+                            "First Coating Temperature": first_coating_temp,
+                            "First Coating Die": first_die,
+                            "Second Coating": second_coating,
+                            "Second Coating Temperature": second_coating_temp,
+                            "Second Coating Die": second_die,
+                            "Fiber Diameter": fiber_diameter,
+                            "First Coating Entry Die": first_entry_die,
+                            "Second Coating Entry Die": second_entry_die,
+                            "Drawing Details": drawing_details
+                        }
+
+                        history_df = pd.read_csv(HISTORY_FILE)
+                        history_df = pd.concat([history_df, pd.DataFrame([history_entry])], ignore_index=True)
+                        history_df.to_csv(HISTORY_FILE, index=False)
+
+                        st.success("Draw history saved successfully!")
+                        st.rerun()
+                    else:
+                        st.warning("Please fill in all the required fields.")
 
             if st.button("Add Experiment"):
                 if experiment_title and date:
@@ -1890,11 +1907,25 @@ elif tab_selection == "🧪 Development Process":
                         "Date": date.strftime("%Y-%m-%d"),
                         "Researcher": researcher,
                         "Observations": observations,
-                        "Results": results
+                        "Results": results,
+                        "Is Drawing": show_drawing,
+                        "Drawing Details": drawing_details if show_drawing else ""
                     }])
                     dev_df = pd.concat([dev_df, new_experiment], ignore_index=True)
                     dev_df.to_csv(DEVELOPMENT_FILE, index=False)
                     st.success("Experiment added successfully!")
+                    if show_drawing:
+
+                        history_entry = {
+                            "Timestamp": pd.Timestamp.now(),
+                            "Type": "Drawing History",
+                            "Experiment Title": experiment_title,
+                            "Drawing Details": drawing_details,
+                            "Project Name": selected_project
+                        }
+                        history_df = pd.read_csv(HISTORY_FILE)
+                        history_df = pd.concat([history_df, pd.DataFrame([history_entry])], ignore_index=True)
+                        history_df.to_csv(HISTORY_FILE, index=False)
                     st.rerun()
                 else:
                     st.warning("Please provide at least a title and date for the experiment.")
@@ -1948,8 +1979,7 @@ elif tab_selection == "🧪 Development Process":
         conclusion = st.text_area("Enter conclusion and final summary for this project",
                                   key=f"conclusion_{selected_project}")
 # ------------------ Protocols Tab ------------------
-
-if tab_selection == "📋 Protocols":
+elif tab_selection == "📋 Protocols":
     st.title("📋 Protocols")
     st.subheader("Manage Tower Protocols")
     PROTOCOLS_FILE = "protocols.json"
@@ -2187,4 +2217,42 @@ elif tab_selection == "🍃 Consumables":
         else:
                 st.warning("Missing one or more MFC columns (Furnace MFC1 Actual, Furnace MFC2 Actual, Furnace MFC3 Actual, Furnace MFC4 Actual).")
     else:
+            st.warning("Please upload a valid log file to calculate gas spent.")
+
+# Add a button to save the calculated total gas to the selected CSV
+    if st.button("Save Total Gas Spent to CSV"):
+        if log_file:
+            # Ensure total_gas is calculated properly
+            total_gas = 0  # Replace this with the correct calculation of total_gas
+
+            # Select CSV file from 'data_set_csv' directory
+            selected_csv = st.selectbox("Select CSV to Save Total Gas Spent",
+                                        [f for f in os.listdir('data_set_csv') if f.endswith(".csv")])
+
+            if selected_csv:
+                csv_path = os.path.join('data_set_csv', selected_csv)
+
+                try:
+                    # Load the selected CSV
+                    df_csv = pd.read_csv(csv_path)
+
+                    # Prepare the new data to be added
+                    new_row = pd.DataFrame([{
+                        "Parameter Name": "Total Gas Spent",
+                        "Value": total_gas,
+                        "Units": "liters"
+                    }])
+
+                    # Append new data to the existing CSV
+                    df_csv = pd.concat([df_csv, new_row], ignore_index=True)
+
+                    # Save the updated CSV back to the same file
+                    df_csv.to_csv(csv_path, index=False)
+
+                    st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
+                except FileNotFoundError:
+                    st.error(f"CSV file '{selected_csv}' not found.")
+            else:
+                st.warning("Please select a valid CSV file to save the total gas spent.")
+        else:
             st.warning("Please upload a valid log file to calculate gas spent.")

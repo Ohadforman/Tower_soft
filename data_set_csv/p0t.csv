@@ -15,3 +15,14 @@ Zone 1 Max (Coated Inner Diameter),1.0,µm
 Zone 1 Avg (Coated Outer Diameter),2.0,µm
 Zone 1 Min (Coated Outer Diameter),2,µm
 Zone 1 Max (Coated Outer Diameter),2,µm
+Entry Fiber Diameter,40.0,µm
+First Coating Diameter (Theoretical),88.91658399644209,µm
+Second Coating Diameter (Theoretical),113.49130628135967,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,200.0,µm
+Second Coating Entry Die,200.0,µm
+Primary Coating Temperature,47.0,°C
+Secondary Coating Temperature,44.0,°C
+Primary Die (Main) Diameter,150,µm
+Secondary Die (Main) Diameter,140,µm

@@ -1,27 +1,30 @@
-Timestamp,Summary,Error,Part Change,Type,Draw Name,Coating,Temperature,Die Size,Fiber Diameter,Description,Part Changed,Notes,First Coating,First Coating Temperature,First Coating Die Size,Second Coating,Second Coating Temperature,Second Coating Die Size,Status
+Timestamp,Summary,Error,Part Change,Type,Draw Name,Coating,Temperature,Die Size,Fiber Diameter,Description,Part Changed,Notes,First Coating,First Coating Temperature,First Coating Die Size,Second Coating,Second Coating Temperature,Second Coating Die Size,Status,First Die,Second Die,First Coating Entry Die,Second Coating Entry Die
 2025-03-22 09:01:02.000000,"test
-",jump in coating,coat die,,,,,,,,,,,,,,,,Not Addressed
-2025-03-22 09:15:00.000000,,,,Draw History,modified_Training2_19112024_144443.csv,OF136,44.0,200.0,40.0,,,,,,,,,,Not Addressed
+",jump in coating,coat die,,,,,,,,,,,,,,,,Not Addressed,,,,
+2025-03-22 09:15:00.000000,,,,Draw History,modified_Training2_19112024_144443.csv,OF136,44.0,200.0,40.0,,,,,,,,,,Not Addressed,,,,
 2025-03-22 09:15:34.000000,,,,Problem History,,,,,,"jumo in coating
-",,,,,,,,,Fixed
-2025-03-22 09:27:05.000000,test 2,,,,,,,,,,,,,,,,,,Not Addressed
-2025-03-22 09:29:49.000000,,,,Draw History,simulated_fiber_data.csv,j,0.0,0.0,0.0,,,,,,,,,,Not Addressed
-2025-03-22 09:30:45.000000,,,,Maintenance History,,,,,,,,coating clean,,,,,,,Not Addressed
-2025-03-22 09:49:41.000000,,,,Draw History,simulated_fiber_data.csv,,,,0.0,,,,,0.0,0.0,,0.0,0.0,Not Addressed
-2025-03-22 09:51:52.000000,,,,Draw History,test5,,,,40.0,,,,of,44.0,200.0,sd,48.0,298.0,Not Addressed
+",,,,,,,,,Fixed,,,,
+2025-03-22 09:27:05.000000,test 2,,,,,,,,,,,,,,,,,,Not Addressed,,,,
+2025-03-22 09:29:49.000000,,,,Draw History,simulated_fiber_data.csv,j,0.0,0.0,0.0,,,,,,,,,,Not Addressed,,,,
+2025-03-22 09:30:45.000000,,,,Maintenance History,,,,,,,,coating clean,,,,,,,Not Addressed,,,,
+2025-03-22 09:49:41.000000,,,,Draw History,simulated_fiber_data.csv,,,,0.0,,,,,0.0,0.0,,0.0,0.0,Not Addressed,,,,
+2025-03-22 09:51:52.000000,,,,Draw History,test5,,,,40.0,,,,of,44.0,200.0,sd,48.0,298.0,Not Addressed,,,,
 2025-03-22 16:42:55.912102,,,,Maintenance History,,,,,,,,"coating system clean
-",,,,,,,Not Addressed
+",,,,,,,Not Addressed,,,,
 2025-03-22 16:45:27.263916,,,,Maintenance History,,,,,,,graphit,"the furnace needed cange
-",,,,,,,Not Addressed
+",,,,,,,Not Addressed,,,,
 2025-03-22 16:55:23.224818,,,,Problem History,,,,,,"rpg bad
-",,,,,,,,,Fixed
-2025-03-22 17:47:37.909324,,,,Draw History,ear,,,,0.0,,,,era,0.0,0.0,ear,0.0,0.0,
-2025-03-22 18:25:58.569863,,,,Maintenance History,,,,,,,,hello,,,,,,,
-2025-03-22 18:29:18.479006,,,,Problem History,,,,,,feds,,,,,,,,,Fixed
-2025-03-22 18:29:19.391109,,,,Problem History,,,,,,feds,,,,,,,,,Fixed
-2025-03-22 18:29:28.026163,,,,Problem History,,,,,,feds,,,,,,,,,Fixed
+",,,,,,,,,Fixed,,,,
+2025-03-22 17:47:37.909324,,,,Draw History,ear,,,,0.0,,,,era,0.0,0.0,ear,0.0,0.0,,,,,
+2025-03-22 18:25:58.569863,,,,Maintenance History,,,,,,,,hello,,,,,,,,,,,
+2025-03-22 18:29:18.479006,,,,Problem History,,,,,,feds,,,,,,,,,Fixed,,,,
+2025-03-22 18:29:19.391109,,,,Problem History,,,,,,feds,,,,,,,,,Fixed,,,,
+2025-03-22 18:29:28.026163,,,,Problem History,,,,,,feds,,,,,,,,,Fixed,,,,
 2025-03-22 18:33:22.792982,,,,Problem History,,,,,,"test
-",,,,,,,,,Fixed
-2025-03-22 18:35:09.432771,,,,Maintenance History,,,,,,,,cant clean,,,,,,,
-2025-03-22 18:57:28.689269,,,,Problem History,,,,,,twat,,,,,,,,,Fixed
-2025-03-22 18:58:39.571154,,,,Problem History,,,,,,"rgp - not working well, 0.1ppm",,,,,,,,,Waiting for Parts
+",,,,,,,,,Fixed,,,,
+2025-03-22 18:35:09.432771,,,,Maintenance History,,,,,,,,cant clean,,,,,,,,,,,
+2025-03-22 18:57:28.689269,,,,Problem History,,,,,,twat,,,,,,,,,Fixed,,,,
+2025-03-22 18:58:39.571154,,,,Problem History,,,,,,"rgp - not working well, 0.1ppm",,,,,,,,,Waiting for Parts,,,,
+2025-04-01 16:48:42.728908,,,,Draw History,200_220/42,,,,200.0,,,,DP-1032,47.0,,DS-2015,44.0,,,Die_345,Die_374,500.0,550.0
+2025-04-02 17:39:57.504946,,,,Problem History,,,,,,"there was a problem in the coating system. the second coating was not present at all.  the first also not in the value, less than what needed and showed in past drawings. after uptight the entry dies there was a problem that the first coating was GIANT in diameter and stack in the second die",,,,,,,,,Not Yet Addressed,,,,
+2025-04-02 17:40:12.541877,,,,Problem History,,,,,,"there was a problem in the coating system. the second coating was not present at all.  the first also not in the value, less than what needed and showed in past drawings. after uptight the entry dies there was a problem that the first coating was GIANT in diameter and stack in the second die",,,,,,,,,Not Yet Addressed,,,,
