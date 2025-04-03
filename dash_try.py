@@ -9,6 +9,7 @@ import json
 import seaborn as sns
 import matplotlib.pyplot as plt
 import math
+import numpy as np
 
 # Load coatings and dies from the configuration file
 with open("config_coating.json", "r") as config_file:
@@ -107,6 +108,7 @@ DATA_FOLDER = config.get("logs_directory", "./logs")
 HISTORY_FILE = "history_log.csv"
 PARTS_DIRECTORY = config.get("parts_directory", "./parts")
 DEVELOPMENT_FILE = "development_process.csv"
+DATASET_FOLDER = "./data_set_csv"
 
 if st.session_state.get("selected_tab"):
     tab_selection = st.session_state["selected_tab"]
@@ -154,14 +156,8 @@ if tab_selection == "🏠 Home":
     st.title("️ Tower Management Software")
     st.subheader("A Smart Way to Manage Tower Operations Efficiently")
 
-    # In your Home tab (Main Tab), modify the CSV creation process:
-    # In your Home tab (Main Tab), modify the CSV creation process:
-    # In your Home tab (Main Tab), modify the CSV creation process:
-    # In your Home tab (Main Tab), modify the CSV creation process:
-    # In your Home tab (Main Tab), modify the CSV creation process:
-    # In your Home tab (Main Tab), modify the CSV creation process:
     csv_name = st.text_input("Enter Unique CSV Name", "")  # User enters name here
-
+    csv_name = csv_name+".csv" if csv_name and not csv_name.endswith(".csv") else csv_name
     if st.button("Create New CSV for Data Program", key="create_csv"):
         if csv_name:  # Only proceed if the name is provided
             # Create the folder if it does not exist
@@ -866,13 +862,11 @@ elif tab_selection == "💧 Coating":
                 """,
                 unsafe_allow_html=True
             )
+    recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
+    selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
     if st.button("Update Dataset CSV", key="update_dataset_csv"):
-        recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
-        selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
         if selected_csv:
             st.write(f"Selected CSV: {selected_csv}")
-            # **Dropdowns for Die and Coating Selection**
-            # **Dropdowns for Die Selection**
             # Use calculated die diameters from the coating calculation
             primary_die_main_diameter = primary_die_diameter
             secondary_die_main_diameter = secondary_die_diameter
@@ -888,8 +882,7 @@ elif tab_selection == "💧 Coating":
                 {"Parameter Name": "Primary Coating Temperature", "Value": primary_temperature, "Units": "°C"},
                 {"Parameter Name": "Secondary Coating Temperature", "Value": secondary_temperature, "Units": "°C"},
                 {"Parameter Name": "Primary Die Diameter", "Value": primary_die_main_diameter, "Units": "µm"},
-                {"Parameter Name": "Secondary Die Diameter", "Value": secondary_die_main_diameter,
-                 "Units": "µm"},
+                {"Parameter Name": "Secondary Die Diameter", "Value": secondary_die_main_diameter, "Units": "µm"},
             ]
             csv_path = os.path.join('data_set_csv', selected_csv)
             try:
@@ -1001,49 +994,42 @@ elif tab_selection == "📝 History Log":
         dies = config.get("dies", {})
 
         if history_type == "Draw History":
-            st.sidebar.subheader("Add Draw Entry")
-            draw_name = st.sidebar.text_input("Draw Name")
-            first_coating = st.sidebar.selectbox("Select First Coating", list(coatings.keys()))
-            first_coating_temp = st.sidebar.number_input("First Coating Temperature (°C)", min_value=0.0, step=0.1)
-            first_die = st.sidebar.selectbox("Select First Die", list(dies.keys()))
-            second_coating = st.sidebar.selectbox("Select Second Coating", list(coatings.keys()))
-            second_coating_temp = st.sidebar.number_input("Second Coating Temperature (°C)", min_value=0.0, step=0.1)
-            second_die = st.sidebar.selectbox("Select Second Die", list(dies.keys()))
-            fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
-            first_entry_die = st.sidebar.number_input("First Coating Entry Die (µm)", min_value=0.0, step=0.1)
-            second_entry_die = st.sidebar.number_input("Second Coating Entry Die (µm)", min_value=0.0, step=0.1)
-
-            if st.sidebar.button("Save Draw History"):
-                new_entry = pd.DataFrame([{
-                    "Timestamp": pd.Timestamp.now(),
-                    "Type": "Draw History",
-                    "Draw Name": draw_name,
-                    "First Coating": first_coating,
-                    "First Coating Temperature": first_coating_temp,
-                    "First Die": first_die,
-                    "Second Coating": second_coating,
-                    "Second Coating Temperature": second_coating_temp,
-                    "Second Die": second_die,
-                    "Fiber Diameter": fiber_diameter,
-                    "First Coating Entry Die": first_entry_die,
-                    "Second Coating Entry Die": second_entry_die,
-                }])
-
-                history_df = pd.concat([history_df, new_entry], ignore_index=True)
-                history_df.to_csv(HISTORY_FILE, index=False)
-                st.sidebar.success("Draw history saved!")
-
+            st.sidebar.subheader("Draw History")
+            # Load all CSV files from the dataset folder and combine them
+            data_set_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
+            folder_data = []
+            for file in data_set_files:
+                csv_data = pd.read_csv(os.path.join('data_set_csv', file), header=None)
+                if not csv_data.empty:
+                    csv_data.columns = ['Parameter Name', 'Value', 'Units']
+                    csv_data['Draw Name'] = file.replace('.csv', '')
+                    folder_data.append(csv_data)
+            if folder_data:
+                all_data = pd.concat(folder_data, ignore_index=True)
+                st.write("### Combined Draw History from All CSV Files")
+                # Let the user select parameters to display from the combined data
+                parameters_to_display = st.multiselect("Select Parameters to Display", all_data["Parameter Name"].unique().tolist())
+                if parameters_to_display:
+                    filtered_data = all_data[all_data["Parameter Name"].isin(parameters_to_display)]
+                    st.dataframe(filtered_data, height=300, use_container_width=True)
+                    # Optionally, allow detailed view per draw entry
+                    selected_draw = st.selectbox("Select a Draw Entry", filtered_data["Parameter Name"].tolist())
+                    if selected_draw:
+                        selected_draw_data = filtered_data[filtered_data["Parameter Name"] == selected_draw].iloc[0]
+                        st.write(f"**Selected Data for {selected_draw}:**")
+                        st.write(f"**Value:** {selected_draw_data['Value']} {selected_draw_data['Units']}")
+                else:
+                    st.warning("No parameters selected.")
+            else:
+                st.warning("No CSV files found in the folder.")
 
         elif history_type == "Maintenance History":
-
             st.sidebar.subheader("Add Maintenance History Entry")
 
             # Checkbox to indicate if a part was changed
-
             part_changed_checkbox = st.sidebar.checkbox("Was a part changed?")
 
             # Show part name input only if checked
-
             part_changed = ""
 
             if part_changed_checkbox:
@@ -1053,39 +1039,15 @@ elif tab_selection == "📝 History Log":
 
             if st.sidebar.button("Save Maintenance History"):
                 new_entry = pd.DataFrame([{
-
                     "Timestamp": pd.Timestamp.now(),
-
                     "Type": "Maintenance History",
-
                     "Part Changed": part_changed if part_changed_checkbox else "N/A",
-
-                    "Notes": maintenance_notes
-
-                }])
-
-                history_df = pd.concat([history_df, new_entry], ignore_index=True)
-
-                history_df.to_csv(HISTORY_FILE, index=False)
-
-                st.sidebar.success("Maintenance history saved!")
-
-        elif history_type == "Maintenance History":
-            part_changed = st.sidebar.text_input("Part Changed")
-            maintenance_notes = st.sidebar.text_area("Maintenance Details")
-
-            if st.sidebar.button("Save Maintenance History"):
-                new_entry = pd.DataFrame([{
-                    "Timestamp": pd.Timestamp.now(),
-                    "Type": "Maintenance History",
-                    "Part Changed": part_changed,
                     "Notes": maintenance_notes
                 }])
 
                 history_df = pd.concat([history_df, new_entry], ignore_index=True)
                 history_df.to_csv(HISTORY_FILE, index=False)
                 st.sidebar.success("Maintenance history saved!")
-
         elif history_type == "Problem History":
             st.sidebar.subheader("Add or Update Problem History Entry")
             problem_action = st.sidebar.radio("Select Action", ["Add New Problem", "Update Existing Problem"], index=0)
@@ -1592,32 +1554,49 @@ elif tab_selection == "🔍 Iris Selection":
 
     # Input Preform Diameter
     preform_diameter = st.number_input("Enter Preform Diameter (mm)", min_value=0.0, step=0.1, format="%.2f")
+    # Add checkbox for "Tiger" and input for cut percentage
+    tiger_cut = st.checkbox("Is it a Tiger?", value=False)
+    cut_percentage = 0
+    if tiger_cut:
+        cut_percentage = st.number_input("Enter Cut Percentage", min_value=0, max_value=100, value=20, step=1)
+
+    # Calculate the adjusted area based on the cut
+    def calculate_adjusted_area(diameter, cut_percentage):
+        original_area = np.pi * (diameter / 2) ** 2
+        adjusted_area = original_area * (1 - cut_percentage / 100)
+        return adjusted_area
+
+    if preform_diameter > 0:
+        adjusted_area = calculate_adjusted_area(preform_diameter, cut_percentage)
+        st.write(f"Adjusted Area (with {cut_percentage}% cut): {adjusted_area:.2f} mm²")
+        effective_diameter = 2 * np.sqrt(adjusted_area / np.pi)
+        st.write(f"Effective Preform Diameter after cut: {effective_diameter:.2f} mm")
+    else:
+        st.warning("Please enter a valid preform diameter.")
 
     iris_diameters = [round(x * 0.5, 1) for x in range(20, 91)]  # Iris diameters from 10 mm to 45 mm
 
-    # Validate and compute the best iris diameter based on the preform diameter
+    # Validate and compute the best iris diameter based on the effective preform diameter
     if preform_diameter > 0 and iris_diameters:
-        valid_iris = [d for d in iris_diameters if d > preform_diameter]
+        valid_iris = [d for d in iris_diameters if d > effective_diameter]
         if valid_iris:
-            # Calculate the best iris diameter that gives the closest gap to 0.2 mm
-            results = [(d, (d - preform_diameter) / 2) for d in valid_iris]
-            best = min(results, key=lambda x: abs(x[1] - 0.2))  # Find the iris diameter with gap closest to 0.2 mm
+            # Calculate the best iris diameter that gives the gap closest to 200
+            results = [(d, (4 / np.pi) * (d**2 - effective_diameter**2)) for d in valid_iris]
+            best = min(results, key=lambda x: abs(x[1] - 200))  # Find the iris diameter with gap closest to 200
 
             # Display the best matching iris diameter
             st.write(f"**Best Matching Iris Diameter:** {best[0]:.2f} mm")
-            st.write(f"**Calculated Free Space:** {best[1]:.2f} mm")
+            st.write(f"**Calculated Gap:** {best[1]:.2f} mm")
 
             # Allow manual override of iris selection
             selected_iris = st.selectbox("Or select a different iris diameter", valid_iris,
                                          index=valid_iris.index(best[0]))
-            manual_free_space = (selected_iris - preform_diameter) / 2
+            manual_gap = (4 / np.pi) * (selected_iris**2 - effective_diameter**2)
             st.write(
-                f"**Manual Selection - Iris Diameter:** {selected_iris:.2f} mm, **Free Space:** {manual_free_space:.2f} mm")
+                f"**Manual Selection - Iris Diameter:** {selected_iris:.2f} mm, **Calculated Gap:** {manual_gap:.2f} mm")
 
             # Display the Preform Diameter and Selected Iris Data
             st.write(f"**Preform Diameter:** {preform_diameter:.2f} mm")
-            st.write(f"**Selected Iris Diameter (Manual):** {selected_iris:.2f} mm")
-            st.write(f"**Manual Free Space:** {manual_free_space:.2f} mm")
 
             # Allow user to select the CSV to update
             recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
@@ -1627,10 +1606,11 @@ elif tab_selection == "🔍 Iris Selection":
             if selected_csv:
                 if st.button("Update Dataset CSV", key="update_dataset_csv"):
                     st.write(f"Selected CSV: {selected_csv}")
+                    tiger_cut_value = cut_percentage if tiger_cut else 0  # Set the tiger cut value
                     data_to_add = [
                         {"Parameter Name": "Preform Diameter", "Value": preform_diameter, "Units": "mm"},
+                        {"Parameter Name": "Tiger Cut", "Value": tiger_cut_value, "Units": "%"},
                         {"Parameter Name": "Selected Iris Diameter", "Value": selected_iris, "Units": "mm"},
-                        {"Parameter Name": "Manual Free Space", "Value": manual_free_space, "Units": "mm"}
                     ]
 
                     # Load the selected CSV
