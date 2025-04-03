@@ -1,1 +1,7 @@
-[]
+[
+    {
+        "name": "Tiger 40",
+        "type": "Instructions",
+        "instructions": "points:\n- we need a lot of heat to round the preform - 2200 at least but can change with feedback from zumbach ovality mesurmant\n- before entering to dies of coating 2. the weight should adjust high to maintain the pull from top. this is becuse if not it will stuck in the first die.\n- the capstan startup speed is 1.2m/min likw the mini capstan\n"
+    }
+]

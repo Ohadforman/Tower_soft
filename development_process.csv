@@ -1,6 +1,8 @@
-Project Name,Experiment Title,Date,Researcher,Observations,Results,Methods,Purpose,Project Purpose,Target
-Tiger 40,,,,,,,,TMM,"draw 40um clad fiber. BF 3.7e-4
-"
-Tiger 40,draw for 116um diameter fiber,2025-04-01,Ohad,,,drawing with few set's of die's,"find a good rolling fiber.
-Try primary die - 150um
-        secondary die - 140um",,
+Project Name,Experiment Title,Date,Researcher,Observations,Results,Methods,Purpose,Project Purpose,Target,Is Drawing,Drawing Details,Draw Table,Draw Name
+Tiger,,,,,,,,TMM gyro,"40 um clad.
+bf>3.7e-7",,,,
+Tiger,,,,,,,,"tmm
+","40um
+bf",,,,
+Tiger,,,,,,,,"tmm
+",\,,,,

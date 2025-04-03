@@ -1,6 +1,5 @@
 import streamlit as st
-## 🔧 Required for capturing plot clicks (install with `pip install streamlit-plotly-events`)
-from streamlit_plotly_events import plotly_events  # Ensure package is installed via: pip install streamlit-plotly-events
+from streamlit_plotly_events import plotly_events
 import base64
 import pandas as pd
 import plotly.express as px
@@ -10,6 +9,21 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import math
 import numpy as np
+CSV_SELECTION_FILE = "selected_csv.json"
+
+def save_selected_csv(selected_csv):
+    """Save the selected CSV file path in a JSON file"""
+    with open(CSV_SELECTION_FILE, 'w') as file:
+        json.dump({"selected_csv": selected_csv}, file)
+
+def load_selected_csv():
+    """Load the selected CSV file path from the JSON file"""
+    if os.path.exists(CSV_SELECTION_FILE):
+        with open(CSV_SELECTION_FILE, 'r') as file:
+            data = json.load(file)
+            return data.get("selected_csv")
+    return None
+
 
 # Load coatings and dies from the configuration file
 with open("config_coating.json", "r") as config_file:
@@ -17,12 +31,12 @@ with open("config_coating.json", "r") as config_file:
 
 coatings = config.get("coatings", {})
 dies = config.get("dies", {})
-
+with open("config_coating.json", "r") as config_file:
+    config = json.load(config_file)
 # Ensure coatings and dies are properly loaded
 if not coatings or not dies:
     st.error("Coatings and/or Dies not configured in config_coating.json")
     st.stop()
-
 
 tab_labels = [
     "🏠 Home",
@@ -58,13 +72,6 @@ if "good_zones" not in st.session_state:
 
  # Initialize tab navigation state to avoid jumps back to "🏠 Home" on rerun
 
-def switch_tab(tab_name, parent_tab=None):
-    if parent_tab:
-        st.session_state["parent_tab"] = parent_tab  # Ensure parent tab is stored persistently
-    if tab_name not in ["💧 Coating", "🔍 Iris Selection", "📊 Dashboard", "📝 History Log", "✅ Closed Processes"]:
-        st.session_state["last_tab"] = tab_name
-    st.session_state["selected_tab"] = tab_name
-    st.rerun()
 def get_base64_image(image_path):
     """Encodes an image to base64 format for inline CSS."""
     with open(image_path, "rb") as img_file:
@@ -101,8 +108,6 @@ def evaluate_viscosity(T, function_str):
         st.error(f"Error evaluating viscosity function: {e}")
         return None
 # Load configuration
-with open("config_coating.json", "r") as config_file:
-    config = json.load(config_file)
 
 DATA_FOLDER = config.get("logs_directory", "./logs")
 HISTORY_FILE = "history_log.csv"
@@ -122,7 +127,6 @@ else:
     tab_selection = st.sidebar.radio("Navigation", tab_labels, key="tab_select", index=tab_labels.index(default_tab))
 
 df = pd.DataFrame()  # Initialize an empty DataFrame to avoid NameError
-
 if tab_selection == "📊 Dashboard":
     csv_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith('.csv')]
     if csv_files:
@@ -131,7 +135,6 @@ if tab_selection == "📊 Dashboard":
     else:
         st.error("No CSV files found in the directory.")
         st.stop()
-
 # Ensure df is only processed if it contains data
 if not df.empty and "Date/Time" in df.columns:
     def try_parse_datetime(dt_str):
@@ -250,6 +253,7 @@ if tab_selection == "🏠 Home":
     )
 # ------------------ Dashboard Tab ------------------
 elif tab_selection == "📊 Dashboard":
+
     st.title(f"Draw Tower Logs Dashboard - {selected_file}")
 
     # Dashboard-specific sidebar controls
@@ -286,40 +290,45 @@ elif tab_selection == "📊 Dashboard":
 
         for i, config in enumerate(st.session_state["plot_configs"]):
             config["x_axis"] = st.sidebar.selectbox(
-                f"Select X-axis for Plot {i+1}", column_options,
+                f"Select X-axis for Plot {i + 1}", column_options,
                 key=f"x_axis_select_{i}",
                 index=column_options.index(config["x_axis"]) if config["x_axis"] in column_options else 0
             )
             config["y_axis"] = st.sidebar.selectbox(
-                f"Select Y-axis for Plot {i+1}", column_options,
+                f"Select Y-axis for Plot {i + 1}", column_options,
                 key=f"y_axis_select_{i}",
                 index=column_options.index(config["y_axis"]) if config["y_axis"] in column_options else 0
             )
 
             if config["x_axis"] in df.columns and config["y_axis"] in df.columns:
                 filtered_df = df.dropna(subset=[config["x_axis"], config["y_axis"]])
-                fig_plot = px.line(
-                    filtered_df,
-                    x=config["x_axis"],
-                    y=config["y_axis"],
-                    title=f"{config['y_axis']} vs {config['x_axis']} (Plot {i+1})",
-                    markers=True
-                )
 
-                for start, end in st.session_state.get("good_zones", []):
-                    fig_plot.add_vrect(
-                        x0=start, x1=end,
-                        fillcolor="green", opacity=0.3, line_width=0,
-                        annotation_text="Good Zone", annotation_position="top left"
+                if not filtered_df.empty:
+                    fig_plot = px.line(
+                        filtered_df,
+                        x=config["x_axis"],
+                        y=config["y_axis"],
+                        title=f"{config['y_axis']} vs {config['x_axis']} (Plot {i + 1})",
+                        markers=True
                     )
-                selected_points_raw = plotly_events(
-                    fig_plot, click_event=True, hover_event=False,
-                    key=f"zone_click_plot_{i}"
-                )
-                st.plotly_chart(fig_plot, use_container_width=True, key=f"final_plot_{i}")
-            else:
-                st.warning(f"Plot {i+1}: Selected axes are not valid columns in the dataset.")
 
+                    for start, end in st.session_state.get("good_zones", []):
+                        fig_plot.add_vrect(
+                            x0=start, x1=end,
+                            fillcolor="green", opacity=0.3, line_width=0,
+                            annotation_text="Good Zone", annotation_position="top left"
+                        )
+
+                    selected_points_raw = plotly_events(
+                        fig_plot, click_event=True, hover_event=False,
+                        key=f"zone_click_plot_{i}"
+                    )
+                    st.plotly_chart(fig_plot, use_container_width=True, key=f"final_plot_{i}")
+                else:
+                    st.warning(f"Plot {i + 1}: No valid data available for the selected axes.")
+            else:
+                st.warning(f"Plot {i + 1}: Selected axes are not valid columns in the dataset.")
+    #fix the 2 plot make only one plot
     if "zone_click_mode" not in st.session_state:
         st.session_state["zone_click_mode"] = "Start"
     if "current_zone" not in st.session_state:
@@ -729,11 +738,81 @@ elif tab_selection == "🍃 Consumables":
         with open(CONFIG_PATH, "w") as f:
             json.dump(config_to_save, f, indent=4)
         st.success("Container configuration saved!")
+    # Calculate and display Total Gas Spent
+    # Move the Total Gas Spent logic to the Consumables tab
+    # Ensure total_gas is calculated properly before saving it
 
-    st.markdown("---")
-    st.markdown("### 🧯 Argon Vessel")
-    argon_level = st.slider("Argon Fill Level (%)", min_value=0, max_value=100, value=60, key="argon_level")
-    st.progress(argon_level / 100.0, text=f"{argon_level}%")
+    # After calculating the total_gas value
+    log_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv") or f.endswith(".xlsx")]
+    log_folder = DATA_FOLDER  # Assuming the logs are in the same folder as the CSVs
+    log_file = st.sidebar.selectbox("Select Log File", log_files, key="log_file_select")
+    # Ensure total_gas is calculated properly before saving it
+    if st.button("Calculate Gas Spent"):
+
+        if log_file:
+            # Load the log data file
+            file_path = os.path.join(log_folder, log_file)
+            if log_file.endswith(".csv"):
+                log_data = pd.read_csv(file_path)
+            else:
+                log_data = pd.read_excel(file_path)
+
+            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
+
+            # Make sure the required columns are present in the log
+            if all(col in log_data.columns for col in mfc_columns):
+                log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
+                time_column = "Date/Time"
+
+                # Apply the datetime parsing
+                log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
+
+                if log_data[time_column].isna().all():
+                    st.error("No valid timestamps found in the log data.")
+                    st.dataframe(log_data)
+                else:
+                    log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
+
+                    # Apply Simpson's Rule for gas calculation
+                    total_gas = 0
+                    for i in range(1, len(log_data)):
+                        flow_avg = (log_data['Total Flow'].iloc[i - 1] + log_data['Total Flow'].iloc[i]) / 2
+                        time_diff = log_data['Time Difference'].iloc[i]
+                        total_gas += flow_avg * time_diff
+
+                    st.write(f"### 🧯 Total Argon Used: {total_gas:.2f} liters")
+
+                    # Show the CSV file list to save the result
+                    csv_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
+                    selected_csv = st.selectbox("Select CSV to Save Total Gas Spent", csv_files)
+
+                    # If CSV is selected, save the result
+                    if selected_csv:
+                        try:
+                            csv_path = os.path.join('data_set_csv', selected_csv)
+                            df_csv = pd.read_csv(csv_path)
+
+                            # Prepare the new row to add
+                            new_row = pd.DataFrame([{
+                                "Parameter Name": "Total Gas Spent",
+                                "Value": total_gas,
+                                "Units": "liters"
+                            }])
+
+                            # Append new data to the existing CSV
+                            df_csv = pd.concat([df_csv, new_row], ignore_index=True)
+                            df_csv.to_csv(csv_path, index=False)
+
+                            st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
+
+                        except FileNotFoundError:
+                            st.error(f"CSV file '{selected_csv}' not found.")
+                    else:
+                        st.warning("Please select a valid CSV file to save the total gas spent.")
+            else:
+                st.warning("Missing one or more MFC columns in the log data.")
+        else:
+            st.warning("Please upload a valid log file to calculate gas spent.")
 # ------------------ Coating Tab ------------------
 elif tab_selection == "💧 Coating":
     st.title("💧 Coating Calculation")
@@ -1150,8 +1229,12 @@ elif tab_selection == "📝 History Log":
 
                     # Display schedule as a timeline
                     st.write("### Schedule Timeline")
-                    event_colors = {"Maintenance": "blue", "Drawing": "green", "Stop": "red"}
-
+                    event_colors = {
+                        "Maintenance": "blue",
+                        "Drawing": "green",
+                        "Stop": "red",
+                        "Management Event": "purple"  # New color for the management event
+                    }
                     if not filtered_schedule.empty:
                         fig = px.timeline(
                             filtered_schedule,
@@ -1170,7 +1253,10 @@ elif tab_selection == "📝 History Log":
                     # Add new event form
                     st.sidebar.subheader("Add New Event")
                     event_description = st.sidebar.text_area("Event Description")
-                    event_type = st.sidebar.selectbox("Select Event Type", ["Maintenance", "Drawing", "Stop"])
+                    event_type = st.sidebar.selectbox("Select Event Type", ["Maintenance", "Drawing", "Stop","Management Event"])
+                    deadline_date = None
+                    if event_type == "Management Event":
+                        deadline_date = st.sidebar.date_input("Deadline Date")
                     start_date = st.sidebar.date_input("Start Date", pd.Timestamp.now().date())
                     start_time = st.sidebar.time_input("Start Time")
                     end_date = st.sidebar.date_input("End Date", pd.Timestamp.now().date())
@@ -1186,7 +1272,9 @@ elif tab_selection == "📝 History Log":
                             "Start DateTime": start_datetime,
                             "End DateTime": end_datetime,
                             "Description": event_description,
-                            "Recurrence": recurrence
+                            "Recurrence": recurrence,
+                            "Deadline Date": deadline_date if event_type == "Management Event" else None
+                            # Add deadline only for Management Event
                         }])
 
                         full_schedule_df = pd.read_csv(SCHEDULE_FILE)
@@ -1241,7 +1329,7 @@ elif tab_selection == "📅 Schedule":
 
             # Display schedule as a timeline
             st.write("### Schedule Timeline")
-            event_colors = {"Maintenance": "blue", "Drawing": "green", "Stop": "red"}
+            event_colors = {"Maintenance": "blue", "Drawing": "green", "Stop": "red","Management Event": "purple"}  # New color for the management event
 
             if not filtered_schedule.empty:
                 fig = px.timeline(
@@ -1251,7 +1339,12 @@ elif tab_selection == "📅 Schedule":
                     y="Event Type",
                     color="Event Type",
                     title="Tower Schedule",
-                    color_discrete_map=event_colors
+                    color_discrete_map=event_colors,
+                    hover_data = {
+                        "Description": True,  # Add this line to show the description on hover
+                        "Start DateTime": True,  # Optionally, you can hide start and end datetime if not needed
+                        "End DateTime": True
+                    }
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -1261,7 +1354,7 @@ elif tab_selection == "📅 Schedule":
             # Add new event form
             st.sidebar.subheader("Add New Event")
             event_description = st.sidebar.text_area("Event Description")
-            event_type = st.sidebar.selectbox("Select Event Type", ["Maintenance", "Drawing", "Stop"])
+            event_type = st.sidebar.selectbox("Select Event Type", ["Maintenance", "Drawing", "Stop", "Management Event"])
             start_date = st.sidebar.date_input("Start Date", pd.Timestamp.now().date())
             start_time = st.sidebar.time_input("Start Time")
             end_date = st.sidebar.date_input("End Date", pd.Timestamp.now().date())
@@ -1718,7 +1811,7 @@ elif tab_selection == "🧪 Development Process":
     if selected_project:
         st.subheader(f"Project Details: {selected_project}")
 
-        # Load project details safely
+        # Retrieve project details
         project_rows = dev_df[dev_df["Project Name"] == selected_project]
         if not project_rows.empty:
             project_data = project_rows.iloc[0]
@@ -1726,6 +1819,14 @@ elif tab_selection == "🧪 Development Process":
             st.write(f"**Target:** {project_data.get('Target', 'N/A')}")
         else:
             st.warning(f"No project data found for '{selected_project}'. It may have been removed or archived.")
+
+        # Display experiment details and draw data (CSV)
+        project_experiments = dev_df[
+            (dev_df["Project Name"] == selected_project) &
+            (dev_df["Experiment Title"].notna()) &
+            (dev_df["Date"].notna())
+            ]
+
 
     # ---- Archive or Delete Project ----
     st.sidebar.subheader("📦 Manage Project")
@@ -1781,6 +1882,10 @@ elif tab_selection == "🧪 Development Process":
                 st.info("No archived projects file available.")
         # ---- Add New Experiment ----
         show_add_experiment = st.checkbox("➕ Add Experiment to Project")
+        # ---- Inside "Add Experiment" Section ----
+        # Inside the Add Experiment section
+        # Inside "Add Experiment" section
+        # Inside "Add Experiment" section
         if show_add_experiment:
             st.subheader("➕ Add Experiment to Project")
             experiment_title = st.text_input("Experiment Title")
@@ -1791,92 +1896,36 @@ elif tab_selection == "🧪 Development Process":
             observations = st.text_area("Observations")
             results = st.text_area("Results")
             show_drawing = st.checkbox("Is this a Drawing?", key=f"show_drawing_{selected_project}")
+
             if show_drawing:
                 drawing_details = st.text_area("Enter Drawing Details", key=f"drawing_details_{selected_project}")
+
+                # Check if the CSV is already stored in session state
+                if 'selected_csv' in st.session_state and st.session_state.selected_csv:
+                    selected_csv = st.session_state.selected_csv
+                    st.write(f"Selected CSV: {selected_csv}")
+                else:
+                    # If not already selected, allow the user to choose a CSV from the dataset
+                    dataset_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
+
+
+
+                    selected_csv = st.selectbox("Select CSV for Drawing Data", dataset_files, key="select_csv")
+                # Load the CSV file and display it if selected
+                if selected_csv:
+                    csv_path = os.path.join('data_set_csv', selected_csv)
+                    try:
+                        draw_data = pd.read_csv(csv_path)
+                        st.write("### CSV Data")
+                        st.dataframe(draw_data)  # Display the CSV data as a table
+                        # Store the CSV data in session state to persist it for this experiment
+                        st.session_state.selected_csv_data = draw_data
+                    except Exception as e:
+                        st.error(f"Failed to load CSV: {e}")
             else:
                 drawing_details = ""
-            if show_drawing:
-                st.subheader("Add Draw Entry")
 
-                # Drawing details input fields
-                draw_name = st.text_input("Draw Name")
-                first_coating = st.selectbox("Select First Coating", coatings.keys())
-                first_coating_temp = st.number_input("First Coating Temperature (°C)", value=25.0, step=0.1)
-                first_die = st.selectbox("Select First Die", dies.keys())
-
-                second_coating = st.selectbox("Select Second Coating", coatings.keys())
-                second_coating_temp = st.number_input("Second Coating Temperature (°C)", value=25.0, step=0.1)
-                second_die = st.selectbox("Select Second Die", dies.keys())
-
-                fiber_diameter = st.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
-
-                first_entry_die = st.number_input("First Coating Entry Die (mm)", min_value=0.0, step=0.1)
-                second_entry_die = st.number_input("Second Coating Entry Die (mm)", min_value=0.0, step=0.1)
-
-                # Save button for both experiment and history
-                if st.button("Save Draw History"):
-                    if draw_name and first_coating and first_die and second_coating and second_die:
-                        new_experiment = pd.DataFrame([{
-                            "Project Name": selected_project,
-                            "Experiment Title": experiment_title,
-                            "Methods": methods,
-                            "Purpose": purpose,
-                            "Date": date.strftime("%Y-%m-%d"),
-                            "Researcher": researcher,
-                            "Observations": observations,
-                            "Results": results,
-                            "Is Drawing": True,
-                            "Drawing Name": draw_name,
-                            "First Coating": first_coating,
-                            "First Coating Temperature": first_coating_temp,
-                            "First Coating Die": first_die,
-                            "Second Coating": second_coating,
-                            "Second Coating Temperature": second_coating_temp,
-                            "Second Coating Die": second_die,
-                            "Fiber Diameter": fiber_diameter,
-                            "First Coating Entry Die": first_entry_die,
-                            "Second Coating Entry Die": second_entry_die,
-                            "Drawing Details": drawing_details if show_drawing else ""
-                        }])
-
-                        # Save the new experiment to the development file
-                        dev_df = pd.concat([dev_df, new_experiment], ignore_index=True)
-                        dev_df.to_csv(DEVELOPMENT_FILE, index=False)
-
-                        # Save the draw details to the history log
-                        history_entry = {
-                            "Timestamp": pd.Timestamp.now(),
-                            "Type": "Drawing History",
-                            "Project Name": selected_project,
-                            "Experiment Title": experiment_title,
-                            "Methods": methods,
-                            "Purpose": purpose,
-                            "Date": date.strftime("%Y-%m-%d"),
-                            "Researcher": researcher,
-                            "Observations": observations,
-                            "Results": results,
-                            "Draw Name": draw_name,
-                            "First Coating": first_coating,
-                            "First Coating Temperature": first_coating_temp,
-                            "First Coating Die": first_die,
-                            "Second Coating": second_coating,
-                            "Second Coating Temperature": second_coating_temp,
-                            "Second Coating Die": second_die,
-                            "Fiber Diameter": fiber_diameter,
-                            "First Coating Entry Die": first_entry_die,
-                            "Second Coating Entry Die": second_entry_die,
-                            "Drawing Details": drawing_details
-                        }
-
-                        history_df = pd.read_csv(HISTORY_FILE)
-                        history_df = pd.concat([history_df, pd.DataFrame([history_entry])], ignore_index=True)
-                        history_df.to_csv(HISTORY_FILE, index=False)
-
-                        st.success("Draw history saved successfully!")
-                        st.rerun()
-                    else:
-                        st.warning("Please fill in all the required fields.")
-
+            # Add Experiment Button
             if st.button("Add Experiment"):
                 if experiment_title and date:
                     new_experiment = pd.DataFrame([{
@@ -1889,33 +1938,29 @@ elif tab_selection == "🧪 Development Process":
                         "Observations": observations,
                         "Results": results,
                         "Is Drawing": show_drawing,
-                        "Drawing Details": drawing_details if show_drawing else ""
+                        "Drawing Details": drawing_details if show_drawing else "",
+                        "Draw Name": selected_csv.replace('.csv', '') if selected_csv else "",
                     }])
+
+                    # Store CSV data along with experiment
+                    if 'selected_csv_data' in st.session_state:
+                        new_experiment["Draw Table"] = [st.session_state.selected_csv_data.to_dict(orient='records')]
+
+                    dev_df = pd.read_csv(DEVELOPMENT_FILE) if os.path.exists(DEVELOPMENT_FILE) else pd.DataFrame(
+                        columns=new_experiment.columns)
                     dev_df = pd.concat([dev_df, new_experiment], ignore_index=True)
                     dev_df.to_csv(DEVELOPMENT_FILE, index=False)
                     st.success("Experiment added successfully!")
-                    if show_drawing:
-
-                        history_entry = {
-                            "Timestamp": pd.Timestamp.now(),
-                            "Type": "Drawing History",
-                            "Experiment Title": experiment_title,
-                            "Drawing Details": drawing_details,
-                            "Project Name": selected_project
-                        }
-                        history_df = pd.read_csv(HISTORY_FILE)
-                        history_df = pd.concat([history_df, pd.DataFrame([history_entry])], ignore_index=True)
-                        history_df.to_csv(HISTORY_FILE, index=False)
-                    st.rerun()
                 else:
                     st.warning("Please provide at least a title and date for the experiment.")
 
-        # ---- Display Existing Experiments ----
+        # Display existing experiments
+        # Display existing experiments
         project_experiments = dev_df[
             (dev_df["Project Name"] == selected_project) &
             (dev_df["Experiment Title"].notna()) &
             (dev_df["Date"].notna())
-        ]
+            ]
 
         if not project_experiments.empty:
             st.subheader("🔬 Experiments Conducted")
@@ -1927,7 +1972,18 @@ elif tab_selection == "🧪 Development Process":
                     st.write(f"**Observations:** {exp.get('Observations', 'N/A')}")
                     st.write(f"**Results:** {exp.get('Results', 'N/A')}")
 
-                    # Load experiment updates
+                    # Check if 'Draw Name' exists before attempting to access it
+                    if 'Draw Name' in exp:
+                        st.write(f"**Drawing Name:** {exp['Draw Name']}")
+                    else:
+                        st.warning("No drawing name available for this experiment.")
+
+                    # If CSV data is available for this experiment (stored in session state)
+                    if 'selected_csv_data' in st.session_state:
+                        st.write("### Draw Data (CSV) for this Experiment")
+                        st.dataframe(st.session_state.selected_csv_data)
+
+                    # Experiment updates
                     updates_df = pd.read_csv(UPDATES_FILE) if os.path.exists(UPDATES_FILE) else pd.DataFrame(
                         columns=["Experiment Title", "Update Date", "Researcher", "Update Notes"])
                     exp_updates = updates_df[updates_df["Experiment Title"] == exp["Experiment Title"]]
@@ -1940,8 +1996,10 @@ elif tab_selection == "🧪 Development Process":
 
                     # ---- Update Experiment Progress Over Time ----
                     st.subheader("🔄 Update Experiment Progress")
-                    update_researcher = st.text_input(f"Your name for update on {exp['Experiment Title']}", key=f"researcher_{exp['Experiment Title']}")
-                    update_notes = st.text_area(f"Add new progress update for {exp['Experiment Title']}", key=f"update_{exp['Experiment Title']}")
+                    update_researcher = st.text_input(f"Your name for update on {exp['Experiment Title']}",
+                                                      key=f"researcher_{exp['Experiment Title']}")
+                    update_notes = st.text_area(f"Add new progress update for {exp['Experiment Title']}",
+                                                key=f"update_{exp['Experiment Title']}")
                     if st.button(f"Update {exp['Experiment Title']}", key=f"update_button_{exp['Experiment Title']}"):
                         new_update = pd.DataFrame([{
                             "Experiment Title": exp["Experiment Title"],
@@ -1953,7 +2011,6 @@ elif tab_selection == "🧪 Development Process":
                         updates_df.to_csv(UPDATES_FILE, index=False)
                         st.success(f"Update added to {exp['Experiment Title']}!")
                         st.rerun()
-
         # ---- Final Conclusion for the Project ----
         st.subheader("📢 Project Conclusion")
         conclusion = st.text_area("Enter conclusion and final summary for this project",
@@ -2047,192 +2104,3 @@ elif tab_selection == "📋 Protocols":
                     else:
                         st.error("Please fill out all fields.")
 # ------------------ Consumables Tab ------------------
-elif tab_selection == "🍃 Consumables":
-    st.title("🍃 Consumables")
-    st.subheader("Manage Gases and Coatings Stock")
-
-    # Input for gases and coating stock
-
-    # List the available log files from the logs directory
-    log_folder = "logs"  # Directory containing log files
-    log_files = [f for f in os.listdir(log_folder) if f.endswith(('.csv', '.xlsx'))]
-
-    st.sidebar.subheader("Log Data Selection")
-    if log_files:
-        log_file = st.sidebar.selectbox("Select a Log File", log_files)
-    else:
-        log_file = None
-        st.info("No log files found in the logs directory.")
-
-    if log_file:
-        # Load the selected log file
-        file_path = os.path.join(log_folder, log_file)
-        if log_file.endswith(".csv"):
-            log_data = pd.read_csv(file_path)
-        else:
-            log_data = pd.read_excel(file_path)
-
-    st.write("### Log Data")
-    st.dataframe(log_data)
-
-    # Add a button to trigger gas calculation
-    if st.button("Calculate Gas Spent"):
-        if log_file:
-            file_path = os.path.join(log_folder, log_file)
-            if log_file.endswith(".csv"):
-                log_data = pd.read_csv(file_path)
-            else:
-                log_data = pd.read_excel(file_path)
-
-            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
-            if all(col in log_data.columns for col in mfc_columns):
-                log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
-                time_column = "Date/Time"
-                def try_parse_datetime(dt_str):
-                    if isinstance(dt_str, str):
-                        dt_str = dt_str[:19]  # Clean extra characters beyond seconds
-                    date_formats = [
-                        "%d/%m/%Y %H:%M:%S",
-                        "%Y-%m-%d %H:%M:%S",
-                        "%m/%d/%Y %H:%M:%S",
-                        "%d-%m-%Y %H:%M:%S"
-                    ]
-                    for fmt in date_formats:
-                        try:
-                            parsed = pd.to_datetime(dt_str, format=fmt, errors='coerce')
-                            if pd.notnull(parsed):
-                                return parsed
-                        except Exception:
-                            continue
-                    return pd.NaT
-
-                log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
-
-                if log_data[time_column].isna().all():
-                    st.error("No valid timestamps found in the log data. Please inspect the data below.")
-                    st.dataframe(log_data)
-                else:
-                    log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
-
-                    # Use Simpson's Rule if sufficient data exists, else fallback to Trapezoidal Rule
-                    def simpson_rule(y, h):
-                        n = len(y) - 1
-                        if n % 2 == 1:
-                            # For odd number of intervals, apply Simpson's rule on first n-1 intervals and trapezoidal for last
-                            S = simpson_rule(y[:-1], h) + (y.iloc[-2] + y.iloc[-1]) * h / 2
-                        else:
-                            S = y.iloc[0] + y.iloc[-1] + 4 * y.iloc[1:-1:2].sum() + 2 * y.iloc[2:-2:2].sum()
-                            S = S * h / 3
-                        return S
-
-                    time_diffs = log_data['Time Difference'].dropna().reset_index(drop=True)
-                    flow_values = log_data['Total Flow'].dropna().reset_index(drop=True)
-                    if len(time_diffs) >= 3:
-                        # Approximate uniform spacing using median time difference
-                        h = time_diffs.median()
-                        total_gas = simpson_rule(flow_values, h)
-                    else:
-                        total_gas = 0
-                        for i in range(1, len(log_data)):
-                            flow_avg = (log_data['Total Flow'].iloc[i-1] + log_data['Total Flow'].iloc[i]) / 2
-                            time_diff = log_data['Time Difference'].iloc[i]
-                            total_gas += flow_avg * time_diff
-
-    st.write(f"### 🧯 Total Argon Used: {total_gas:.2f} liters")
-    # Add a button to save the calculated total gas to the selected CSV
-    if st.button("Save Total Gas Spent to CSV"):
-        if log_file:
-            file_path = os.path.join(log_folder, log_file)
-            if log_file.endswith(".csv"):
-                log_data = pd.read_csv(file_path)
-            else:
-                log_data = pd.read_excel(file_path)
-
-            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
-            log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
-            time_column = "Date/Time"
-            log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
-
-            if log_data[time_column].isna().all():
-                st.error("No valid timestamps found in the log data. Please inspect the data below.")
-                st.dataframe(log_data)
-            else:
-                log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
-
-                def simpson_rule(y, h):
-                    n = len(y) - 1
-                    if n % 2 == 1:
-                        S = simpson_rule(y[:-1], h) + (y.iloc[-2] + y.iloc[-1]) * h / 2
-                    else:
-                        S = y.iloc[0] + y.iloc[-1] + 4 * y.iloc[1:-1:2].sum() + 2 * y.iloc[2:-2:2].sum()
-                        S = S * h / 3
-                    return S
-
-                time_diffs = log_data['Time Difference'].dropna().reset_index(drop=True)
-                flow_values = log_data['Total Flow'].dropna().reset_index(drop=True)
-                if len(time_diffs) >= 3:
-                    h = time_diffs.median()
-                    total_gas = simpson_rule(flow_values, h)
-                else:
-                    total_gas = 0
-                    for i in range(1, len(log_data)):
-                        flow_avg = (log_data['Total Flow'].iloc[i-1] + log_data['Total Flow'].iloc[i]) / 2
-                        time_diff = log_data['Time Difference'].iloc[i]
-                        total_gas += flow_avg * time_diff
-
-                selected_csv = st.selectbox("Select CSV to Save Total Gas Spent", [f for f in os.listdir('data_set_csv') if f.endswith(".csv")])
-                if selected_csv:
-                    csv_path = os.path.join('data_set_csv', selected_csv)
-                    df_csv = pd.read_csv(csv_path)
-                    new_row = pd.DataFrame([{
-                        "Parameter Name": "Total Gas Spent",
-                        "Value": total_gas,
-                        "Units": "liters"
-                    }])
-                    df_csv = pd.concat([df_csv, new_row], ignore_index=True)
-                    df_csv.to_csv(csv_path, index=False)
-                    st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
-                else:
-                    st.warning("Please select a valid CSV file to save the total gas spent.")
-        else:
-                st.warning("Missing one or more MFC columns (Furnace MFC1 Actual, Furnace MFC2 Actual, Furnace MFC3 Actual, Furnace MFC4 Actual).")
-    else:
-            st.warning("Please upload a valid log file to calculate gas spent.")
-
-# Add a button to save the calculated total gas to the selected CSV
-    if st.button("Save Total Gas Spent to CSV"):
-        if log_file:
-            # Ensure total_gas is calculated properly
-            total_gas = 0  # Replace this with the correct calculation of total_gas
-
-            # Select CSV file from 'data_set_csv' directory
-            selected_csv = st.selectbox("Select CSV to Save Total Gas Spent",
-                                        [f for f in os.listdir('data_set_csv') if f.endswith(".csv")])
-
-            if selected_csv:
-                csv_path = os.path.join('data_set_csv', selected_csv)
-
-                try:
-                    # Load the selected CSV
-                    df_csv = pd.read_csv(csv_path)
-
-                    # Prepare the new data to be added
-                    new_row = pd.DataFrame([{
-                        "Parameter Name": "Total Gas Spent",
-                        "Value": total_gas,
-                        "Units": "liters"
-                    }])
-
-                    # Append new data to the existing CSV
-                    df_csv = pd.concat([df_csv, new_row], ignore_index=True)
-
-                    # Save the updated CSV back to the same file
-                    df_csv.to_csv(csv_path, index=False)
-
-                    st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
-                except FileNotFoundError:
-                    st.error(f"CSV file '{selected_csv}' not found.")
-            else:
-                st.warning("Please select a valid CSV file to save the total gas spent.")
-        else:
-            st.warning("Please upload a valid log file to calculate gas spent.")
