@@ -157,9 +157,9 @@ column_options = df.columns.tolist() if not df.empty else []
 # ------------------ Home Tab ------------------
 if tab_selection == "🏠 Home":
     st.title("️ Tower Management Software")
-    st.subheader("A Smart Way to Manage Tower Operations Efficiently")
+    st.subheader("Isorad Tower Management Software")
 
-    csv_name = st.text_input("Enter Unique CSV Name", "")  # User enters name here
+    csv_name = st.text_input("Enter Unique CSV Name For Drawing Data Set Creation ", "")
     csv_name = csv_name+".csv" if csv_name and not csv_name.endswith(".csv") else csv_name
     if st.button("Create New CSV for Data Program", key="create_csv"):
         if csv_name:  # Only proceed if the name is provided
@@ -1247,9 +1247,9 @@ elif tab_selection == "📝 History Log":
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
+
                     st.write("### Current Schedule")
                     st.data_editor(schedule_df, height=300, use_container_width=True)
-
                     # Add new event form
                     st.sidebar.subheader("Add New Event")
                     event_description = st.sidebar.text_area("Event Description")
@@ -1488,6 +1488,7 @@ elif tab_selection == "✅ Closed Processes":
 # ------------------ Tower Parts Tab ------------------
 elif tab_selection == "🛠️ Tower Parts":
     st.title("🛠️ Tower Parts Management")
+    st.write("### Order Tracking")
     st.sidebar.title("Order Parts Management")
 
     ORDER_FILE = "part_orders.csv"
@@ -1506,9 +1507,13 @@ elif tab_selection == "🛠️ Tower Parts":
         serial_number = st.sidebar.text_input("Serial Number")
         purpose = st.sidebar.text_area("Purpose of Order")
         reason = st.sidebar.text_area("Reason for New/Replacement")
-        date_ordered = st.sidebar.date_input("Date of Order (if ordered)")
-        company = st.sidebar.text_input("Company Ordered From")
+
         opened_by = st.sidebar.text_input("Opened By")
+
+        # Load the list of projects from the development file
+        projects_df = pd.read_csv(DEVELOPMENT_FILE)
+        project_options = ["None"] + list(pd.Series(projects_df["Project Name"]).unique())  # Ensure unique projects
+        selected_project = st.sidebar.selectbox("Select Project for This Part", project_options)
 
         if st.sidebar.button("Save Order"):
             new_order = pd.DataFrame([{
@@ -1516,10 +1521,11 @@ elif tab_selection == "🛠️ Tower Parts":
                 "Serial Number": serial_number,
                 "Purpose": purpose,
                 "Reason": reason,
-                "Date Ordered": date_ordered.strftime("%Y-%m-%d") if date_ordered else "",
-                "Company": company,
+                #"Date Ordered": date_ordered.strftime("%Y-%m-%d") if date_ordered else "",
+                #"Company": company,
                 "Opened By": opened_by,
-                "Status": "Needed"
+                "Status": "Needed",
+                "Project Name": selected_project if selected_project != "None" else ""  # If "None", leave empty
             }])
 
             orders_df = pd.concat([orders_df, new_order], ignore_index=True)
@@ -1534,16 +1540,42 @@ elif tab_selection == "🛠️ Tower Parts":
             order_index = orders_df[
                 (orders_df["Part Name"] + " - " + orders_df["Serial Number"].astype(str)) == order_to_update].index[0]
             new_status = st.sidebar.selectbox("Update Order Status",
-                                              ["Needed", "Ordered", "Shipped", "Received", "Installed"],
-                                              index=["Needed", "Ordered", "Shipped", "Received", "Installed"].index(
+                                              ["Needed", "Ordered", "Shipped", "Received", "Installed", "Approved"],
+                                              index=["Needed", "Ordered", "Shipped", "Received", "Installed", "Approved"].index(
                                                   orders_df.at[order_index, "Status"]))
+            approval_date = st.sidebar.date_input("Date of Approval")
+            ordered_by = st.sidebar.text_input("Ordered By")
+            # Ensure "Date Ordered" is either valid or set it to today's date
+            date_ordered_value = pd.to_datetime(orders_df.at[order_index, "Date Ordered"], errors='coerce') if orders_df.at[order_index, "Date Ordered"] else pd.Timestamp.today()
+
+            # Use a default value if the "Date Ordered" is invalid (NaT)
+            if pd.isna(date_ordered_value):
+                date_ordered_value = pd.Timestamp.today()
+
+            date_ordered = st.sidebar.date_input("Date of Order (if ordered)", value=date_ordered_value)
+            company = st.sidebar.text_input("Company Ordered From", value=orders_df.at[order_index, "Company"] if "Company" in orders_df.columns else "")
+            approved_value = orders_df.at[order_index, "Approved"] if "Approved" in orders_df.columns else "No"
+            approved = st.sidebar.selectbox("Approved", ["No", "Yes"], index=0 if approved_value == "No" else 1)
+            approved_by = st.sidebar.text_input("Approved By", value=orders_df.at[order_index, "Approved By"] if "Approved By" in orders_df.columns else "")
 
             if st.sidebar.button("Update Order"):
                 orders_df.at[order_index, "Status"] = new_status
+                if new_status == "Approved" and pd.isna(orders_df.at[order_index, "Approval Date"]):
+                    approval_date = st.sidebar.date_input("Date of Approval",                                           value=pd.Timestamp.today())  # Set today's date if it's not already set
+                else:
+                    approval_date = orders_df.at[
+                        order_index, "Approval Date"]  # Keep the existing approval date if it's already set
+
+                # Now update the order with the new status and approval date (only if it's approved)
+                orders_df.at[order_index, "Status"] = new_status
+                if new_status == "Approved" and pd.isna(orders_df.at[order_index, "Approval Date"]):
+                    orders_df.at[order_index, "Approval Date"] = approval_date # Keep the existing approval date if it's already set
+                orders_df.at[order_index, "Ordered By"] = ordered_by
+                orders_df.at[order_index, "Company"] = company
+                orders_df.at[order_index, "Approved"] = approved
+                orders_df.at[order_index, "Approved By"] = approved_by
                 orders_df.to_csv(ORDER_FILE, index=False)
                 st.sidebar.success("Order updated!")
-
-    st.write("### Order Tracking")
 
     if not orders_df.empty:
         # Move Status column to the first position
@@ -1600,6 +1632,11 @@ elif tab_selection == "🛠️ Tower Parts":
             "Installed": "background-color: lightgray; color: black",
             }
             return [color_map.get(row["Status"], "")] + [""] * (len(row) - 1)
+
+        # Sort the DataFrame by 'Status' so 'Needed' items come first
+        status_order = ["Needed", "Ordered", "Shipped", "Received", "Installed"]
+        orders_df['Status'] = pd.Categorical(orders_df['Status'], categories=status_order, ordered=True)
+        orders_df = orders_df.sort_values('Status')
 
         st.dataframe(orders_df.style.apply(highlight_status, axis=1), height=400, use_container_width=True)
 
@@ -1729,39 +1766,6 @@ elif tab_selection == "🔍 Iris Selection":
 elif tab_selection == "🧪 Development Process":
     st.title("🧪 Development Process")
     st.sidebar.title("Manage R&D Projects")
-    st.subheader("📦 Archived Projects")
-    archived_file = "archived_projects.csv"
-
-    # Render quick access buttons to archived project views
-    if os.path.exists(archived_file):
-        archived_projects_df = pd.read_csv(archived_file)
-        archived_projects = archived_projects_df["Project Name"].unique().tolist()
-        selected_archived = st.selectbox("Select Archived Project", [""] + archived_projects, key="archived_project_select")
-        if selected_archived:
-            st.markdown(f"## 📋 Project Details: {selected_archived}")
-            archived_project_data = archived_projects_df[archived_projects_df["Project Name"] == selected_archived]
-            if not archived_project_data.empty:
-                first_entry = archived_project_data.iloc[0]
-                st.markdown(f"**Project Purpose:** {first_entry.get('Project Purpose', 'N/A')}")
-                st.markdown(f"**Target:** {first_entry.get('Target', 'N/A')}")
-
-                experiments = archived_project_data[
-                    archived_project_data["Experiment Title"].notna() &
-                    archived_project_data["Date"].notna()
-                ]
-                if not experiments.empty:
-                    st.subheader("🔬 Archived Experiments")
-                    for _, exp in experiments.iterrows():
-                        with st.expander(f"🧪 {exp['Experiment Title']} ({exp['Date']})"):
-                            st.markdown(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
-                            st.markdown(f"**Methods:** {exp.get('Methods', 'N/A')}")
-                            st.markdown(f"**Purpose:** {exp.get('Purpose', 'N/A')}")
-                            st.markdown(f"**Observations:** {exp.get('Observations', 'N/A')}")
-                            st.markdown(f"**Results:** {exp.get('Results', 'N/A')}")
-            else:
-                st.warning("No data found for selected archived project.")
-    else:
-        st.info("No archived projects file available.")
     UPDATES_FILE = "experiment_updates.csv"
     if not os.path.exists(UPDATES_FILE):
         pd.DataFrame(columns=["Experiment Title", "Update Date", "Researcher", "Update Notes"]).to_csv(UPDATES_FILE,
@@ -1771,6 +1775,9 @@ elif tab_selection == "🧪 Development Process":
         pd.DataFrame(columns=["Project Name", "Project Purpose", "Target"]).to_csv(DEVELOPMENT_FILE, index=False)
 
     dev_df = pd.read_csv(DEVELOPMENT_FILE)
+    archived_file = "archived_projects.csv"
+
+
 
     # ---- Add New Project ----
     st.sidebar.subheader("➕ Add New Project")
@@ -1806,8 +1813,10 @@ elif tab_selection == "🧪 Development Process":
         )] if os.path.exists("archived_projects.csv") else dev_df
         del st.session_state["restored_project"]
     else:
-        selected_project = st.sidebar.selectbox("Choose a Project", active_projects["Project Name"].unique().tolist())
-
+        selected_project = st.sidebar.selectbox(
+            "Choose a Project",
+            [""] + active_projects["Project Name"].unique().tolist(),  # Add an empty string as the first option
+        )
     if selected_project:
         st.subheader(f"Project Details: {selected_project}")
 
@@ -2015,6 +2024,38 @@ elif tab_selection == "🧪 Development Process":
         st.subheader("📢 Project Conclusion")
         conclusion = st.text_area("Enter conclusion and final summary for this project",
                                   key=f"conclusion_{selected_project}")
+    st.subheader("📦 Archived Projects")
+    # Render quick access buttons to archived project views
+    if os.path.exists(archived_file):
+        archived_projects_df = pd.read_csv(archived_file)
+        archived_projects = archived_projects_df["Project Name"].unique().tolist()
+        selected_archived = st.selectbox("Select Archived Project", [""] + archived_projects,
+                                         key="archived_project_select")
+        if selected_archived:
+            st.markdown(f"## 📋 Project Details: {selected_archived}")
+            archived_project_data = archived_projects_df[archived_projects_df["Project Name"] == selected_archived]
+            if not archived_project_data.empty:
+                first_entry = archived_project_data.iloc[0]
+                st.markdown(f"**Project Purpose:** {first_entry.get('Project Purpose', 'N/A')}")
+                st.markdown(f"**Target:** {first_entry.get('Target', 'N/A')}")
+
+                experiments = archived_project_data[
+                    archived_project_data["Experiment Title"].notna() &
+                    archived_project_data["Date"].notna()
+                    ]
+                if not experiments.empty:
+                    st.subheader("🔬 Archived Experiments")
+                    for _, exp in experiments.iterrows():
+                        with st.expander(f"🧪 {exp['Experiment Title']} ({exp['Date']})"):
+                            st.markdown(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
+                            st.markdown(f"**Methods:** {exp.get('Methods', 'N/A')}")
+                            st.markdown(f"**Purpose:** {exp.get('Purpose', 'N/A')}")
+                            st.markdown(f"**Observations:** {exp.get('Observations', 'N/A')}")
+                            st.markdown(f"**Results:** {exp.get('Results', 'N/A')}")
+            else:
+                st.warning("No data found for selected archived project.")
+    else:
+        st.info("No archived projects file available.")
 # ------------------ Protocols Tab ------------------
 elif tab_selection == "📋 Protocols":
     st.title("📋 Protocols")
