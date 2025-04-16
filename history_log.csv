@@ -34,3 +34,10 @@ Timestamp,Summary,Error,Part Change,Type,Draw Name,Coating,Temperature,Die Size,
 2025-04-04 00:37:30.947736,,,,Drawing History,,,,,,,,,,,,,,,,,,,,Drae1,,Tiger 40
 2025-04-04 00:39:01.906225,,,,Drawing History,,,,,,,,,,,,,,,,,,,,test draw in,,Tiger 40
 2025-04-04 01:00:11.785429,,,,Drawing History,,,,,,,,,,,,,,,,,,,,3,,Tiger 40
+2025-04-09 17:08:34.431274,,,,Problem History,,,,,,"main coating not stable, not in the diameter, trying to find the source",,,,,,,,,Not Yet Addressed,,,,,,,
+2025-04-16 10:09:38.171759,,,,Draw History,test.csv,,,,,,,,,,,,,,,,,,,,,
+2025-04-16 11:57:32.249402,,,,Draw History,time_tst.csv,,,,,,,,,,,,,,,,,,,,,
+2025-04-16 12:00:32.799811,,,,Draw History,tst_t_d.csv,,,,,,,,,,,,,,,,,,,,,
+2025-04-16 12:01:32.294017,,,,Draw History,tast.csv,,,,,,,,,,,,,,,,,,,,,
+2025-04-16 12:04:07.254635,,,,Draw History,t3333.csv,,,,,,,,,,,,,,,,,,,,,
+2025-04-16 16:21:59.581760,,,,Draw History,Hello.csv,,,,N/A,,,,N/A,N/A,N/A,N/A,N/A,N/A,,,,,,,,

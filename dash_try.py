@@ -159,8 +159,8 @@ if tab_selection == "🏠 Home":
     st.title("️ Tower Management Software")
     st.subheader("Isorad Tower Management Software")
 
-    csv_name = st.text_input("Enter Unique CSV Name For Drawing Data Set Creation ", "")
-    csv_name = csv_name+".csv" if csv_name and not csv_name.endswith(".csv") else csv_name
+    csv_name1 = st.text_input("Enter Unique CSV Name For Drawing Data Set Creation ", "")
+    csv_name = csv_name1+".csv" if csv_name1 and not csv_name1.endswith(".csv") else csv_name1
     if st.button("Create New CSV for Data Program", key="create_csv"):
         if csv_name:  # Only proceed if the name is provided
             # Create the folder if it does not exist
@@ -177,10 +177,52 @@ if tab_selection == "🏠 Home":
                 # Create the DataFrame with the necessary columns
                 columns = ["Parameter Name", "Value", "Units"]
                 df_new = pd.DataFrame(columns=columns)
+                # Define the new row with Timestamp and other parameter values
+                new_rows = [
+                    {
+                        "Parameter Name": "Draw Name",
+                        "Value": csv_name1,  # User-provided Name
+                        "Units": "N/A"
+                    },
+                    {
+                        "Parameter Name": "Draw Date",
+                        "Value": pd.Timestamp.now(),  # Current timestamp
+                        "Units": "N/A"
+                    }
+
+                ]
+                # Create the new row as a DataFrame
+                new_row_df = pd.DataFrame(new_rows)
+
+                # Use pd.concat to append the new row to the existing DataFrame
+                df_new = pd.concat([df_new, new_row_df], ignore_index=True)
 
                 # Save the empty CSV file
                 df_new.to_csv(csv_path, index=False)
                 st.success(f"New CSV '{csv_name}' created in the 'data_set_csv' folder!")
+                # Automatically add to Draw History after CSV creation
+                new_draw_entry = pd.DataFrame([{
+                    "Timestamp": pd.Timestamp.now(),
+                    "Type": "Draw History",
+                    "Draw Name": csv_name,
+                    "First Coating": "N/A",  # Modify with actual data if necessary
+                    "First Coating Temperature": "N/A",  # Modify with actual data if necessary
+                    "First Coating Die Size": "N/A",  # Modify with actual data if necessary
+                    "Second Coating": "N/A",  # Modify with actual data if necessary
+                    "Second Coating Temperature": "N/A",  # Modify with actual data if necessary
+                    "Second Coating Die Size": "N/A",  # Modify with actual data if necessary
+                    "Fiber Diameter": "N/A"  # Modify with actual data if necessary
+                }])
+
+                # Append to the history log file
+                if os.path.exists(HISTORY_FILE):
+                    history_df = pd.read_csv(HISTORY_FILE)
+                else:
+                    history_df = pd.DataFrame(columns=["Timestamp", "Type", "Draw Name", "First Coating", "First Coating Temperature", "First Coating Die Size", "Second Coating", "Second Coating Temperature", "Second Coating Die Size", "Fiber Diameter"])
+
+                history_df = pd.concat([history_df, new_draw_entry], ignore_index=True)
+                history_df.to_csv(HISTORY_FILE, index=False)
+                st.success(f"Draw history for {csv_name} added successfully!")
         else:
             st.warning("Please enter a valid name for the CSV file.")
     st.markdown(
@@ -726,18 +768,32 @@ elif tab_selection == "🍃 Consumables":
                     updated_stock[label] = new_level
 
                     st.rerun()
-    if st.button("💾 Save Container Configuration"):
-        config_to_save = {
-            label: {
-                "level": container_levels[label],
-                "type": st.session_state[f"coating_type_{label}"],
-                "temp": container_temps[label]
-            }
-            for label in container_labels
+    st.subheader("🔥 Coating Heater Temperatures")
+
+    heater_config_path = "heater_config.json"
+    if os.path.exists(heater_config_path):
+        with open(heater_config_path, "r") as f:
+            try:
+                saved_heater_config = json.load(f)
+            except Exception:
+                saved_heater_config = {}
+    else:
+        saved_heater_config = {}
+
+    main_default = saved_heater_config.get("main_heater_temp", 0.0)
+    secondary_default = saved_heater_config.get("secondary_heater_temp", 0.0)
+
+    main_heater_temp = st.number_input("Main Coating Heater Temperature (°C)", min_value=0.0, step=0.1, value=main_default, key="main_heater_temp_value")
+    secondary_heater_temp = st.number_input("Secondary Coating Heater Temperature (°C)", min_value=0.0, step=0.1, value=secondary_default, key="secondary_heater_temp_value")
+
+    if st.button("💾 Save Heater Temperature Configuration"):
+        heater_config = {
+            "main_heater_temp": main_heater_temp,
+            "secondary_heater_temp": secondary_heater_temp
         }
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(config_to_save, f, indent=4)
-        st.success("Container configuration saved!")
+        with open("heater_config.json", "w") as f:
+            json.dump(heater_config, f, indent=4)
+        st.success("Heater temperature configuration saved!")
     # Calculate and display Total Gas Spent
     # Move the Total Gas Spent logic to the Consumables tab
     # Ensure total_gas is calculated properly before saving it
@@ -811,8 +867,9 @@ elif tab_selection == "🍃 Consumables":
                         st.warning("Please select a valid CSV file to save the total gas spent.")
             else:
                 st.warning("Missing one or more MFC columns in the log data.")
-        else:
-            st.warning("Please upload a valid log file to calculate gas spent.")
+
+    st.markdown("---")
+
 # ------------------ Coating Tab ------------------
 elif tab_selection == "💧 Coating":
     st.title("💧 Coating Calculation")
@@ -985,12 +1042,12 @@ elif tab_selection == "📝 History Log":
             history_df['Status'] = 'Not Yet Addressed'
 
         # Define relevant columns for each history type
-        draw_history_fields = ["Draw Name", "First Coating", "First Coating Temperature", "First Coating Die Size",
-                               "Second Coating", "Second Coating Temperature", "Second Coating Die Size", "Fiber Diameter"]
+        draw_history_fields = ["Draw Name", "Timestamp"]
 
         problem_history_fields = ["Description", "Status"]
 
         maintenance_history_fields = ["Part Changed", "Notes"]
+
         fields_mapping = {
             "Draw History": draw_history_fields,
             "Problem History": problem_history_fields,
@@ -1013,7 +1070,7 @@ elif tab_selection == "📝 History Log":
         history_df.columns = make_column_names_unique(history_df.columns.tolist())
 
         # Sidebar Selection for History Type
-        history_type = st.sidebar.radio("Select History Type", ["All", "Draw History", "Problem History", "Maintenance History"], key="history_type_select")
+        history_type = st.sidebar.radio("Select History Type", [ "Draw History", "Problem History", "Maintenance History"], key="history_type_select")
 
         if history_type == "All":
             # Show all history logs with separate tables & plots
@@ -1029,16 +1086,7 @@ elif tab_selection == "📝 History Log":
                     st.write(f"### {log_type} Table")
                     st.data_editor(filtered_df[fields], height=200, use_container_width=True)
 
-                    st.write(f"### {log_type} Timeline")
-                    fig = px.scatter(
-                        filtered_df,
-                        x="Timestamp",
-                        y="Type",
-                        color="Type",
-                        opacity=0.8,
-                        title=f"{log_type} Timeline"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+
                 else:
                     st.warning(f"No records found for {log_type}")
 
@@ -1052,16 +1100,7 @@ elif tab_selection == "📝 History Log":
                 st.write(f"### {history_type} Table")
                 st.data_editor(filtered_df[fields_mapping[history_type]], height=200, use_container_width=True)
 
-                st.write(f"### {history_type} Timeline")
-                fig = px.scatter(
-                    filtered_df,
-                    x="Timestamp",
-                    y="Type",
-                    color="Type",
-                    opacity=0.8,
-                    title=f"{history_type} Timeline"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+
             else:
                 st.warning(f"No records found for {history_type}")
 
@@ -1073,7 +1112,7 @@ elif tab_selection == "📝 History Log":
         dies = config.get("dies", {})
 
         if history_type == "Draw History":
-            st.sidebar.subheader("Draw History")
+            # st.sidebar.subheader("Draw History")
             # Load all CSV files from the dataset folder and combine them
             data_set_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
             folder_data = []
@@ -1101,7 +1140,6 @@ elif tab_selection == "📝 History Log":
                     st.warning("No parameters selected.")
             else:
                 st.warning("No CSV files found in the folder.")
-
         elif history_type == "Maintenance History":
             st.sidebar.subheader("Add Maintenance History Entry")
 
@@ -1711,7 +1749,7 @@ elif tab_selection == "🔍 Iris Selection":
         valid_iris = [d for d in iris_diameters if d > effective_diameter]
         if valid_iris:
             # Calculate the best iris diameter that gives the gap closest to 200
-            results = [(d, (4 / np.pi) * (d**2 - effective_diameter**2)) for d in valid_iris]
+            results = [(d, ( np.pi / 4) * (d**2 - effective_diameter**2)) for d in valid_iris]
             best = min(results, key=lambda x: abs(x[1] - 200))  # Find the iris diameter with gap closest to 200
 
             # Display the best matching iris diameter
@@ -1721,7 +1759,7 @@ elif tab_selection == "🔍 Iris Selection":
             # Allow manual override of iris selection
             selected_iris = st.selectbox("Or select a different iris diameter", valid_iris,
                                          index=valid_iris.index(best[0]))
-            manual_gap = (4 / np.pi) * (selected_iris**2 - effective_diameter**2)
+            manual_gap = (np.pi / 4) * (selected_iris**2 - effective_diameter**2)
             st.write(
                 f"**Manual Selection - Iris Diameter:** {selected_iris:.2f} mm, **Calculated Gap:** {manual_gap:.2f} mm")
 
@@ -2144,4 +2182,5 @@ elif tab_selection == "📋 Protocols":
                         st.rerun()  # Immediately refresh the list
                     else:
                         st.error("Please fill out all fields.")
-# ------------------ Consumables Tab ------------------
+
+
