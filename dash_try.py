@@ -1578,8 +1578,8 @@ elif tab_selection == "🛠️ Tower Parts":
             order_index = orders_df[
                 (orders_df["Part Name"] + " - " + orders_df["Serial Number"].astype(str)) == order_to_update].index[0]
             new_status = st.sidebar.selectbox("Update Order Status",
-                                              ["Needed", "Ordered", "Shipped", "Received", "Installed", "Approved"],
-                                              index=["Needed", "Ordered", "Shipped", "Received", "Installed", "Approved"].index(
+                                              ["Needed", "Approved", "Ordered", "Shipped", "Received", "Installed"],
+                                              index=["Needed", "Approved", "Ordered", "Shipped", "Received", "Installed"].index(
                                                   orders_df.at[order_index, "Status"]))
             approval_date = st.sidebar.date_input("Date of Approval")
             ordered_by = st.sidebar.text_input("Ordered By")
@@ -1599,7 +1599,7 @@ elif tab_selection == "🛠️ Tower Parts":
             if st.sidebar.button("Update Order"):
                 orders_df.at[order_index, "Status"] = new_status
                 if new_status == "Approved" and pd.isna(orders_df.at[order_index, "Approval Date"]):
-                    approval_date = st.sidebar.date_input("Date of Approval",                                           value=pd.Timestamp.today())  # Set today's date if it's not already set
+                    approval_date = st.sidebar.date_input("Date of Approval", value=pd.Timestamp.today())  #Set today's date if it's not already set
                 else:
                     approval_date = orders_df.at[
                         order_index, "Approval Date"]  # Keep the existing approval date if it's already set
@@ -1616,19 +1616,37 @@ elif tab_selection == "🛠️ Tower Parts":
                 st.sidebar.success("Order updated!")
 
     if not orders_df.empty:
+        # Remove only the "Date of Approval" column and keep the rest intact
+        orders_df = orders_df.drop(columns=["Date of Approval"], errors='ignore')
         # Move Status column to the first position
         columns_order = ["Status"] + [col for col in orders_df.columns if col != "Status"]
         orders_df = orders_df[columns_order]
 
-        # Add a delete option
-        delete_row = st.selectbox("Select a part to delete", orders_df["Part Name"].tolist(), key="delete_part")
-        if st.button("Delete Selected Part"):
-            orders_df = orders_df[orders_df["Part Name"] != delete_row]
-            orders_df.to_csv(ORDER_FILE, index=False)
-            st.success(f"Deleted part: {delete_row}")
+        # Color-coding based on Status
+        def highlight_status(row):
+            color_map = {
+            "Needed": "background-color: lightcoral; color: black",
+            "Approved": "background-color: lightgreen; color: black",
+            "Ordered": "background-color: lightyellow; color: black",
+            "Shipped": "background-color: lightblue; color: black",
+            "Received": "background-color: green; color: black",
+            "Installed": "background-color: lightgray; color: black",
+            }
+            return [color_map.get(row["Status"], "")] + [""] * (len(row) - 1)
+
+        # Sort the DataFrame by 'Status' so 'Needed' items come first
+        status_order = ["Needed","Approved", "Ordered", "Shipped", "Received", "Installed"]
+        orders_df['Status'] = pd.Categorical(orders_df['Status'], categories=status_order, ordered=True)
+        orders_df = orders_df.sort_values('Status')
+
+        st.dataframe(orders_df.style.apply(highlight_status, axis=1), height=400, use_container_width=True)
+
+    else:
+        st.warning("No orders have been placed yet.")
+
 
         # Archive installed parts
-        if st.button("📦 Archive Installed Orders"):
+    if st.button("📦 Archive Installed Orders"):
             archive_file = "archived_orders.csv"
             installed_df = orders_df[orders_df["Status"].str.strip().str.lower() == "installed"]
             remaining_df = orders_df[orders_df["Status"].str.strip().str.lower() != "installed"]
@@ -1648,7 +1666,7 @@ elif tab_selection == "🛠️ Tower Parts":
                 st.info("No installed parts to archive.")
 
         # Button to view archived orders
-        if st.button("📂 View Archived Orders"):
+    if st.button("📂 View Archived Orders"):
             archive_file = "archived_orders.csv"
             if os.path.exists(archive_file):
                 archived_df = pd.read_csv(archive_file)
@@ -1659,27 +1677,6 @@ elif tab_selection == "🛠️ Tower Parts":
                     st.info("The archive is currently empty.")
             else:
                 st.info("Archive file does not exist yet.")
-
-        # Color-coding based on Status
-        def highlight_status(row):
-            color_map = {
-            "Needed": "background-color: lightcoral; color: black",
-            "Ordered": "background-color: lightyellow; color: black",
-            "Shipped": "background-color: lightblue; color: black",
-            "Received": "background-color: lightgreen; color: black",
-            "Installed": "background-color: lightgray; color: black",
-            }
-            return [color_map.get(row["Status"], "")] + [""] * (len(row) - 1)
-
-        # Sort the DataFrame by 'Status' so 'Needed' items come first
-        status_order = ["Needed", "Ordered", "Shipped", "Received", "Installed"]
-        orders_df['Status'] = pd.Categorical(orders_df['Status'], categories=status_order, ordered=True)
-        orders_df = orders_df.sort_values('Status')
-
-        st.dataframe(orders_df.style.apply(highlight_status, axis=1), height=400, use_container_width=True)
-
-    else:
-        st.warning("No orders have been placed yet.")
 
     # ------------------ Parts Datasheet (Hierarchical View) Section ------------------
     st.write("### Parts Datasheet (Hierarchical View)")
@@ -1712,9 +1709,14 @@ elif tab_selection == "🛠️ Tower Parts":
             if st.button(f"📄 Open {file_name}", key=file_path):
                 os.system(f"open {file_path}")  # For macOS, use `xdg-open` for Linux, `start` for Windows
 
-
     if os.path.exists(PARTS_DIRECTORY) and os.listdir(PARTS_DIRECTORY):
         display_directory(PARTS_DIRECTORY)
+        # Add a delete option
+    delete_row = st.selectbox("Select a part to delete", orders_df["Part Name"].tolist(), key="delete_part")
+    if st.button("Delete Selected Part"):
+            orders_df = orders_df[orders_df["Part Name"] != delete_row]
+            orders_df.to_csv(ORDER_FILE, index=False)
+            st.success(f"Deleted part: {delete_row}")
 # ------------------ Draw Archive Tab ------------------
 elif tab_selection == "🔍 Iris Selection":
     st.title("🔍 Iris Selection")
