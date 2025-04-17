@@ -1,3 +1,2 @@
-Status,Part Name,Serial Number,Purpose,Reason,Date Ordered,Company,Approved,Approved By,Approval Date,Ordered By,Opened By,Date of Approval,Project Name
-Approved,Die cleaner,123,clean 140 die,"silica rod stuck inside and can't get it out
-",,nan,Yes,Ohad,2025-04-16,,Ohad,,Tiger
+Status,Part Name,Serial Number,Details,Approved,Approved By,Approval Date,Ordered By,Date Ordered,Company
+Ordered,Die 140,345,the first 140 is stuck,Yes,Ariel,2025-04-17,Emilion,,SG

@@ -46,6 +46,7 @@ tab_labels = [
     "🧪 Development Process",
     "💧 Coating",
     "🔍 Iris Selection",
+    "🔧 PID and TF Configuration",
     "📊 Dashboard",
     "📝 History Log",
     "✅ Closed Processes",
@@ -604,6 +605,9 @@ elif tab_selection == "📊 Dashboard":
             st.warning("No numerical columns available for correlation analysis.")
 # ------------------ Consumables Tab ------------------
 elif tab_selection == "🍃 Consumables":
+    log_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv") or f.endswith(".xlsx")]
+    selected_log_file = st.sidebar.selectbox("Select Log File for Gas Calculation", log_files, key="log_file_select")
+
     # Load saved stock levels if they exist
     stock_path = "stock_levels.json"
     if os.path.exists(stock_path):
@@ -793,83 +797,145 @@ elif tab_selection == "🍃 Consumables":
         }
         with open("heater_config.json", "w") as f:
             json.dump(heater_config, f, indent=4)
-        st.success("Heater temperature configuration saved!")
-    # Calculate and display Total Gas Spent
-    # Move the Total Gas Spent logic to the Consumables tab
-    # Ensure total_gas is calculated properly before saving it
-
-    # After calculating the total_gas value
-    log_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv") or f.endswith(".xlsx")]
-    log_folder = DATA_FOLDER  # Assuming the logs are in the same folder as the CSVs
-    log_file = st.sidebar.selectbox("Select Log File", log_files, key="log_file_select")
-    # Ensure total_gas is calculated properly before saving it
-    if st.button("Calculate Gas Spent"):
-
-        if log_file:
-            # Load the log data file
-            file_path = os.path.join(log_folder, log_file)
-            if log_file.endswith(".csv"):
-                log_data = pd.read_csv(file_path)
+    st.success("Heater temperature configuration saved!")
+    # Gas calculation logic
+    if selected_log_file:
+        # Display the "Calculate Gas Spent" button only if a file is selected
+        if st.button("Calculate Gas Spent"):
+            log_file_path = os.path.join(DATA_FOLDER, selected_log_file)
+            if selected_log_file.endswith(".csv"):
+                log_data = pd.read_csv(log_file_path)
             else:
-                log_data = pd.read_excel(file_path)
+                log_data = pd.read_excel(log_file_path)
 
+            # Ensure "Date/Time" column is parsed correctly
+            def try_parse_datetime(dt_str):
+                try:
+                    return pd.to_datetime(dt_str, errors='coerce')  # Use 'coerce' to handle invalid timestamps
+                except Exception:
+                    return pd.NaT
+
+            # Try parsing the "Date/Time" column
+            if "Date/Time" in log_data.columns:
+                log_data["Date/Time"] = log_data["Date/Time"].apply(try_parse_datetime)
+            else:
+                st.error("No 'Date/Time' column found in the data.")
+                st.stop()
+
+            # Check if valid timestamps exist after parsing
+            if log_data["Date/Time"].isna().all():
+                st.error("No valid timestamps found in the log data.")
+                st.dataframe(log_data)
+                st.stop()
+
+            # Gas calculation logic
+            total_gas = 0.0
             mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
-
-            # Make sure the required columns are present in the log
             if all(col in log_data.columns for col in mfc_columns):
                 log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
                 time_column = "Date/Time"
-
-                # Apply the datetime parsing
                 log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
 
-                if log_data[time_column].isna().all():
-                    st.error("No valid timestamps found in the log data.")
-                    st.dataframe(log_data)
-                else:
-                    log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0
+                log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0  # in minutes
+                total_gas = 0
+                for i in range(1, len(log_data)):
+                    flow_avg = (log_data['Total Flow'].iloc[i - 1] + log_data['Total Flow'].iloc[i]) / 2
+                    time_diff = log_data['Time Difference'].iloc[i]
+                    total_gas += flow_avg * time_diff
 
-                    # Apply Simpson's Rule for gas calculation
-                    total_gas = 0
-                    for i in range(1, len(log_data)):
-                        flow_avg = (log_data['Total Flow'].iloc[i - 1] + log_data['Total Flow'].iloc[i]) / 2
-                        time_diff = log_data['Time Difference'].iloc[i]
-                        total_gas += flow_avg * time_diff
+            # Show the result of the gas calculation
+            st.success(f"Gas calculation completed! Total Gas Spent: {total_gas:.2f} liters")
 
-                    st.write(f"### 🧯 Total Argon Used: {total_gas:.2f} liters")
+            # Option to save the result to the CSV file
+            save_to_csv = st.checkbox("Save Gas Calculation to CSV", key="save_gas_to_csv")
 
-                    # Show the CSV file list to save the result
-                    csv_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
-                    selected_csv = st.selectbox("Select CSV to Save Total Gas Spent", csv_files)
+            if save_to_csv:
+                # Let the user choose a CSV file to append the result
+                csv_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
+                selected_csv = st.selectbox("Select CSV to Save Gas Calculation", csv_files)
 
-                    # If CSV is selected, save the result
-                    if selected_csv:
-                        try:
-                            csv_path = os.path.join('data_set_csv', selected_csv)
-                            df_csv = pd.read_csv(csv_path)
+                if selected_csv:
+                    csv_path = os.path.join('data_set_csv', selected_csv)
 
-                            # Prepare the new row to add
-                            new_row = pd.DataFrame([{
-                                "Parameter Name": "Total Gas Spent",
-                                "Value": total_gas,
-                                "Units": "liters"
-                            }])
+                    try:
+                        df_csv = pd.read_csv(csv_path)
+                    except FileNotFoundError:
+                        st.error(f"CSV file '{selected_csv}' not found.")
+                        st.stop()
 
-                            # Append new data to the existing CSV
-                            df_csv = pd.concat([df_csv, new_row], ignore_index=True)
-                            df_csv.to_csv(csv_path, index=False)
+                    # Prepare the new data to append
+                    new_data = [
+                        {"Parameter Name": "Total Gas Spent", "Value": total_gas, "Units": "liters"}
+                    ]
+                    new_df = pd.DataFrame(new_data)
 
-                            st.success(f"Total Gas Spent of {total_gas:.2f} liters saved to '{selected_csv}'!")
+                    # Append the new data to the existing DataFrame
+                    df_csv = pd.concat([df_csv, new_df], ignore_index=True)
 
-                        except FileNotFoundError:
-                            st.error(f"CSV file '{selected_csv}' not found.")
-                    else:
-                        st.warning("Please select a valid CSV file to save the total gas spent.")
-            else:
-                st.warning("Missing one or more MFC columns in the log data.")
+                    # Save the updated CSV
+                    df_csv.to_csv(csv_path, index=False)
+                    st.success(f"Gas calculation saved to '{selected_csv}'!")
+        else:
+            st.warning("Please select a CSV file before calculating the gas.")
+    else:
+        st.warning("Please select a CSV file for calculation.")
+# In the PID Configuration tab:
+elif tab_selection == "🔧 PID and TF Configuration":
+    st.title("🔧 PID and TF Configuration")
 
-    st.markdown("---")
+    # Load previous configuration if exists
+    pid_config_path = "pid_config.json"
+    if os.path.exists(pid_config_path):
+        with open(pid_config_path, "r") as f:
+            pid_config = json.load(f)
+    else:
+        pid_config = {}
 
+    st.subheader("PID and TF Settings")
+
+    # Input fields for P Gain and I Gain
+    p_gain = st.number_input("P Gain (Diameter Control)", min_value=0.0, step=0.1, value=pid_config.get("p_gain", 1.0))
+    i_gain = st.number_input("I Gain (Diameter Control)", min_value=0.0, step=0.1, value=pid_config.get("i_gain", 1.0))
+    # Winder Configuration
+    winder_mode = st.selectbox("TF Mode", ["Winder", "Straight Mode"], index=["Winder", "Straight Mode"].index(pid_config.get("winder_mode", "Winder")))
+
+    # Increment Value for Winder
+    increment_value = st.number_input("Increment Value [mm]", min_value=0.0, step=0.1, value=pid_config.get("increment_value", 0.5))
+
+    # Select CSV to save the configuration
+    selected_csv = st.selectbox("Select CSV to Save PID and TF Configuration", [f for f in os.listdir('data_set_csv') if f.endswith('.csv')])
+
+    if st.button("💾 Save PID and TF Configuration"):
+        if not selected_csv:
+            st.error("Please select a CSV file before saving.")
+        else:
+            pid_config["p_gain"] = p_gain
+            pid_config["i_gain"] = i_gain
+            pid_config["winder_mode"] = winder_mode
+            pid_config["increment_value"] = increment_value
+
+            # Save the PID configuration to a JSON file
+            with open(pid_config_path, "w") as f:
+                json.dump(pid_config, f, indent=4)
+
+            st.success(f"PID and TF configuration saved to '{selected_csv}'!")
+
+            # Save to the chosen CSV
+            csv_path = os.path.join('data_set_csv', selected_csv)
+            df_csv = pd.read_csv(csv_path)
+
+            new_data = [
+                {"Parameter Name": "P Gain (Diameter Control)", "Value": p_gain, "Units": ""},
+                {"Parameter Name": "I Gain (Diameter Control)", "Value": i_gain, "Units": ""},
+                {"Parameter Name": "TF Mode", "Value": winder_mode, "Units": ""},
+                {"Parameter Name": "Increment TF Value", "Value": increment_value, "Units": "mm"}
+            ]
+            new_df = pd.DataFrame(new_data)
+            df_csv = pd.concat([df_csv, new_df], ignore_index=True)
+
+            # Save back to CSV
+            df_csv.to_csv(csv_path, index=False)
+            # st.success(f"PID and TF configuration saved to '{selected_csv}'!")
 # ------------------ Coating Tab ------------------
 elif tab_selection == "💧 Coating":
     st.title("💧 Coating Calculation")
@@ -1428,8 +1494,52 @@ elif tab_selection == "📅 Schedule":
                 st.sidebar.info("No events available for deletion.")
 # ------------------ Closed Log Tab ------------------
 elif tab_selection == "✅ Closed Processes":
+    # Define the CLOSED_PROCESSES_FILE path
+    CLOSED_PROCESSES_FILE = "closed_processes.csv"
     st.title("✅ Closed Processes")
     st.write("Manage products that are finalized and ready for drawing.")
+    # Add CSV selection for Closed Process
+    st.sidebar.subheader("Select CSV to Mark as Closed Process")
+    closed_process_csv = st.sidebar.selectbox("Select CSV", [f for f in os.listdir('data_set_csv') if f.endswith('.csv')])
+    st.sidebar.subheader("Set Process Type")
+    process_type = st.sidebar.text_input("Process Type", value="PM")
+
+    if closed_process_csv:
+        st.sidebar.write(f"Selected CSV: {closed_process_csv}")
+        if st.sidebar.button("Mark as Closed Process"):
+            # Load selected CSV
+            csv_path = os.path.join('data_set_csv', closed_process_csv)
+            try:
+                df_csv = pd.read_csv(csv_path)
+                # Add relevant process data to closed processes file with process type
+                new_entry = {
+                    "Product Name": closed_process_csv.replace('.csv', ''),
+                    "Furnace Temperature (°C)": "N/A",  # Modify as necessary
+                    "Tension (g)": "N/A",  # Modify as necessary
+                    "Drawing Speed (m/min)": "N/A",  # Modify as necessary
+                    "Coating Type (Main)": "N/A",  # Modify as necessary
+                    "Coating Type (Secondary)": "N/A",  # Modify as necessary
+                    "Entry Die (Main)": "N/A",  # Modify as necessary
+                    "Entry Die (Secondary)": "N/A",  # Modify as necessary
+                    "Primary Die (Main)": "N/A",  # Modify as necessary
+                    "Primary Die (Secondary)": "N/A",  # Modify as necessary
+                    "Coating Diameter (Main, µm)": "N/A",  # Modify as necessary
+                    "Coating Diameter (Secondary, µm)": "N/A",  # Modify as necessary
+                    "Coating Temperature (Main, °C)": "N/A",  # Modify as necessary
+                    "Coating Temperature (Secondary, °C)": "N/A",  # Modify as necessary
+                    "Fiber Diameter (µm)": "N/A",  # Modify as necessary
+                    "P Gain for Diameter Control": "N/A",  # Modify as necessary
+                    "I Gain for Diameter Control": "N/A",  # Modify as necessary
+                    "Process Description": "N/A",  # Modify as necessary
+                    "Recipe Name": "N/A",  # Modify as necessary
+                    "Process Type": process_type
+                }
+                closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
+                closed_df = pd.concat([closed_df, pd.DataFrame([new_entry])], ignore_index=True)
+                closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
+                st.sidebar.success(f"CSV '{closed_process_csv}' marked as a closed process!")
+            except Exception as e:
+                st.sidebar.error(f"Error marking as closed process: {e}")
     CLOSED_PROCESSES_FILE = "closed_processes.csv"
     with open("config_coating.json", "r") as config_file:
         config = json.load(config_file)
@@ -1449,9 +1559,21 @@ elif tab_selection == "✅ Closed Processes":
         ]).to_csv(CLOSED_PROCESSES_FILE, index=False)
 
     closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
+    valid_columns = [
+        "Product Name", "Process Type", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
+        "Coating Type (Main)", "Coating Type (Secondary)", "Entry Die (Main)", "Entry Die (Secondary)",
+        "Primary Die (Main)", "Primary Die (Secondary)", "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)",
+        "Coating Temperature (Main, °C)", "Coating Temperature (Secondary, °C)", "Fiber Diameter (µm)",
+        "P Gain for Diameter Control", "I Gain for Diameter Control", "Process Description", "Recipe Name"
+    ]
+    closed_df_clean = closed_df[valid_columns].drop_duplicates()
 
-    st.write("### Closed Products Table")
-    st.data_editor(closed_df, height=400, use_container_width=True)
+    st.write("### Cleaned Closed Products Table")
+    st.sidebar.subheader("Filter by Process Type")
+    process_filter = st.sidebar.selectbox("Process Type", ["All", "PM", "NPM", "Other"])
+    if process_filter != "All":
+        closed_df_clean = closed_df_clean[closed_df_clean["Process Type"] == process_filter]
+    st.data_editor(closed_df_clean, height=400, use_container_width=True)
 
     st.sidebar.subheader("Add New Closed Process")
     product_name = st.sidebar.text_input("Product Name")
@@ -1490,6 +1612,7 @@ elif tab_selection == "✅ Closed Processes":
     if st.sidebar.button("Add Product"):
         new_entry = pd.DataFrame([{
             "Product Name": product_name,
+            "Process Type": process_type,
             "Furnace Temperature (°C)": furnace_temperature,
             "Tension (g)": tension,
             "Drawing Speed (m/min)": drawing_speed,
@@ -1535,7 +1658,7 @@ elif tab_selection == "🛠️ Tower Parts":
         orders_df = pd.read_csv(ORDER_FILE)
     else:
         orders_df = pd.DataFrame(
-            columns=["Part Name", "Serial Number", "Purpose", "Reason", "Date Ordered", "Company", "Status"]
+            columns=["Part Name", "Serial Number", "Purpose", "Details", "Date Ordered", "Company", "Status"]
         )
 
     action = st.sidebar.radio("Manage Orders", ["Add New Order", "Update Existing Order"], key="order_action")
@@ -1544,7 +1667,7 @@ elif tab_selection == "🛠️ Tower Parts":
         part_name = st.sidebar.text_input("Part Name")
         serial_number = st.sidebar.text_input("Serial Number")
         purpose = st.sidebar.text_area("Purpose of Order")
-        reason = st.sidebar.text_area("Reason for New/Replacement")
+        Details = st.sidebar.text_area("Details for New/Replacement")
 
         opened_by = st.sidebar.text_input("Opened By")
 
@@ -1558,7 +1681,7 @@ elif tab_selection == "🛠️ Tower Parts":
                 "Part Name": part_name,
                 "Serial Number": serial_number,
                 "Purpose": purpose,
-                "Reason": reason,
+                "Details": Details,
                 #"Date Ordered": date_ordered.strftime("%Y-%m-%d") if date_ordered else "",
                 #"Company": company,
                 "Opened By": opened_by,
@@ -1577,6 +1700,9 @@ elif tab_selection == "🛠️ Tower Parts":
 
             order_index = orders_df[
                 (orders_df["Part Name"] + " - " + orders_df["Serial Number"].astype(str)) == order_to_update].index[0]
+            # Input fields for Part Name and Serial Number
+            updated_part_name = st.sidebar.text_input("Update Part Name", value=orders_df.at[order_index, "Part Name"])
+            updated_serial_number = st.sidebar.text_input("Update Serial Number", value=orders_df.at[order_index, "Serial Number"])
             new_status = st.sidebar.selectbox("Update Order Status",
                                               ["Needed", "Approved", "Ordered", "Shipped", "Received", "Installed"],
                                               index=["Needed", "Approved", "Ordered", "Shipped", "Received", "Installed"].index(
@@ -1590,37 +1716,48 @@ elif tab_selection == "🛠️ Tower Parts":
             if pd.isna(date_ordered_value):
                 date_ordered_value = pd.Timestamp.today()
 
-            date_ordered = st.sidebar.date_input("Date of Order (if ordered)", value=date_ordered_value)
+            date_ordered = st.sidebar.date_input("Date of Order", value=date_ordered_value)
             company = st.sidebar.text_input("Company Ordered From", value=orders_df.at[order_index, "Company"] if "Company" in orders_df.columns else "")
             approved_value = orders_df.at[order_index, "Approved"] if "Approved" in orders_df.columns else "No"
             approved = st.sidebar.selectbox("Approved", ["No", "Yes"], index=0 if approved_value == "No" else 1)
             approved_by = st.sidebar.text_input("Approved By", value=orders_df.at[order_index, "Approved By"] if "Approved By" in orders_df.columns else "")
 
             if st.sidebar.button("Update Order"):
+                orders_df.at[order_index, "Part Name"] = updated_part_name  # Update Part Name
+                orders_df.at[order_index, "Serial Number"] = updated_serial_number  # Update Serial Number
                 orders_df.at[order_index, "Status"] = new_status
                 if new_status == "Approved" and pd.isna(orders_df.at[order_index, "Approval Date"]):
-                    approval_date = st.sidebar.date_input("Date of Approval", value=pd.Timestamp.today())  #Set today's date if it's not already set
+                    approval_date = st.sidebar.date_input("Date of Approval", value=pd.Timestamp.today())  # Set today's date if not already set
                 else:
-                    approval_date = orders_df.at[
-                        order_index, "Approval Date"]  # Keep the existing approval date if it's already set
-
-                # Now update the order with the new status and approval date (only if it's approved)
-                orders_df.at[order_index, "Status"] = new_status
-                if new_status == "Approved" and pd.isna(orders_df.at[order_index, "Approval Date"]):
-                    orders_df.at[order_index, "Approval Date"] = approval_date # Keep the existing approval date if it's already set
+                    approval_date = orders_df.at[order_index, "Approval Date"]  # Keep the existing approval date if it's already set
+                orders_df.at[order_index, "Approval Date"] = approval_date
                 orders_df.at[order_index, "Ordered By"] = ordered_by
                 orders_df.at[order_index, "Company"] = company
                 orders_df.at[order_index, "Approved"] = approved
                 orders_df.at[order_index, "Approved By"] = approved_by
+                orders_df.at[order_index, "Date Ordered"] = date_ordered.strftime("%Y-%m-%d")  # Update Date Ordered column with the new date
                 orders_df.to_csv(ORDER_FILE, index=False)
                 st.sidebar.success("Order updated!")
 
     if not orders_df.empty:
-        # Remove only the "Date of Approval" column and keep the rest intact
+        # Define the new column order
+        column_order = [
+            "Status",
+            "Part Name",
+            "Serial Number",
+            "Details",
+            "Approved",
+            "Approved By",
+            "Approval Date",
+            "Ordered By",
+            "Date Ordered",
+            "Company",
+
+        ]
+        # Reorganize the DataFrame columns
+        orders_df = orders_df[column_order]
+        # Remove "Date of Approval" if still present
         orders_df = orders_df.drop(columns=["Date of Approval"], errors='ignore')
-        # Move Status column to the first position
-        columns_order = ["Status"] + [col for col in orders_df.columns if col != "Status"]
-        orders_df = orders_df[columns_order]
 
         # Color-coding based on Status
         def highlight_status(row):
@@ -1672,6 +1809,13 @@ elif tab_selection == "🛠️ Tower Parts":
                 archived_df = pd.read_csv(archive_file)
                 if not archived_df.empty:
                     st.write("### Archived Orders")
+
+                    # Reorganize columns for the archived table to match the Order Tracking table
+                    column_order = [
+                        "Status", "Part Name", "Serial Number", "Details", "Approved", "Approved By", "Approval Date",
+                        "Ordered By", "Date Ordered", "Company"
+                    ]
+                    archived_df = archived_df[column_order]
                     st.dataframe(archived_df, height=300, use_container_width=True)
                 else:
                     st.info("The archive is currently empty.")

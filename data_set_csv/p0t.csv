@@ -26,4 +26,7 @@ Primary Coating Temperature,47.0,°C
 Secondary Coating Temperature,44.0,°C
 Primary Die (Main) Diameter,150,µm
 Secondary Die (Main) Diameter,140,µm
-
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment Value,0.12,mm

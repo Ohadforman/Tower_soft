@@ -1,2 +1,9 @@
 Parameter Name,Value,Units
-Total Gas Spent,1457.446873697925,liters
+P Gain (diameter control),1.0,
+I Gain diameter control),1.0,
+TF Mode,Winder,
+Increment Value,0.12,mm
+P Gain (diameter control),1.0,
+I Gain diameter control),1.0,
+TF Mode,Winder,
+Increment Value,0.12,mm

@@ -1,5 +1,2 @@
-Event Type,Start DateTime,End DateTime,Y Position,Description,Recurrence
-Drawing,2025-03-31 09:00:00,2025-03-31 16:00:00,,Draw 200/220 from Yoav order ,
-Management Event,2025-04-04 00:05:00,2025-04-04 00:45:00,,tiger optics check at tmm,
-Maintenance,2025-04-04 00:09:00,2025-04-04 01:15:00,,,
-Stop,2025-04-04 00:09:00,2025-04-11 01:15:00,,,None
+Event Type,Start DateTime,End DateTime,Description,Recurrence
+Maintenance,2025-04-17 07:46:00,2025-04-17 18:15:00,Change coating,None

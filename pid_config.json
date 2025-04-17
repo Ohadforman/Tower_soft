@@ -1,0 +1,6 @@
+{
+    "p_gain": 1.0,
+    "i_gain": 1.0,
+    "winder_mode": "Winder",
+    "increment_value": 0.12
+}
