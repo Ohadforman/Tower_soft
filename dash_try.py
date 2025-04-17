@@ -1492,160 +1492,250 @@ elif tab_selection == "📅 Schedule":
                     st.sidebar.success("Event deleted successfully!")
             else:
                 st.sidebar.info("No events available for deletion.")
-# ------------------ Closed Log Tab ------------------
+# ------------------ Closed Processes Tab ------------------
 elif tab_selection == "✅ Closed Processes":
     # Define the CLOSED_PROCESSES_FILE path
     CLOSED_PROCESSES_FILE = "closed_processes.csv"
     st.title("✅ Closed Processes")
     st.write("Manage products that are finalized and ready for drawing.")
-    # Add CSV selection for Closed Process
-    st.sidebar.subheader("Select CSV to Mark as Closed Process")
-    closed_process_csv = st.sidebar.selectbox("Select CSV", [f for f in os.listdir('data_set_csv') if f.endswith('.csv')])
-    st.sidebar.subheader("Set Process Type")
-    process_type = st.sidebar.text_input("Process Type", value="PM")
 
-    if closed_process_csv:
-        st.sidebar.write(f"Selected CSV: {closed_process_csv}")
-        if st.sidebar.button("Mark as Closed Process"):
-            # Load selected CSV
-            csv_path = os.path.join('data_set_csv', closed_process_csv)
-            try:
-                df_csv = pd.read_csv(csv_path)
-                # Add relevant process data to closed processes file with process type
-                new_entry = {
-                    "Product Name": closed_process_csv.replace('.csv', ''),
-                    "Furnace Temperature (°C)": "N/A",  # Modify as necessary
-                    "Tension (g)": "N/A",  # Modify as necessary
-                    "Drawing Speed (m/min)": "N/A",  # Modify as necessary
-                    "Coating Type (Main)": "N/A",  # Modify as necessary
-                    "Coating Type (Secondary)": "N/A",  # Modify as necessary
-                    "Entry Die (Main)": "N/A",  # Modify as necessary
-                    "Entry Die (Secondary)": "N/A",  # Modify as necessary
-                    "Primary Die (Main)": "N/A",  # Modify as necessary
-                    "Primary Die (Secondary)": "N/A",  # Modify as necessary
-                    "Coating Diameter (Main, µm)": "N/A",  # Modify as necessary
-                    "Coating Diameter (Secondary, µm)": "N/A",  # Modify as necessary
-                    "Coating Temperature (Main, °C)": "N/A",  # Modify as necessary
-                    "Coating Temperature (Secondary, °C)": "N/A",  # Modify as necessary
-                    "Fiber Diameter (µm)": "N/A",  # Modify as necessary
-                    "P Gain for Diameter Control": "N/A",  # Modify as necessary
-                    "I Gain for Diameter Control": "N/A",  # Modify as necessary
-                    "Process Description": "N/A",  # Modify as necessary
-                    "Recipe Name": "N/A",  # Modify as necessary
-                    "Process Type": process_type
-                }
-                closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
-                closed_df = pd.concat([closed_df, pd.DataFrame([new_entry])], ignore_index=True)
-                closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
-                st.sidebar.success(f"CSV '{closed_process_csv}' marked as a closed process!")
-            except Exception as e:
-                st.sidebar.error(f"Error marking as closed process: {e}")
-    CLOSED_PROCESSES_FILE = "closed_processes.csv"
+    # Check if the CSV file exists and if it's empty
+    if not os.path.exists(CLOSED_PROCESSES_FILE) or os.stat(CLOSED_PROCESSES_FILE).st_size == 0:
+        # Define columns for the blank CSV
+        columns = ["Product Name", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
+                   "Coating Type (Main)", "Coating Type (Secondary)", "Entry Die (Main)", "Entry Die (Secondary)",
+                   "Primary Die (Main)", "Primary Die (Secondary)", "Coating Diameter (Main, µm)",
+                   "Coating Diameter (Secondary, µm)", "Coating Temperature (Main, °C)",
+                   "Coating Temperature (Secondary, °C)", "Fiber Diameter (µm)", "P Gain for Diameter Control",
+                   "I Gain for Diameter Control", "Process Description", "Recipe Name", "Process Type", "TF Mode",
+                   "TF Increment (mm)", "Core-Clad Ratio"]
+
+        # Create the CSV with the above columns
+        pd.DataFrame(columns=columns).to_csv(CLOSED_PROCESSES_FILE, index=False)
+        st.warning("CSV file is empty or doesn't exist. A new blank file has been created.")
+
+    # Load the closed processes file
+    closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
+
+    # Load the configuration from the JSON file
     with open("config_coating.json", "r") as config_file:
         config = json.load(config_file)
 
+    # Die and coating selections
     dies = config.get("dies", {})
     coatings = config.get("coatings", {})
-    if not os.path.exists(CLOSED_PROCESSES_FILE):
-        pd.DataFrame(columns=[
-            "Product Name", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
-            "Coating Type (Main)", "Coating Type (Secondary)",
-            "Entry Die (Main)", "Entry Die (Secondary)",
-            "Primary Die (Main)", "Primary Die (Secondary)",
-            "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)",
-            "Coating Temperature (Main, °C)", "Coating Temperature (Secondary, °C)",
-            "Fiber Diameter (µm)", "P Gain for Diameter Control", "I Gain for Diameter Control",
-            "Process Description", "Recipe Name"
-        ]).to_csv(CLOSED_PROCESSES_FILE, index=False)
+    process_types = ["PM", "NPM", "Other"]  # List of process types
 
-    closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
-    valid_columns = [
-        "Product Name", "Process Type", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
-        "Coating Type (Main)", "Coating Type (Secondary)", "Entry Die (Main)", "Entry Die (Secondary)",
-        "Primary Die (Main)", "Primary Die (Secondary)", "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)",
-        "Coating Temperature (Main, °C)", "Coating Temperature (Secondary, °C)", "Fiber Diameter (µm)",
-        "P Gain for Diameter Control", "I Gain for Diameter Control", "Process Description", "Recipe Name"
-    ]
-    closed_df_clean = closed_df[valid_columns].drop_duplicates()
+    # Sidebar options for adding a new or updating an existing process
+    action = st.sidebar.radio("Select Action", ["Add New Process", "Update Existing Process"])
+
+    # **Add New Process**
+    if action == "Add New Process":
+        st.sidebar.subheader("Add New Closed Process")
+        product_name = st.sidebar.text_input("Product Name")
+        process_type = st.sidebar.selectbox("Process Type", process_types)  # Move Process Type here
+        core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio")
+        furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1)
+        tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1)
+        drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1)
+
+        # Coating Type Inputs
+        coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()))
+        coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
+
+        # Die Inputs (Entry and Primary Dies)
+        entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1)
+        entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1)
+        primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
+        primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
+
+        # Coating Diameter Inputs
+        coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1)
+        coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
+                                                             step=0.1)
+
+        # Coating Temperature Inputs
+        coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0, step=0.1)
+        coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)", min_value=0.0,
+                                                                step=0.1)
+
+        # Fiber Diameter and Control Inputs
+        fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
+        p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1)
+        i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1)
+
+        # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
+        tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
+                                       index=["Winder", "Straight Mode"].index("Winder"))
+        tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01, value=0.1)
+
+        # Process Description and Recipe Name
+        process_description = st.sidebar.text_area("Process Description")
+        recipe_name = st.sidebar.text_input("Recipe Name")
+
+        if st.sidebar.button("Add New Process"):
+            new_entry = pd.DataFrame([{
+                "Product Name": product_name,
+                "Process Type": process_type,  # User-selected process type
+                "Furnace Temperature (°C)": furnace_temperature,
+                "Tension (g)": tension,
+                "Drawing Speed (m/min)": drawing_speed,
+                "Coating Type (Main)": coating_type_main,
+                "Coating Type (Secondary)": coating_type_secondary,
+                "Entry Die (Main)": entry_die_main,
+                "Entry Die (Secondary)": entry_die_secondary,
+                "Primary Die (Main)": primary_die_main,
+                "Primary Die (Secondary)": primary_die_secondary,
+                "Coating Diameter (Main, µm)": coating_diameter_main,
+                "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
+                "Coating Temperature (Main, °C)": coating_temperature_main,
+                "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
+                "Fiber Diameter (µm)": fiber_diameter,
+                "P Gain for Diameter Control": p_gain,
+                "I Gain for Diameter Control": i_gain,
+                "Process Description": process_description,
+                "Recipe Name": recipe_name,
+                "TF Mode": tf_mode,
+                "TF Increment (mm)": tf_increment,
+                "Core-Clad Ratio": core_clad_ratio  # New input
+            }])
+
+            # Append the new entry to the closed processes DataFrame and save it
+            closed_df = pd.concat([closed_df, new_entry], ignore_index=True)
+            closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
+            st.sidebar.success(f"New process '{product_name}' added successfully!")
+
+    # **Update Existing Process**
+    elif action == "Update Existing Process":
+        st.sidebar.subheader("Update Existing Closed Process")
+        closed_process_name = st.sidebar.selectbox("Select Process to Update", closed_df["Product Name"].tolist())
+
+        if closed_process_name:
+            matching_process = closed_df[closed_df["Product Name"] == closed_process_name]
+
+            if not matching_process.empty:
+                selected_process = matching_process.iloc[0]
+
+                # Display current values of the closed process
+                st.sidebar.write(f"Updating {closed_process_name}")
+                product_name = st.sidebar.text_input("Product Name", value=selected_process["Product Name"])
+                process_type = st.sidebar.selectbox("Process Type", process_types,
+                                                    index=process_types.index(selected_process["Process Type"]))
+                core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio", value=selected_process["Core-Clad Ratio"])
+                furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1,
+                                                              value=selected_process["Furnace Temperature (°C)"])
+                tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1,
+                                                  value=selected_process["Tension (g)"])
+                drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1,
+                                                        value=selected_process["Drawing Speed (m/min)"])
+
+                # Coating Type Inputs
+                coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()),
+                                                         index=list(coatings.keys()).index(
+                                                             selected_process["Coating Type (Main)"]))
+                coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()),
+                                                              index=list(coatings.keys()).index(
+                                                                  selected_process["Coating Type (Secondary)"]))
+
+                # Die Inputs (Entry and Primary Dies)
+                entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1,
+                                                         value=selected_process["Entry Die (Main)"])
+                entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1,
+                                                              value=selected_process["Entry Die (Secondary)"])
+                primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()),
+                                                        index=list(dies.keys()).index(
+                                                            selected_process["Primary Die (Main)"]))
+                primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()),
+                                                             index=list(dies.keys()).index(
+                                                                 selected_process["Primary Die (Secondary)"]))
+
+                # Coating Diameter Inputs
+                coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1,
+                                                                value=selected_process["Coating Diameter (Main, µm)"])
+                coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
+                                                                     step=0.1, value=selected_process[
+                        "Coating Diameter (Secondary, µm)"])
+
+                # Coating Temperature Inputs
+                coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0,
+                                                                   step=0.1, value=selected_process[
+                        "Coating Temperature (Main, °C)"])
+                coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)",
+                                                                        min_value=0.0, step=0.1, value=selected_process[
+                        "Coating Temperature (Secondary, °C)"])
+
+                # Fiber Diameter and Control Inputs
+                fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1,
+                                                         value=selected_process["Fiber Diameter (µm)"])
+                p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1,
+                                                 value=selected_process["P Gain for Diameter Control"])
+                i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1,
+                                                 value=selected_process["I Gain for Diameter Control"])
+
+                # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
+                tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
+                                               index=["Winder", "Straight Mode"].index(selected_process["TF Mode"]))
+                tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01,
+                                                       value=selected_process["TF Increment (mm)"])
+
+                # Process Description and Recipe Name
+                process_description = st.sidebar.text_area("Process Description",
+                                                           value=selected_process["Process Description"])
+                recipe_name = st.sidebar.text_input("Recipe Name", value=selected_process["Recipe Name"])
+
+                if st.sidebar.button("Update Product"):
+                    # Prepare updated entry with all the values
+                    updated_entry = {
+                        "Product Name": product_name,
+                        "Process Type": process_type,
+                        "Furnace Temperature (°C)": furnace_temperature,
+                        "Tension (g)": tension,
+                        "Drawing Speed (m/min)": drawing_speed,
+                        "Coating Type (Main)": coating_type_main,
+                        "Coating Type (Secondary)": coating_type_secondary,
+                        "Entry Die (Main)": entry_die_main,
+                        "Entry Die (Secondary)": entry_die_secondary,
+                        "Primary Die (Main)": primary_die_main,
+                        "Primary Die (Secondary)": primary_die_secondary,
+                        "Coating Diameter (Main, µm)": coating_diameter_main,
+                        "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
+                        "Coating Temperature (Main, °C)": coating_temperature_main,
+                        "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
+                        "Fiber Diameter (µm)": fiber_diameter,
+                        "P Gain for Diameter Control": p_gain,
+                        "I Gain for Diameter Control": i_gain,
+                        "Process Description": process_description,
+                        "Recipe Name": recipe_name,
+                        "TF Mode": tf_mode,
+                        "TF Increment (mm)": tf_increment,
+                        "Core-Clad Ratio": core_clad_ratio
+                    }
+
+                    # Find the index of the product name and update it
+                    closed_df.loc[closed_df["Product Name"] == closed_process_name, updated_entry.keys()] = list(
+                        updated_entry.values())
+
+                    closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
+                    st.sidebar.success(f"Product '{product_name}' updated successfully!")
+
+            else:
+                st.sidebar.error(f"No process found with the name '{closed_process_name}'.")
+
+        # Remove duplicates and display the cleaned table
+
+    # Remove duplicates and display the cleaned table
+    closed_df_clean = closed_df.drop_duplicates(
+        subset=["Product Name", "Coating Type (Main)", "Coating Type (Secondary)"])
+
+    # Reorganize the columns as requested
+    closed_df_clean = closed_df_clean[[
+        "Product Name", "Process Type", "Core-Clad Ratio", "Fiber Diameter (µm)",
+        "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)", "Drawing Speed (m/min)",
+        "Furnace Temperature (°C)", "Tension (g)", "TF Mode", "TF Increment (mm)"
+    ]]
 
     st.write("### Cleaned Closed Products Table")
-    st.sidebar.subheader("Filter by Process Type")
-    process_filter = st.sidebar.selectbox("Process Type", ["All", "PM", "NPM", "Other"])
-    if process_filter != "All":
-        closed_df_clean = closed_df_clean[closed_df_clean["Process Type"] == process_filter]
-    st.data_editor(closed_df_clean, height=400, use_container_width=True)
-
-    st.sidebar.subheader("Add New Closed Process")
-    product_name = st.sidebar.text_input("Product Name")
-    furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1)
-    tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1)
-    drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1)
-
-    # Main and Secondary Coating Type Inputs
-    coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()))
-    coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
-
-    # Die Inputs (Entry and Primary Dies)
-    entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1)
-    entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1)
-    primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
-    primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
-
-    # Coating Diameter Inputs
-    coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1)
-    coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0, step=0.1)
-
-    # Coating Temperature Inputs
-    coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0, step=0.1)
-    coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)", min_value=0.0,
-                                                            step=0.1)
-
-    # Fiber Diameter and Control Inputs
-    fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
-    p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1)
-    i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1)
-
-    # Process Description and Recipe Name
-    process_description = st.sidebar.text_area("Process Description")
-    recipe_name = st.sidebar.text_input("Recipe Name")
-
-    if st.sidebar.button("Add Product"):
-        new_entry = pd.DataFrame([{
-            "Product Name": product_name,
-            "Process Type": process_type,
-            "Furnace Temperature (°C)": furnace_temperature,
-            "Tension (g)": tension,
-            "Drawing Speed (m/min)": drawing_speed,
-            "Coating Type (Main)": coating_type_main,
-            "Coating Type (Secondary)": coating_type_secondary,
-            "Entry Die (Main)": entry_die_main,
-            "Entry Die (Secondary)": entry_die_secondary,
-            "Primary Die (Main)": primary_die_main,
-            "Primary Die (Secondary)": primary_die_secondary,
-            "Coating Diameter (Main, µm)": coating_diameter_main,
-            "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
-            "Coating Temperature (Main, °C)": coating_temperature_main,
-            "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
-            "Fiber Diameter (µm)": fiber_diameter,
-            "P Gain for Diameter Control": p_gain,
-            "I Gain for Diameter Control": i_gain,
-            "Process Description": process_description,
-            "Recipe Name": recipe_name
-        }])
-
-        closed_df = pd.concat([closed_df, new_entry], ignore_index=True)
-        closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
-        st.sidebar.success("Product added successfully!")
-
-    st.sidebar.subheader("Delete Closed Process")
-    if not closed_df.empty:
-        delete_product = st.sidebar.selectbox("Select Product to Delete", closed_df["Product Name"].tolist())
-        if st.sidebar.button("Delete Product"):
-            closed_df = closed_df[closed_df["Product Name"] != delete_product]
-            closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
-            st.sidebar.success("Product deleted successfully!")
-    else:
-        st.sidebar.info("No products available for deletion.")
+    st.dataframe(closed_df_clean, height=300, use_container_width=True)
 # ------------------ Tower Parts Tab ------------------
 elif tab_selection == "🛠️ Tower Parts":
     st.title("🛠️ Tower Parts Management")
@@ -2244,89 +2334,94 @@ elif tab_selection == "🧪 Development Process":
 elif tab_selection == "📋 Protocols":
     st.title("📋 Protocols")
     st.subheader("Manage Tower Protocols")
+
     PROTOCOLS_FILE = "protocols.json"
-    if os.path.exists(PROTOCOLS_FILE):
-        with open(PROTOCOLS_FILE, "r") as file:
-            st.session_state["protocols"] = json.load(file)
-    if "protocols" not in st.session_state:
-        st.session_state["protocols"] = []
 
     # Load protocols from file if they exist
     if os.path.exists(PROTOCOLS_FILE):
         with open(PROTOCOLS_FILE, "r") as file:
             st.session_state["protocols"] = json.load(file)
 
-    selected_protocol = ""
-    if st.session_state["protocols"]:
-        selected_protocol = st.selectbox("Select a Protocol", [""] + [p["name"] for p in st.session_state["protocols"]])
-        if selected_protocol:
-            protocol = next(p for p in st.session_state["protocols"] if p["name"] == selected_protocol)
-            st.markdown(f"**{protocol['name']}**")
-            st.write(f"Type: {protocol['type']}")
-            if protocol["type"] == "Checklist":
-                checklist_items = [item.strip() for item in protocol["instructions"].split("\n") if item.strip()]
-                if checklist_items:
-                    checkbox_values = [st.checkbox(item) for item in checklist_items]
-                    if all(checkbox_values):
-                        st.success(f"All items in {protocol['name']} checklist are completed!")
-                else:
-                    st.info("No checklist items available.")
-            else:
-                st.markdown("Instructions:\n" + protocol["instructions"].replace("\n", "  \n"))
+    if "protocols" not in st.session_state:
+        st.session_state["protocols"] = []
 
-    if selected_protocol:
-        st.markdown("---")
-        update_protocol = st.checkbox("Update Protocol", key="update_protocol_checkbox")
-        if update_protocol:
-            with st.form(key="update_protocol_form"):
-                new_protocol_name = st.text_input("New Protocol Name", value=protocol["name"])
-                new_protocol_type = st.radio("New Protocol Type", ["Checklist", "Instructions"],
-                                             index=["Checklist", "Instructions"].index(protocol["type"]))
-                new_protocol_instructions = st.text_area("New Protocol Instructions", value=protocol["instructions"])
-                update_button = st.form_submit_button(label="Update Protocol")
-                if update_button:
-                    protocol["name"] = new_protocol_name
-                    protocol["type"] = new_protocol_type
-                    protocol["instructions"] = new_protocol_instructions
+    # Ensure each protocol has a 'sub_type' key
+    for protocol in st.session_state["protocols"]:
+        if "sub_type" not in protocol:
+            protocol["sub_type"] = "Instructions"  # Default to "Instructions" if not provided
+
+
+    # Organize protocols by type and display each type as a subtitle with its protocols listed below
+    protocol_types = ["Drawings", "Maintenance", "Tower Regular Operations"]
+    for protocol_type in protocol_types:
+        st.subheader(f"Protocols for {protocol_type}")
+        filtered_protocols = [p for p in st.session_state["protocols"] if p.get("type") == protocol_type]
+        if filtered_protocols:
+            for protocol in filtered_protocols:
+                with st.expander(protocol["name"]):
+                    st.write(f"Type: {protocol['type']}")
+                    if protocol["sub_type"] == "Checklist":
+                        checklist_items = [item.strip() for item in protocol["instructions"].split("\n") if item.strip()]
+                        if checklist_items:
+                            # Provide a unique key for each checkbox
+                            checkbox_values = [st.checkbox(item, key=f"{protocol['name']}_{item}") for item in checklist_items]
+                            if all(checkbox_values):
+                                st.success(f"All items in {protocol['name']} checklist are completed!")
+                        else:
+                            st.info("No checklist items available.")
+                    else:
+                        st.markdown("Instructions:\n" + protocol["instructions"].replace("\n", "  \n"))
+
+                    # Individual delete button for protocol
+                    delete_button = st.button(f"Delete {protocol['name']}", key=f"delete_{protocol['name']}")
+                    if delete_button:
+                        st.session_state["protocols"].remove(protocol)
+                        # Save the updated protocols list to file
+                        with open(PROTOCOLS_FILE, "w") as file:
+                            json.dump(st.session_state["protocols"], file, indent=4)
+                        st.success(f"Protocol '{protocol['name']}' deleted successfully!")
+                        st.rerun()  # Immediately refresh the list
+        else:
+            st.warning(f"No protocols available for {protocol_type}")
+
+    st.markdown("---")
+
+    # Protocol creation section
+    create_new = st.checkbox("Create New Protocol", key="create_new_protocol_checkbox")
+    if create_new:
+        with st.form(key="new_protocol_form"):
+            protocol_name = st.text_input("Enter Protocol Name")
+            protocol_type = st.selectbox("Select Protocol Type", protocol_types, key="protocol_type_select_create")
+
+            checklist_or_instructions = st.selectbox("Select Protocol Sub-Type", ["Checklist", "Instructions"],
+                                                     key="checklist_or_instructions_create")
+
+            protocol_instructions = st.text_area("Enter Protocol Instructions")
+            submit_button = st.form_submit_button(label="Add Protocol")
+            if submit_button:
+                if protocol_name and protocol_instructions:
+                    new_protocol = {"name": protocol_name, "type": protocol_type, "sub_type": checklist_or_instructions,
+                                    "instructions": protocol_instructions}
+                    st.session_state["protocols"].append(new_protocol)
                     # Save updated protocols list to file
                     with open(PROTOCOLS_FILE, "w") as file:
                         json.dump(st.session_state["protocols"], file, indent=4)
-                    st.success(f"Protocol '{new_protocol_name}' updated successfully!")
+                    # Immediately update the protocols list without page refresh
+                    st.session_state["protocols"] = st.session_state["protocols"]
+                    st.success(f"Protocol '{protocol_name}' added successfully!")
                     st.rerun()  # Immediately refresh the list
-
-        delete_protocol = st.checkbox("Delete Protocol", key="delete_protocol_checkbox")
-        if delete_protocol:
-            if st.button(f"Delete {protocol['name']}"):
-                st.session_state["protocols"].remove(protocol)
-                # Save updated protocols list to file
+                else:
+                    st.error("Please fill out all fields.")
+    st.markdown("---")
+    # Now display the delete checkbox and delete button at the end of the page
+    delete_mode = st.checkbox("Delete Protocols", key="delete_mode")
+    if delete_mode:
+        protocol_names = [protocol["name"] for protocol in st.session_state["protocols"]]
+        selected_for_deletion = st.multiselect("Select protocols to delete", options=protocol_names, key="protocols_to_delete")
+        if selected_for_deletion:
+            if st.button("Delete Selected Protocols"):
+                st.session_state["protocols"] = [protocol for protocol in st.session_state["protocols"] if protocol["name"] not in selected_for_deletion]
                 with open(PROTOCOLS_FILE, "w") as file:
                     json.dump(st.session_state["protocols"], file, indent=4)
-                st.success(f"Protocol '{protocol['name']}' deleted successfully!")
-                st.rerun()  # Immediately refresh the list
-
-    else:
-        st.info("No protocols available.")
-
-    if not selected_protocol:
-        create_new = st.checkbox("Create New Protocol", key="create_new_protocol_checkbox")
-        if create_new:
-            with st.form(key="new_protocol_form"):
-                protocol_name = st.text_input("Enter Protocol Name")
-                protocol_type = st.radio("Select Protocol Type", ["Checklist", "Instructions"])
-                protocol_instructions = st.text_area("Enter Protocol Instructions")
-                submit_button = st.form_submit_button(label="Add Protocol")
-                if submit_button:
-                    if protocol_name and protocol_instructions:
-                        new_protocol = {"name": protocol_name, "type": protocol_type, "instructions": protocol_instructions}
-                        st.session_state["protocols"].append(new_protocol)
-                        # Save updated protocols list to file
-                        with open(PROTOCOLS_FILE, "w") as file:
-                            json.dump(st.session_state["protocols"], file, indent=4)
-                        # Immediately update the protocols list without page refresh
-                        st.session_state["protocols"] = st.session_state["protocols"]
-                        st.success(f"Protocol '{protocol_name}' added successfully!")
-                        st.rerun()  # Immediately refresh the list
-                    else:
-                        st.error("Please fill out all fields.")
-
-
+                st.success(f"Deleted {len(selected_for_deletion)} protocol(s) successfully!")
+                st.rerun()
