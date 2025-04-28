@@ -161,6 +161,7 @@ if tab_selection == "🏠 Home":
     st.subheader("Isorad Tower Management Software")
 
     csv_name1 = st.text_input("Enter Unique CSV Name For Drawing Data Set Creation ", "")
+
     csv_name = csv_name1+".csv" if csv_name1 and not csv_name1.endswith(".csv") else csv_name1
     if st.button("Create New CSV for Data Program", key="create_csv"):
         if csv_name:  # Only proceed if the name is provided
@@ -173,7 +174,7 @@ if tab_selection == "🏠 Home":
 
             # Check if the CSV already exists, and provide feedback
             if os.path.exists(csv_path):
-                st.warning(f"CSV file '{csv_name}' already exists.")
+                st.warning(f"CSV file '{csv_name1}' already exists.")
             else:
                 # Create the DataFrame with the necessary columns
                 columns = ["Parameter Name", "Value", "Units"]
@@ -192,6 +193,7 @@ if tab_selection == "🏠 Home":
                     }
 
                 ]
+
                 # Create the new row as a DataFrame
                 new_row_df = pd.DataFrame(new_rows)
 
@@ -205,7 +207,7 @@ if tab_selection == "🏠 Home":
                 new_draw_entry = pd.DataFrame([{
                     "Timestamp": pd.Timestamp.now(),
                     "Type": "Draw History",
-                    "Draw Name": csv_name,
+                    "Draw Name": csv_name1,
                     "First Coating": "N/A",  # Modify with actual data if necessary
                     "First Coating Temperature": "N/A",  # Modify with actual data if necessary
                     "First Coating Die Size": "N/A",  # Modify with actual data if necessary
@@ -1100,7 +1102,6 @@ elif tab_selection == "💧 Coating":
 elif tab_selection == "📝 History Log":
     st.title("📝 History Log")
     st.sidebar.title("History Log Management")
-
     if os.path.exists(HISTORY_FILE):
         history_df = pd.read_csv(HISTORY_FILE)
         history_df["Timestamp"] = pd.to_datetime(history_df["Timestamp"])
