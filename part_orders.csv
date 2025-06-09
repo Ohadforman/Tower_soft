@@ -1,2 +1,4 @@
-Status,Part Name,Serial Number,Details,Approved,Approved By,Approval Date,Ordered By,Date Ordered,Company
-Ordered,Die 140,345,the first 140 is stuck,Yes,Ariel,2025-04-17,Emilion,,SG
+Status,Part Name,Serial Number,Details,Approved,Approved By,Approval Date,Ordered By,Date Ordered,Company,Purpose,Opened By,Project Name
+Ordered,Die 140,345,the first 140 is stuck,Yes,Ariel,2025-04-17,Emilion,,SG,,,
+Needed,coating DS,123,tiger project need,,,,,,,stock,Ohad,Tiger
+Shipped,coating OF,123,tiger project need,Yes,nan,,,2025-05-08,nan,stock,Ohad,Tiger

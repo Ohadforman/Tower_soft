@@ -1,2 +1,6 @@
 Event Type,Start DateTime,End DateTime,Description,Recurrence
-Maintenance,2025-04-17 07:46:00,2025-04-17 18:15:00,Change coating,None
+Maintenance,2025-04-17 07:46:00,2025-04-17 18:15:00,Change coating,
+Maintenance,2025-05-08 07:52:00,2025-05-08 11:15:00,,
+Drawing,2025-05-09 07:52:00,2025-05-09 11:15:00,,
+Stop,2025-05-10 07:52:00,2025-05-12 11:15:00,,
+Management Event,2025-05-22 07:52:00,2025-05-22 11:15:00,,None

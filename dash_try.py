@@ -9,6 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import math
 import numpy as np
+from datetime import timedelta
 CSV_SELECTION_FILE = "selected_csv.json"
 
 def save_selected_csv(selected_csv):
@@ -41,6 +42,7 @@ if not coatings or not dies:
 tab_labels = [
     "🏠 Home",
     "📅 Schedule",
+    "📦 Order Draw",
     "🛠️ Tower Parts",
     "🍃 Consumables",
     "🧪 Development Process",
@@ -298,313 +300,174 @@ if tab_selection == "🏠 Home":
     )
 # ------------------ Dashboard Tab ------------------
 elif tab_selection == "📊 Dashboard":
+    st.title(f"📊 Draw Tower Logs Dashboard - {selected_file}")
 
-    st.title(f"Draw Tower Logs Dashboard - {selected_file}")
+    # Sidebar options
+    show_corr_matrix = st.sidebar.checkbox("Show Correlation Matrix")
+    column_options = df.columns.tolist()
 
-    # Dashboard-specific sidebar controls
-    st.sidebar.title("Data Selection")
-    plot_type = st.sidebar.radio("Select Plot Type", ["2D", "3D"], key="plot_type")
+    # Plot axis selections
+    x_axis = st.selectbox("Select X-axis", column_options, key="x_axis_dash")
+    y_axis = st.selectbox("Select Y-axis", column_options, key="y_axis_dash")
 
-    if plot_type == "3D":
-        x_axis = st.sidebar.selectbox("Select X-axis", column_options, key="x_axis_select")
-        y_axis = st.sidebar.selectbox("Select Y-axis", column_options, key="y_axis_select")
-        z_axis = st.sidebar.selectbox("Select Z-axis", column_options, key="z_axis_select")
-        if x_axis in df.columns and y_axis in df.columns and z_axis in df.columns:
-            plot_df_3d = df[[x_axis, y_axis, z_axis]].dropna().copy()
-            fig_3d = px.scatter_3d(plot_df_3d, x=x_axis, y=y_axis, z=z_axis, title=f"3D Plot: {z_axis} vs {y_axis} vs {x_axis}")
-            st.plotly_chart(fig_3d, use_container_width=True, key="plot_3d")
-        else:
-            st.warning("Please select valid columns for X, Y, and Z axes.")
+    # Drop NA and sort by x
+    filtered_df = df.dropna(subset=[x_axis, y_axis]).sort_values(by=x_axis)
 
-    show_corr_matrix = st.sidebar.checkbox("Show Correlation Matrix", key="corr_matrix")
+    # ---- Time slider ----
+    time_range = None
+    if np.issubdtype(filtered_df[x_axis].dtype, np.datetime64):
+        time_min = filtered_df[x_axis].min().to_pydatetime()
+        time_max = filtered_df[x_axis].max().to_pydatetime()
+        time_range = st.slider(
+            "Select Time Range for Good Zone",
+            min_value=time_min,
+            max_value=time_max,
+            value=(time_min, time_max),
+            step=pd.Timedelta(seconds=1).to_pytimedelta(),
+            format="HH:mm:ss"
+        )
 
+    # Build plot
+    st.subheader("📈 Plot")
+    fig = px.line(filtered_df, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}", markers=True)
 
-    st.subheader("📏 Mark Good Zones (Click on the Plot)")
+    # Green rectangles for saved zones
+    for start, end in st.session_state["good_zones"]:
+        fig.add_vrect(
+            x0=start, x1=end,
+            fillcolor="green", opacity=0.3, line_width=0,
+            annotation_text="Good Zone", annotation_position="top left"
+        )
 
-    # Create unified plot(s) for selected axes (2D only)
-    if plot_type == "2D":
-        if "plot_configs" not in st.session_state:
-            default_x = column_options[0] if column_options else ""
-            default_y = column_options[0] if column_options else ""
-            st.session_state["plot_configs"] = [{"x_axis": default_x, "y_axis": default_y}]
+    # Blue rectangle for live selection
+    if time_range:
+        fig.add_vrect(
+            x0=time_range[0], x1=time_range[1],
+            fillcolor="blue", opacity=0.2, line_width=1,
+            line_dash="dot",
+            annotation_text="Selected", annotation_position="top right"
+        )
 
-        if st.sidebar.button("Add Plot", key="add_plot_button"):
-            default_x = column_options[0] if column_options else ""
-            default_y = column_options[0] if column_options else ""
-            st.session_state["plot_configs"].append({"x_axis": default_x, "y_axis": default_y})
+    # Final render
+    st.plotly_chart(fig, use_container_width=True)
 
-        for i, config in enumerate(st.session_state["plot_configs"]):
-            config["x_axis"] = st.sidebar.selectbox(
-                f"Select X-axis for Plot {i + 1}", column_options,
-                key=f"x_axis_select_{i}",
-                index=column_options.index(config["x_axis"]) if config["x_axis"] in column_options else 0
-            )
-            config["y_axis"] = st.sidebar.selectbox(
-                f"Select Y-axis for Plot {i + 1}", column_options,
-                key=f"y_axis_select_{i}",
-                index=column_options.index(config["y_axis"]) if config["y_axis"] in column_options else 0
-            )
+    # Add new zone
+    if time_range and st.button("➕ Add Selected Zone"):
+        st.session_state["good_zones"].append(time_range)
+        st.success(f"Zone added: {time_range[0]} to {time_range[1]}")
 
-            if config["x_axis"] in df.columns and config["y_axis"] in df.columns:
-                filtered_df = df.dropna(subset=[config["x_axis"], config["y_axis"]])
-
-                if not filtered_df.empty:
-                    fig_plot = px.line(
-                        filtered_df,
-                        x=config["x_axis"],
-                        y=config["y_axis"],
-                        title=f"{config['y_axis']} vs {config['x_axis']} (Plot {i + 1})",
-                        markers=True
-                    )
-
-                    for start, end in st.session_state.get("good_zones", []):
-                        fig_plot.add_vrect(
-                            x0=start, x1=end,
-                            fillcolor="green", opacity=0.3, line_width=0,
-                            annotation_text="Good Zone", annotation_position="top left"
-                        )
-
-                    selected_points_raw = plotly_events(
-                        fig_plot, click_event=True, hover_event=False,
-                        key=f"zone_click_plot_{i}"
-                    )
-                    st.plotly_chart(fig_plot, use_container_width=True, key=f"final_plot_{i}")
-                else:
-                    st.warning(f"Plot {i + 1}: No valid data available for the selected axes.")
-            else:
-                st.warning(f"Plot {i + 1}: Selected axes are not valid columns in the dataset.")
-    #fix the 2 plot make only one plot
-    if "zone_click_mode" not in st.session_state:
-        st.session_state["zone_click_mode"] = "Start"
-    if "current_zone" not in st.session_state:
-        st.session_state["current_zone"] = {}
-    zone_mode = st.session_state["zone_click_mode"]
-    st.write("### Click to Mark Zone")
-    if selected_points_raw:
-        st.write(f"Clicked Point X: {selected_points_raw[0]['x']}")
-        if st.button("Mark Zone", key="mark_zone_button"):
-            raw_time = selected_points_raw[0]["x"]
-            try:
-                point_time = pd.to_datetime(raw_time, errors='raise')
-            except Exception:
-                try:
-                    if isinstance(raw_time, str) and len(raw_time.split(":")[-1]) > 2:
-                        parts = raw_time.rsplit(":", 1)
-                        fixed_time = parts[0] + ":" + parts[1][:2] + "." + parts[1][2:]
-                        point_time = pd.to_datetime(fixed_time)
-                    else:
-                        raise
-                except Exception as e:
-                    st.error(f"⚠️ Failed to parse timestamp: {raw_time}\n\nError: {e}")
-                    st.stop()
-            if zone_mode == "Start":
-                st.session_state["current_zone"]["start"] = point_time
-                st.success(f"Start of zone set to: {point_time}")
-            elif zone_mode == "End":
-                st.session_state["current_zone"]["end"] = point_time
-                st.success(f"End of zone set to: {point_time}")
-
-            if "start" in st.session_state["current_zone"] and "end" in st.session_state["current_zone"]:
-                zone = (
-                    min(st.session_state["current_zone"]["start"], st.session_state["current_zone"]["end"]),
-                    max(st.session_state["current_zone"]["start"], st.session_state["current_zone"]["end"])
-                )
-                st.session_state["good_zones"].append(zone)
-                st.success(f"Zone added from {zone[0]} to {zone[1]}")
-                st.session_state["current_zone"] = {}
-    if "good_zones" not in st.session_state:
-        st.session_state["good_zones"] = []
-
-    st.write("## Zone Selection Mode")
-    zone_mode = st.radio("Click Mode", ["Start", "End"], key="zone_click_mode")
-    selected_points = []
-
-    if selected_points and st.button("Mark Zone"):
-        raw_time = selected_points[0]["x"]
-        try:
-            point_time = pd.to_datetime(raw_time, errors='raise')
-        except Exception:
-            try:
-                # Fix malformed timestamps like "13:16:48813" → "13:16:48.813"
-                if isinstance(raw_time, str) and len(raw_time.split(":")[-1]) > 2:
-                    parts = raw_time.rsplit(":", 1)
-                    fixed_time = parts[0] + ":" + parts[1][:2] + "." + parts[1][2:]
-                    point_time = pd.to_datetime(fixed_time)
-                else:
-                    raise
-            except Exception as e:
-                st.error(f"⚠️ Failed to parse timestamp: {raw_time}\n\nError: {e}")
-                st.stop()
-        if zone_mode == "Start":
-            st.session_state["current_zone"]["start"] = point_time
-            st.success(f"Start of zone set to: {point_time}")
-        elif zone_mode == "End":
-            st.session_state["current_zone"]["end"] = point_time
-            st.success(f"End of zone set to: {point_time}")
-
-        # When both start and end are selected, add to good_zones
-        if "start" in st.session_state["current_zone"] and "end" in st.session_state["current_zone"]:
-            zone = (
-                min(st.session_state["current_zone"]["start"], st.session_state["current_zone"]["end"]),
-                max(st.session_state["current_zone"]["start"], st.session_state["current_zone"]["end"])
-            )
-            st.session_state["good_zones"].append(zone)
-            st.success(f"Zone added from {zone[0]} to {zone[1]}")
-            st.session_state["current_zone"] = {}
-
+    # Summary section
     if st.session_state["good_zones"]:
-        st.write("### Good Zones Summary")
+        st.write("### ✅ Good Zones Summary")
+
         summary_data = []
-        global_start = None
-        global_end = None
         all_values = []
 
-        for start, end in st.session_state["good_zones"]:
-            if "Date/Time" in df.columns:
-                zone_data = df[(df["Date/Time"] >= pd.to_datetime(start)) & (df["Date/Time"] <= pd.to_datetime(end))]
-                if not zone_data.empty:
-                    global_start = min(global_start, start) if global_start else start
-                    global_end = max(global_end, end) if global_end else end
-                    y_axis_selected = st.session_state["plot_configs"][0]["y_axis"] if st.session_state.get("plot_configs") else (column_options[0] if column_options else "")
-                    all_values.extend(zone_data[y_axis_selected].tolist())
+        for i, (start, end) in enumerate(st.session_state["good_zones"]):
+            zone_data = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
+            if not zone_data.empty:
+                summary_data.append({
+                    "Zone": f"Zone {i+1}",
+                    "Start": start,
+                    "End": end,
+                    "Avg": zone_data[y_axis].mean(),
+                    "Min": zone_data[y_axis].min(),
+                    "Max": zone_data[y_axis].max()
+                })
+                all_values.extend(pd.to_numeric(zone_data[y_axis], errors='coerce').dropna().values)
 
         if all_values:
-            st.markdown("### 📊 Combined Good Zone Stats")
-            st.write(f"**Start:** {global_start}")
-            st.write(f"**End:** {global_end}")
+            st.markdown("#### 📊 Combined Stats")
+            st.write(f"**Start:** {min(all_values):.4f}")
+            st.write(f"**End:** {max(all_values):.4f}")
             st.write(f"**Average:** {pd.Series(all_values).mean():.4f}")
             st.write(f"**Min:** {min(all_values):.4f}")
             st.write(f"**Max:** {max(all_values):.4f}")
+
+        st.dataframe(pd.DataFrame(summary_data))
+
+    # CSV Save section
+    recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
+    selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
+
+    if selected_csv and st.button("💾 Save Zones Summary"):
+        csv_path = os.path.join('data_set_csv', selected_csv)
+        try:
+            df_csv = pd.read_csv(csv_path)
+        except FileNotFoundError:
+            st.error(f"CSV file '{selected_csv}' not found.")
+            st.stop()
+
+        data_to_add = [{"Parameter Name": "Log File Name", "Value": selected_file, "Units": ""}]
         for i, (start, end) in enumerate(st.session_state["good_zones"]):
-            if "Date/Time" in df.columns:
-                zone_data = df[(df["Date/Time"] >= pd.to_datetime(start)) & (df["Date/Time"] <= pd.to_datetime(end))]
-                if not zone_data.empty:
-                    y_axis_selected = st.session_state["plot_configs"][0]["y_axis"] if st.session_state.get(
-                        "plot_configs") else (column_options[0] if column_options else "")
-                    summary = {
-                        "Zone": f"Zone {i + 1}",
-                        "Start": start,
-                        "End": end,
-                        "Avg": zone_data[y_axis_selected].mean(),
-                        "Min": zone_data[y_axis_selected].min(),
-                        "Max": zone_data[y_axis_selected].max()
-                    }
-                    summary_data.append(summary)
-            else:
-                st.warning("The selected dataset does not contain a 'Date/Time' column.")
-                break
+            data_to_add.extend([
+                {"Parameter Name": f"Zone {i+1} Start", "Value": start, "Units": ""},
+                {"Parameter Name": f"Zone {i+1} End", "Value": end, "Units": ""}
+            ])
 
-        summary_df = pd.DataFrame(summary_data)
-        st.dataframe(summary_df)
+            zone_data = df[(df["Date/Time"] >= pd.to_datetime(start)) & (df["Date/Time"] <= pd.to_datetime(end))]
+            if not zone_data.empty:
+                for param in ["Fibre Length", "Pf Process Position"]:
+                    if param in zone_data.columns:
+                        data_to_add.extend([
+                            {"Parameter Name": f"Zone {i+1} {param} at Start", "Value": zone_data.iloc[0][param], "Units": "km" if "Fibre" in param else "mm"},
+                            {"Parameter Name": f"Zone {i+1} {param} at End", "Value": zone_data.iloc[-1][param], "Units": "km" if "Fibre" in param else "mm"}
+                        ])
+                for param in ["Bare Fibre Diameter", "Coated Inner Diameter", "Coated Outer Diameter"]:
+                    if param in zone_data.columns:
+                        data_to_add.extend([
+                            {"Parameter Name": f"Zone {i + 1} Avg ({param})", "Value": zone_data[param].mean(), "Units": "µm"},
+                            {"Parameter Name": f"Zone {i + 1} Min ({param})", "Value": zone_data[param].min(), "Units": "µm"},
+                            {"Parameter Name": f"Zone {i + 1} Max ({param})", "Value": zone_data[param].max(), "Units": "µm"}
+                        ])
+                for param in ["Capstan Speed"]:
+                    if param in zone_data.columns:
+                        data_to_add.extend([
+                            {"Parameter Name": f"Zone {i + 1} Avg ({param})", "Value": zone_data[param].mean(),
+                             "Units": "m/min"},
+                            {"Parameter Name": f"Zone {i + 1} Min ({param})", "Value": zone_data[param].min(),
+                             "Units": "m/min"},
+                            {"Parameter Name": f"Zone {i + 1} Max ({param})", "Value": zone_data[param].max(),
+                             "Units": "m/min"}
+                        ])
+                for param in ["Tension N"]:
+                    if param in zone_data.columns:
+                        data_to_add.extend([
+                            {"Parameter Name": f"Zone {i + 1} Avg ({param})", "Value": zone_data[param].mean(),
+                             "Units": "g"},
+                            {"Parameter Name": f"Zone {i + 1} Min ({param})", "Value": zone_data[param].min(),
+                             "Units": "g"},
+                            {"Parameter Name": f"Zone {i + 1} Max ({param})", "Value": zone_data[param].max(),
+                             "Units": "g"}
+                        ])
+                for param in ["Furnace DegC Actual"]:
+                    if param in zone_data.columns:
+                        data_to_add.extend([
+                            {"Parameter Name": f"Zone {i + 1} Avg ({param})", "Value": zone_data[param].mean(),
+                             "Units": "C"},
+                            {"Parameter Name": f"Zone {i + 1} Min ({param})", "Value": zone_data[param].min(),
+                             "Units": "C"},
+                            {"Parameter Name": f"Zone {i + 1} Max ({param})", "Value": zone_data[param].max(),
+                             "Units": "C"}
+                        ])
+        df_csv = pd.concat([df_csv, pd.DataFrame(data_to_add)], ignore_index=True)
+        df_csv.to_csv(csv_path, index=False)
+        st.success(f"CSV '{selected_csv}' updated!")
 
-        # Select CSV file before saving
-        recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
-        selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="select_csv_update")
+    # Show raw data
+    st.write("### 🧾 Raw Data Preview")
+    st.data_editor(df, height=300, use_container_width=True)
 
-        # Proceed with the rest of the dashboard only after selecting a CSV
-        if selected_csv:
-            st.write(f"Selected CSV: {selected_csv}")
-
-            # Now, the user can click the button to save the data
-            if st.button("Save Zone's Summary after finishing mark all zones"):
-                # Prepare the data to log (e.g., good zones data) in the format you mentioned
-                data_to_add = []
-                log_file_name = selected_file  # Assuming this is the log file the user selected
-
-                # Add Log File Name to the data
-                data_to_add.append({
-                    "Parameter Name": "Log File Name",
-                    "Value": log_file_name,
-                    "Units": ""
-                })
-
-                # Iterate over the good zones and add the relevant data
-                for i, (start, end) in enumerate(st.session_state["good_zones"]):
-                    # Add Zone as a parameter
-                    data_to_add.append({
-                        "Parameter Name": f"Zone {i + 1} Start",
-                        "Value": start,
-                        "Units": ""
-                    })
-                    data_to_add.append({
-                        "Parameter Name": f"Zone {i + 1} End",
-                        "Value": end,
-                        "Units": ""
-                    })
-
-                    zone_data = df[(df["Date/Time"] >= pd.to_datetime(start)) & (df["Date/Time"] <= pd.to_datetime(end))]
-                    if not zone_data.empty:
-                        for param in ["Fibre Length", "Pf Process Position"]:
-                            if param in zone_data.columns:
-                                start_value = zone_data.iloc[0][param]
-                                end_value = zone_data.iloc[-1][param]
-                                data_to_add.append({
-                                    "Parameter Name": f"Zone {i+1} {param} at Start",
-                                    "Value": start_value,
-                                    "Units": "km" if param == "Fibre Length" else "mm"
-                                })
-                                data_to_add.append({
-                                    "Parameter Name": f"Zone {i+1} {param} at End",
-                                    "Value": end_value,
-                                    "Units": "km" if param == "Fibre Length" else "mm"
-                                })
-                        # Calculate avg, min, max for Bare Fibre Diameter, Coated Inner Diameter, and Coated Outer Diameter
-                        for param in ["Bare Fibre Diameter", "Coated Inner Diameter", "Coated Outer Diameter"]:
-                            if param in zone_data.columns:
-                                avg_value = zone_data[param].mean()
-                                min_value = zone_data[param].min()
-                                max_value = zone_data[param].max()
-                                data_to_add.append({
-                                    "Parameter Name": f"Zone {i + 1} Avg ({param})",
-                                    "Value": avg_value,
-                                    "Units": "µm"
-                                })
-                                data_to_add.append({
-                                    "Parameter Name": f"Zone {i + 1} Min ({param})",
-                                    "Value": min_value,
-                                    "Units": "µm"
-                                })
-                                data_to_add.append({
-                                    "Parameter Name": f"Zone {i + 1} Max ({param})",
-                                    "Value": max_value,
-                                    "Units": "µm"
-                                })
-
-                # Load the selected CSV
-                csv_path = os.path.join('data_set_csv', selected_csv)
-                try:
-                    df_csv = pd.read_csv(csv_path)
-                except FileNotFoundError:
-                    st.error(f"CSV file '{selected_csv}' not found.")
-                    st.stop()
-
-                # Append the new data to the CSV
-                new_rows = pd.DataFrame(data_to_add)
-                df_csv = pd.concat([df_csv, new_rows], ignore_index=True)
-
-                # Save the updated CSV
-                df_csv.to_csv(csv_path, index=False)
-                st.success(f"CSV '{selected_csv}' updated with new good zones data!")
-        else:
-            st.warning("Please select a valid CSV file before saving.")
-    # Display log data
-    st.write("### Log Data")
-    st.data_editor(df, height=300, width=1000, use_container_width=True)
-
-    # Display correlation matrix if checked
+    # Correlation matrix
     if show_corr_matrix:
-        st.write("### Correlation Matrix Heatmap")
-        numeric_df = df.select_dtypes(include=['number'])
+        st.write("### 🔗 Correlation Matrix")
+        numeric_df = df.select_dtypes(include='number')
         if not numeric_df.empty:
-            corr_matrix = numeric_df.corr()
-            fig_corr, ax_corr = plt.subplots(figsize=(12, 8))
-            sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f", linewidths=0.5, ax=ax_corr,
-                        annot_kws={"size": 8})
-            ax_corr.set_xticklabels(ax_corr.get_xticklabels(), fontsize=10, rotation=45, ha="right")
-            ax_corr.set_yticklabels(ax_corr.get_yticklabels(), fontsize=10, rotation=0)
+            fig_corr, ax = plt.subplots(figsize=(12, 6))
+            sns.heatmap(numeric_df.corr(), annot=True, cmap="coolwarm", fmt=".2f", ax=ax)
             st.pyplot(fig_corr)
         else:
-            st.warning("No numerical columns available for correlation analysis.")
+            st.warning("No numerical columns available.")
 # ------------------ Consumables Tab ------------------
 elif tab_selection == "🍃 Consumables":
     log_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv") or f.endswith(".xlsx")]
@@ -1493,6 +1356,128 @@ elif tab_selection == "📅 Schedule":
                     st.sidebar.success("Event deleted successfully!")
             else:
                 st.sidebar.info("No events available for deletion.")
+# ------------------ Draw order Tab ------------------
+elif tab_selection == "📦 Order Draw":
+    st.title("📦 Order Draw")
+
+    st.subheader("📝 Enter Draw Order Details")
+
+    # === Input Fields ===
+    order_opener = st.text_input("Order Opened By")
+    priority = st.selectbox("Priority", ["Low", "Normal", "High"])
+    fiber_type = st.text_input("Fiber Type")
+    preform_name = st.text_input("Preform Name")
+    fiber_diameter = st.number_input("Fiber Diameter (µm)", min_value=0.0)
+    diameter_main = st.number_input("Main Coating Diameter (µm)", min_value=0.0)
+    diameter_secondary = st.number_input("Secondary Coating Diameter (µm)", min_value=0.0)
+    tension = st.number_input("Tension (g)", min_value=0.0)
+    draw_speed = st.number_input("Draw Speed (m/min)", min_value=0.0)
+    length_required = st.number_input("Required Length (m)", min_value=0.0)
+    coating_main = st.text_input("Main Coating Type")
+    coating_secondary = st.text_input("Secondary Coating Type")
+    num_spools = st.number_input("Number of Spools", min_value=1, step=1)
+    desired_date = st.date_input("Desired Draw Date")
+    notes = st.text_area("Additional Notes / Instructions")
+
+    submit = st.button("📤 Submit Draw Order")
+
+    orders_file = "draw_orders.csv"
+
+    # === Save New Order ===
+    if submit:
+        order_data = {
+            "Status": "Pending",
+            "Priority": priority,
+            "Order Opener": order_opener,
+            "Preform Name": preform_name,
+            "Fiber Type": fiber_type,
+            "Timestamp": pd.Timestamp.now(),
+            "Desired Date": desired_date,
+            "Fiber Diameter (µm)": fiber_diameter,
+            "Main Coating Diameter (µm)": diameter_main,
+            "Secondary Coating Diameter (µm)": diameter_secondary,
+            "Tension (g)": tension,
+            "Draw Speed (m/min)": draw_speed,
+            "Length (m)": length_required,
+            "Main Coating": coating_main,
+            "Secondary Coating": coating_secondary,
+            "Spools": num_spools,
+            "Notes": notes
+        }
+
+        if os.path.exists(orders_file):
+            df = pd.read_csv(orders_file)
+            df = pd.concat([df, pd.DataFrame([order_data])], ignore_index=True)
+        else:
+            df = pd.DataFrame([order_data])
+
+        df.to_csv(orders_file, index=False)
+        st.success("✅ Draw order submitted!")
+
+    # === Show Existing Orders ===
+    st.subheader("📋 Existing Draw Orders")
+
+    if os.path.exists(orders_file):
+        df = pd.read_csv(orders_file)
+        df["Desired Date"] = pd.to_datetime(df["Desired Date"])
+
+        # === Fix missing columns ===
+        for col in ["Status", "Priority", "Fiber Type", "Order Opener"]:
+            if col not in df.columns:
+                df[col] = ""
+
+        # === Status Editor ===
+        st.markdown("### 🔄 Update Status for a Specific Order")
+        order_options = [f"{i}: {df.loc[i, 'Fiber Type']} | {df.loc[i, 'Timestamp']}" for i in df.index]
+        selected = st.selectbox("Select an Order", order_options)
+        selected_index = int(selected.split(":")[0])
+
+        all_statuses = ["Pending", "Failed", "Done"]
+        current_status = df.loc[selected_index, "Status"]
+        if current_status not in all_statuses:
+            all_statuses.insert(0, current_status)
+
+        new_status = st.selectbox("New Status", all_statuses, index=all_statuses.index(current_status))
+        if st.button("✅ Update Status"):
+            df.at[selected_index, "Status"] = new_status
+            df.to_csv(orders_file, index=False)
+            st.success(f"Status updated for order {selected_index}.")
+
+        # === Reorder Columns ===
+        desired_order = ["Status",
+                         "Priority",
+                         "Order Opener",
+                         "Preform Name",
+                         "Fiber Type",
+                         "Timestamp",
+                         "Desired Date",
+                         "Fiber Diameter (µm)",
+                         "Main Coating Diameter (µm)",
+                         "Secondary Coating Diameter (µm)",
+                         "Tension (g)",
+                         "Draw Speed (m/min)",
+                         "Length (m)",
+                         "Main Coating",
+                         "Secondary Coating",
+                         "Spools",
+                         "Notes"]
+        other_cols = [col for col in df.columns if col not in desired_order]
+        df = df[desired_order + other_cols]
+
+        # === Color formatting ===
+        def color_status(val):
+            return f"color: {dict(Pending='orange', InProgress='dodgerblue', Failed='red', Done='green').get(val.replace(' ', ''), 'black')}; font-weight: bold"
+
+        def color_priority(val):
+            return f"color: {dict(Low='gray', Normal='black', High='crimson').get(val, 'black')}; font-weight: bold"
+
+        styled_df = df.style.applymap(color_status, subset=["Status"]) \
+                            .applymap(color_priority, subset=["Priority"])
+
+        st.dataframe(styled_df)
+
+    else:
+        st.info("No orders submitted yet.")
 # ------------------ Closed Processes Tab ------------------
 elif tab_selection == "✅ Closed Processes":
     # Define the CLOSED_PROCESSES_FILE path
