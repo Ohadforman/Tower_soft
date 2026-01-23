@@ -1,0 +1,5 @@
+Parameter Name,Value,Units
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.12,mm

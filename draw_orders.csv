@@ -1,8 +1,7 @@
-Timestamp,Fiber Type,Length (m),Main Coating,Secondary Coating,Main Coating Diameter (µm),Secondary Coating Diameter (µm),Fiber Diameter (µm),Tension (g),Draw Speed (m/min),Spools,Preform Name,Desired Date,Priority,Notes,Status,Order Opener
-2025-05-07 09:53:43.249256,PM tiger,300.0,-,-,118.0,85.0,40.0,15.0,100.0,1,T0876,2025-05-07,Low,,Failed,
-2025-05-07 09:55:44.131455,4,0.0,4,4,0.0,0.0,0.0,0.0,0.0,1,4,2025-05-07,Low,4.0,Pending,
-2025-05-07 10:10:46.573388,f,0.0,f,f,0.0,0.0,0.0,0.0,0.0,1,f,2025-05-07,Low,f,Pending,f
-2025-05-07 10:21:12.910635,tiger 40 pm,400.0,ds,ds,85.0,122.0,40.0,20.0,100.0,1,T0111,2025-05-15,Normal,"hi
-",Pending,Ohad
-2025-05-07 10:26:07.622555,1,0.0,1,1,0.0,0.0,0.0,0.0,0.0,1,1,2025-05-07,Low,1,Pending,1
-2025-05-13 10:22:04.542539,דגל,0.0,דגכגד,דגל,0.0,0.0,0.0,0.0,0.0,1,כגדכדג,2025-05-13,Low,דגכגדכ,Pending,גדוד
+Status,Priority,Order Opener,Preform Name,Fiber Type,Timestamp,Desired Date,Fiber Diameter (µm),Main Coating Diameter (µm),Secondary Coating Diameter (µm),Tension (g),Draw Speed (m/min),Length (m),Main Coating,Secondary Coating,Spools,Notes,Done CSV,Done Description,T&M Moved,T&M Moved Timestamp
+Done,Low,,T0876,PM tiger,2025-05-07 09:53:43.249256,2025-05-07,40.0,118.0,85.0,15.0,100.0,300.0,-,-,1,,test_2.csv,dfdfd,True,2026-01-23 12:11:39.928474
+Done,Low,,4,4,2025-05-07 09:55:44.131455,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,4,4,1,4.0,,,True,2026-01-23 12:11:46.491177
+Pending,Low,f,f,f,2025-05-07 10:10:46.573388,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,f,f,1,f,,,True,2026-01-23 12:11:50.695063
+Done,Normal,Ohad,T0111,tiger 40 pm,2025-05-07 10:21:12.910635,2025-05-15,40.0,85.0,122.0,20.0,100.0,400.0,ds,ds,1,hi,,,False,
+Done,Low,1,1,1,2025-05-07 10:26:07.622555,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,1,1,1,1,Test_V2.csv,GOOD ONE,False,
+Pending,Low,גדוד,כגדכדג,דגל,2025-05-13 10:22:04.542539,2025-05-13,0.0,0.0,0.0,0.0,0.0,0.0,דגכגד,דגל,1,דגכגדכ,,,False,

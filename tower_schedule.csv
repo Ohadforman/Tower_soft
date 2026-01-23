@@ -3,4 +3,11 @@ Maintenance,2025-04-17 07:46:00,2025-04-17 18:15:00,Change coating,
 Maintenance,2025-05-08 07:52:00,2025-05-08 11:15:00,,
 Drawing,2025-05-09 07:52:00,2025-05-09 11:15:00,,
 Stop,2025-05-10 07:52:00,2025-05-12 11:15:00,,
-Management Event,2025-05-22 07:52:00,2025-05-22 11:15:00,,None
+Management Event,2025-05-22 07:52:00,2025-05-22 11:15:00,,
+Drawing,2025-05-07 09:51:00,2025-05-07 10:51:00,ORDER #0 | Priority: Low | Fiber: PM tiger | Preform: T0876 | Length: 300.0 m | Spools: 1 | Notes: nan,
+Drawing,2026-01-29 09:52:00,2026-01-29 10:52:00,ORDER #0 | Priority: Low | Fiber: PM tiger | Preform: T0876 | Length: 300.0 m | Spools: 1 | Notes: nan,
+Maintenance,2026-01-23 11:06:00,2026-01-23 11:06:00,fsdff,
+Maintenance,2026-01-31 11:08:00,2026-01-31 16:00:00,,
+Stop,2026-03-26 11:09:00,2026-03-31 11:09:00,,
+Maintenance,2026-01-22 08:00:00,2026-01-22 16:00:00,WEELEND REGULAR MAINTANANCE,Weekly
+Maintenance,2026-01-23 11:20:00,2026-01-23 17:45:00,helo,

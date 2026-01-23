@@ -2,8 +2,6 @@ import math
 import json
 from vis_ds2015 import get_viscosityDS2015, get_viscosityDP1032
 
-
-
 def load_config():
     """Loads the configuration from the JSON file."""
     with open('config_coating.json') as config_file:
