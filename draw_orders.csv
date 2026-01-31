@@ -1,7 +1,15 @@
-Status,Priority,Order Opener,Preform Name,Fiber Type,Timestamp,Desired Date,Fiber Diameter (µm),Main Coating Diameter (µm),Secondary Coating Diameter (µm),Tension (g),Draw Speed (m/min),Length (m),Main Coating,Secondary Coating,Spools,Notes,Done CSV,Done Description,T&M Moved,T&M Moved Timestamp
-Done,Low,,T0876,PM tiger,2025-05-07 09:53:43.249256,2025-05-07,40.0,118.0,85.0,15.0,100.0,300.0,-,-,1,,test_2.csv,dfdfd,True,2026-01-23 12:11:39.928474
-Done,Low,,4,4,2025-05-07 09:55:44.131455,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,4,4,1,4.0,,,True,2026-01-23 12:11:46.491177
-Pending,Low,f,f,f,2025-05-07 10:10:46.573388,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,f,f,1,f,,,True,2026-01-23 12:11:50.695063
-Done,Normal,Ohad,T0111,tiger 40 pm,2025-05-07 10:21:12.910635,2025-05-15,40.0,85.0,122.0,20.0,100.0,400.0,ds,ds,1,hi,,,False,
-Done,Low,1,1,1,2025-05-07 10:26:07.622555,2025-05-07,0.0,0.0,0.0,0.0,0.0,0.0,1,1,1,1,Test_V2.csv,GOOD ONE,False,
-Pending,Low,גדוד,כגדכדג,דגל,2025-05-13 10:22:04.542539,2025-05-13,0.0,0.0,0.0,0.0,0.0,0.0,דגכגד,דגל,1,דגכגדכ,,,False,
+Status,Priority,Order Opener,Preform Number,Fiber Project,Timestamp,Fiber Diameter (µm),Main Coating Diameter (µm),Secondary Coating Diameter (µm),Tension (g),Draw Speed (m/min),Required Length (m) (for T&M+costumer),Good Zones Count (required length zones),Main Coating,Secondary Coating,Notes,Active CSV,Done CSV,Done Description,Desired Date,Length (m),Spools,Fiber name and number,Preform Name,Fiber Type,T&M Moved,T&M Moved Timestamp,Preform Length After Draw (m),Preform Length After Draw (cm)
+Done,Low,OHAD,P0888,,2026-01-24 21:49:31.464144,0.0,0.0,0.0,0.0,0.0,0.0,1,sd,sd,sada,FP0888_1.csv,FP0888_1.csv,ALL GOOD,2026-01-24,0.0,1.0,TMM,,,True,2026-01-24 21:53:44,,
+Done,Low,OHAD,T0678,,2026-01-24 21:55:50.965936,0.0,0.0,0.0,0.0,0.0,0.0,1,,,,FT0678_1.csv,FT0678_1.csv,hello,2026-01-24,0.0,1.0,TMM TIGER,,,True,2026-01-31 09:11:45,,15.0
+Done,Low,OHAD,T0123,TMM,2026-01-24 22:06:46.993318,0.0,0.0,0.0,0.0,0.0,0.0,1,df,pdf,,FT0123_1.csv,FT0123_1.csv,TEST 2,2026-01-24,0.0,1.0,,,,True,2026-01-24 22:32:03,,
+Done,Low,OHAD,P0111,LARA,2026-01-24 22:27:35.582901,0.0,0.0,0.0,0.0,0.0,0.0,1,,,,FP0111_1.csv,FP0111_1.csv,HELLO ITS TEST,2026-01-24,0.0,1.0,,,,True,2026-01-24 22:32:05,,
+Done,Low,OHAD,T071,TMM,2026-01-25 13:25:39.268697,0.0,0.0,0.0,0.0,0.0,0.0,1,,,UV,FT071_1.csv,FT071_1.csv,JFJFJFJFJ,2026-01-25,0.0,1.0,,,,True,2026-01-25 13:28:07,,
+Done,Low,OHAD,T071,TMM,2026-01-25 13:53:51.795870,0.0,0.0,0.0,0.0,0.0,0.0,1,kf,egg,,FT071_2.csv,FT071_2.csv,dfghfdhfghgf,2026-01-25,0.0,1.0,,,,True,2026-01-25 14:30:04,,
+Done,Low,Ohad,T072,TAMAM,2026-01-29 02:20:57.729085,0.0,0.0,0.0,0.0,0.0,0.0,1,,,,FT072_1.csv,FT072_1.csv,אקרא אקדח,2026-01-29,0.0,1.0,,,,True,2026-01-30 13:28:27,,
+Done,Low,Oישג,T010,TMM,2026-01-30 19:18:35.832688,500.0,0.0,0.0,0.0,0.0,0.0,1,דג,דג,דגדג,FT010_1.csv,FT010_1.csv,Hello again this is for check for the length,2026-01-30,0.0,1.0,,,,True,2026-01-31 07:45:53,0.1,2.5
+Done,Low,Ohad,P00000,NEW SOF,2026-01-31 07:46:49.371729,0.0,0.0,0.0,0.0,0.0,0.0,1,OF136,DS2015,nothing to add,FP00000_1.csv,FP00000_1.csv,did,2026-01-31,0.0,1.0,,,,True,2026-01-31 10:08:34,,132.0
+Done,Low,Ohad,P00011,TEST SOF,2026-01-31 07:51:50.409405,0.0,0.0,0.0,0.0,0.0,0.0,1,DCOF,chi,not,FP00011_1.csv,FP00011_1.csv,hello,2026-01-31,0.0,1.0,,,,True,2026-01-31 09:59:18,,15.0
+Done,Low,OHAD,P012345,TEST,2026-01-31 10:14:26.744762,0.0,0.0,0.0,0.0,0.0,0.0,1,ds,sd,sods,FP012345_1.csv,FP012345_1.csv,OK,2026-01-31,0.0,1.0,,,,True,2026-01-31 10:19:03,,20.0
+Done,Low,Ohad,P01,TEST,2026-01-31 10:20:37.432687,123.0,123.0,0.0,0.0,0.0,500.0,1,isa,sad,Hello,FP01_1.csv,FP01_1.csv,OK,2026-01-31,500.0,1.0,,,,True,2026-01-31 11:51:12,,25.0
+Done,Low,R,T777,TMM,2026-01-31 12:05:49.897767,0.0,0.0,0.0,0.0,0.0,0.0,1,הדג,דגדג,גדכגדכד,FT777_1.csv,FT777_1.csv,ALL GOOD,2026-01-31,0.0,1.0,,,,True,2026-01-31 13:40:40,,20.0
+Done,Normal,O,P0555,TAT,2026-01-31 13:07:40.178102,0.0,0.0,0.0,0.0,0.0,500.0,1,,,,FP0555_1.csv,FP0555_1.csv,אא,,,,,,,True,2026-01-31 13:44:44,,34.0
