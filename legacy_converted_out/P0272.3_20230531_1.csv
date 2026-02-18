@@ -1,0 +1,38 @@
+Parameter Name,Value,Units
+Draw Name,P0272.3F_1,
+Draw Date,2023-05-31 12:00:00,
+Process Setup Timestamp,2023-05-31 12:00:00,
+Priority,Normal,
+Order Index,,
+Fiber Project,,
+Order Opener,,
+Fiber Geometry Type,PM,
+Tiger Cut (%),0.0,%
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+Octagonal Preform,0,bool
+Octagonal F2F (mm),0.0,mm
+PM Iris System,1,bool
+Iris Mode,Manual,
+Selected Iris Diameter,35.0,mm
+Main Coating,OF-136,
+Secondary Coating,DS-2015,
+Main Coating Temperature (°C),,°C
+Secondary Coating Temperature (°C),,°C
+Done Description,OK,
+Done Timestamp,2023-05-31 13:00:00,
+Preform Number,P0272.3,
+Order Notes,400 - PM - Failed,
+Tension (g),25,g
+Draw Speed (m/min),13,m/min
+Fiber Diameter (µm),400,µm
+Entry Fiber Diameter (µm),400,µm
+Main Coating Diameter (µm),475,µm
+Secondary Coating Diameter (µm),560,µm
+Preform Shape,PM,
+Preform Diameter,28,mm
+Total Good Fiber Length (m),0,m
+Good fiber 3,0,m
+Required Length (m) (for T&M+costumer),all,m
+Good Zones Count,0,count
+Good Zones X Column,Fibre Length,

@@ -1,0 +1,90 @@
+Parameter Name,Value,Units
+Draw Name,P0414F_1,
+Draw Date,2023-09-10 12:00:00,
+Process Setup Timestamp,2023-09-10 12:00:00,
+Priority,Normal,
+Order Index,,
+Fiber Project,,
+Order Opener,,
+Fiber Geometry Type,Octagonal,
+Tiger Cut (%),0.0,%
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+Octagonal Preform,1,bool
+Octagonal F2F (mm),24.5,mm
+PM Iris System,0,bool
+Iris Mode,Manual,
+Selected Iris Diameter,30.0,mm
+Main Coating,OF-136,
+Secondary Coating,DS-2015,
+Main Coating Temperature (°C),,°C
+Secondary Coating Temperature (°C),,°C
+Done Description,,
+Done Timestamp,2023-09-10 13:00:00,
+Preform Number,P0414,
+Order Notes,400 - Octa,
+Tension (g),60,g
+Draw Speed (m/min),20,m/min
+Tension Actual (g),63,g
+Draw Speed Actual (m/min),19.5,m/min
+Fiber Diameter (µm),400,µm
+Entry Fiber Diameter (µm),400,µm
+Main Coating Diameter (µm),475,µm
+Secondary Coating Diameter (µm),560,µm
+Furnace DegC Set,2075,°C
+Preform Shape,Octagonal,
+Preform Diameter,24.5,mm
+Total Fiber Length (m),1537,m
+Total Good Fiber Length (m),948,m
+Cut 1,10,m
+Good fiber 1,159,m
+Cut 2,112,m
+Good fiber 2,789,m
+Good fiber 3,0,m
+Required Length (m) (for T&M+costumer),all,m
+Good Zones Count,2,count
+Good Zones X Column,Fibre Length,
+Zone 1 Start,legacy_fibre_km=0.46,index/label
+Zone 1 End,legacy_fibre_km=1.249,index/label
+Good Zone 1 (km from end) Start,0.2879999999999998,km
+Good Zone 1 (km from end) End,1.077,km
+Good Zone 1 Length,0.7890000000000001,km
+Good Zone 1 Fibre Length Min,0.46,km
+Good Zone 1 Fibre Length Max,1.249,km
+Marked Zone 1 Avg - Bare Fibre Diameter,400.0,
+Marked Zone 1 Min - Bare Fibre Diameter,400.0,
+Marked Zone 1 Max - Bare Fibre Diameter,400.0,
+Marked Zone 1 Avg - Furnace DegC Actual,2075.0,
+Marked Zone 1 Min - Furnace DegC Actual,2075.0,
+Marked Zone 1 Max - Furnace DegC Actual,2075.0,
+Marked Zone 1 Avg - Capstan Speed,19.5,
+Marked Zone 1 Min - Capstan Speed,19.5,
+Marked Zone 1 Max - Capstan Speed,19.5,
+Marked Zone 1 Avg - Tension N,63.0,g
+Marked Zone 1 Min - Tension N,63.0,g
+Marked Zone 1 Max - Tension N,63.0,g
+Marked Zone 1 Avg - Pf Process Position,250.10999999999999,cm
+Marked Zone 1 Min - Pf Process Position,137.38,cm
+Marked Zone 1 Max - Pf Process Position,362.84,cm
+Zone 2 Start,legacy_fibre_km=1.361,index/label
+Zone 2 End,legacy_fibre_km=1.52,index/label
+Good Zone 2 (km from end) Start,0.016999999999999904,km
+Good Zone 2 (km from end) End,0.17599999999999993,km
+Good Zone 2 Length,0.15900000000000003,km
+Good Zone 2 Fibre Length Min,1.361,km
+Good Zone 2 Fibre Length Max,1.52,km
+Marked Zone 2 Avg - Bare Fibre Diameter,400.0,
+Marked Zone 2 Min - Bare Fibre Diameter,400.0,
+Marked Zone 2 Max - Bare Fibre Diameter,400.0,
+Marked Zone 2 Avg - Furnace DegC Actual,2075.0,
+Marked Zone 2 Min - Furnace DegC Actual,2075.0,
+Marked Zone 2 Max - Furnace DegC Actual,2075.0,
+Marked Zone 2 Avg - Capstan Speed,19.5,
+Marked Zone 2 Min - Capstan Speed,19.5,
+Marked Zone 2 Max - Capstan Speed,19.5,
+Marked Zone 2 Avg - Tension N,63.0,g
+Marked Zone 2 Min - Tension N,63.0,g
+Marked Zone 2 Max - Tension N,63.0,g
+Marked Zone 2 Avg - Pf Process Position,417.15,cm
+Marked Zone 2 Min - Pf Process Position,394.74,cm
+Marked Zone 2 Max - Pf Process Position,439.56,cm

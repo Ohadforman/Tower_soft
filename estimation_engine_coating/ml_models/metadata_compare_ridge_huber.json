@@ -1,0 +1,120 @@
+{
+  "trained_at": "2026-02-06 05:33:46",
+  "train_table": "training_table.csv",
+  "rows_main": 60,
+  "rows_secondary": 60,
+  "features": {
+    "main": {
+      "num": [
+        "speed_m_min",
+        "tension_g",
+        "furnace_temp_c",
+        "main_coat_temp_c",
+        "sec_coat_temp_c",
+        "bare_fiber_um",
+        "speed_over_tension",
+        "delta_furnace",
+        "delta_main_coat_temp",
+        "delta_sec_coat_temp"
+      ],
+      "cat": [
+        "main_coating_type",
+        "sec_coating_type"
+      ]
+    },
+    "secondary": {
+      "num": [
+        "speed_m_min",
+        "tension_g",
+        "furnace_temp_c",
+        "main_coat_temp_c",
+        "sec_coat_temp_c",
+        "bare_fiber_um",
+        "speed_over_tension",
+        "delta_furnace",
+        "delta_main_coat_temp",
+        "delta_sec_coat_temp",
+        "D_main_th_um_as_feat"
+      ],
+      "cat": [
+        "main_coating_type",
+        "sec_coating_type"
+      ]
+    }
+  },
+  "clamp_predicted_residual_um": {
+    "main": {
+      "low": -2.8488020000000027,
+      "high": 3.9307269999999934,
+      "pct": [
+        1.0,
+        99.0
+      ]
+    },
+    "secondary": {
+      "low": -1.9898810000000255,
+      "high": 3.8514459999999873,
+      "pct": [
+        1.0,
+        99.0
+      ]
+    }
+  },
+  "nominal_used_for_deltas": {
+    "furnace_temp_c": 1900.0,
+    "main_coat_temp_c": 45.0,
+    "sec_coat_temp_c": 45.0
+  },
+  "results": {
+    "ridge": {
+      "main": {
+        "model_type": "ridge",
+        "alpha": 3.0,
+        "loo_residual_mae": 0.7456686430064402,
+        "baseline_diam_mae": 1.3924166666666693,
+        "corrected_diam_mae": 0.7456686430064418,
+        "improvement_pct": 46.44788008811249
+      },
+      "secondary": {
+        "model_type": "ridge",
+        "alpha": 10.0,
+        "loo_residual_mae": 0.9636217719764588,
+        "baseline_diam_mae": 1.384398333333334,
+        "corrected_diam_mae": 0.9636217719764593,
+        "improvement_pct": 30.394182889814314
+      }
+    },
+    "huber": {
+      "main": {
+        "model_type": "huber",
+        "alpha": null,
+        "loo_residual_mae": 0.8034663751859259,
+        "baseline_diam_mae": 1.3924166666666693,
+        "corrected_diam_mae": 0.8034663751859237,
+        "improvement_pct": 42.29698664054661
+      },
+      "secondary": {
+        "model_type": "huber",
+        "alpha": null,
+        "loo_residual_mae": 1.042002491412989,
+        "baseline_diam_mae": 1.384398333333334,
+        "corrected_diam_mae": 1.0420024914129897,
+        "improvement_pct": 24.732465626127176
+      }
+    }
+  },
+  "best_by_corrected_diameter_mae": {
+    "main": "ridge",
+    "secondary": "ridge"
+  },
+  "model_files": {
+    "ridge": {
+      "main": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/ridge_residual_main.joblib",
+      "secondary": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/ridge_residual_secondary.joblib"
+    },
+    "huber": {
+      "main": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/huber_residual_main.joblib",
+      "secondary": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/huber_residual_secondary.joblib"
+    }
+  }
+}

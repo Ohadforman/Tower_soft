@@ -1,0 +1,94 @@
+{
+  "trained_at": "2026-02-06 05:21:37",
+  "model_type": "ridge",
+  "train_table": "training_table.csv",
+  "rows_main": 60,
+  "rows_secondary": 60,
+  "targets": {
+    "main": "residual_main_um",
+    "secondary": "residual_sec_um"
+  },
+  "features": {
+    "main": {
+      "num": [
+        "speed_m_min",
+        "tension_g",
+        "furnace_temp_c",
+        "main_coat_temp_c",
+        "sec_coat_temp_c",
+        "bare_fiber_um",
+        "speed_over_tension",
+        "delta_furnace",
+        "delta_main_coat_temp",
+        "delta_sec_coat_temp"
+      ],
+      "cat": [
+        "main_coating_type",
+        "sec_coating_type"
+      ]
+    },
+    "secondary": {
+      "num": [
+        "speed_m_min",
+        "tension_g",
+        "furnace_temp_c",
+        "main_coat_temp_c",
+        "sec_coat_temp_c",
+        "bare_fiber_um",
+        "speed_over_tension",
+        "delta_furnace",
+        "delta_main_coat_temp",
+        "delta_sec_coat_temp",
+        "D_main_th_um_as_feat"
+      ],
+      "cat": [
+        "main_coating_type",
+        "sec_coating_type"
+      ]
+    }
+  },
+  "ridge_alpha": {
+    "main": 3.0,
+    "secondary": 10.0
+  },
+  "cv": {
+    "method": "LeaveOneOut",
+    "residual_mae_um": {
+      "main": 0.7456686430064402,
+      "secondary": 0.9636217719764588
+    },
+    "diameter_mae_um": {
+      "main_baseline_theory": 1.3924166666666693,
+      "main_corrected": 0.7456686430064418,
+      "secondary_baseline_theory": 1.384398333333334,
+      "secondary_corrected": 0.9636217719764593
+    },
+    "diameter_improvement_pct": {
+      "main": 46.44788008811249,
+      "secondary": 30.394182889814314
+    }
+  },
+  "clamp_predicted_residual_um": {
+    "main": {
+      "low": -2.8488020000000027,
+      "high": 3.9307269999999934,
+      "pct": [
+        1.0,
+        99.0
+      ]
+    },
+    "secondary": {
+      "low": -1.9898810000000255,
+      "high": 3.8514459999999873,
+      "pct": [
+        1.0,
+        99.0
+      ]
+    }
+  },
+  "nominal_used_for_deltas": {
+    "furnace_temp_c": 1900.0,
+    "main_coat_temp_c": 45.0,
+    "sec_coat_temp_c": 45.0
+  }
+}

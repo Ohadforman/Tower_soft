@@ -1,0 +1,68 @@
+Parameter Name,Value,Units
+Draw Name,P0264.2F_1,
+Draw Date,2023-01-24 12:00:00,
+Process Setup Timestamp,2023-01-24 12:00:00,
+Priority,Normal,
+Order Index,,
+Fiber Project,,
+Order Opener,,
+Fiber Geometry Type,PM,
+Tiger Cut (%),0.0,%
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+Octagonal Preform,0,bool
+Octagonal F2F (mm),0.0,mm
+PM Iris System,1,bool
+Iris Mode,Manual,
+Selected Iris Diameter,37.0,mm
+Main Coating,OF-136,
+Secondary Coating,DS-2015,
+Main Coating Temperature (°C),,°C
+Secondary Coating Temperature (°C),,°C
+Done Description,OK,
+Done Timestamp,2023-01-24 13:00:00,
+Preform Number,P0264.2,
+Order Notes,125 - PM,
+Tension (g),25,g
+Draw Speed (m/min),25,m/min
+Tension Actual (g),17-18,g
+Draw Speed Actual (m/min),22-23,m/min
+Fiber Diameter (µm),125,µm
+Entry Fiber Diameter (µm),125,µm
+Main Coating Diameter (µm),167,µm
+Secondary Coating Diameter (µm),260,µm
+Furnace DegC Set,1960,°C
+Preform Shape,PM,
+Preform Diameter,22,mm
+Total Fiber Length (m),3565,m
+Total Good Fiber Length (m),3565,m
+Cut 1,17,m
+Good fiber 1,3565,m
+Cut 2,-,m
+Good fiber 2,0,m
+Good fiber 3,0,m
+Required Length (m) (for T&M+costumer),all,m
+Good Zones Count,1,count
+Good Zones X Column,Fibre Length,
+Zone 1 Start,legacy_fibre_km=0.1,index/label
+Zone 1 End,legacy_fibre_km=3.665,index/label
+Good Zone 1 (km from end) Start,0.0,km
+Good Zone 1 (km from end) End,3.465,km
+Good Zone 1 Length,3.465,km
+Good Zone 1 Fibre Length Min,0.1,km
+Good Zone 1 Fibre Length Max,3.665,km
+Marked Zone 1 Avg - Bare Fibre Diameter,125.0,
+Marked Zone 1 Min - Bare Fibre Diameter,125.0,
+Marked Zone 1 Max - Bare Fibre Diameter,125.0,
+Marked Zone 1 Avg - Furnace DegC Actual,1960.0,
+Marked Zone 1 Min - Furnace DegC Actual,1960.0,
+Marked Zone 1 Max - Furnace DegC Actual,1960.0,
+Marked Zone 1 Avg - Capstan Speed,22.0,
+Marked Zone 1 Min - Capstan Speed,22.0,
+Marked Zone 1 Max - Capstan Speed,22.0,
+Marked Zone 1 Avg - Tension N,17.0,g
+Marked Zone 1 Min - Tension N,17.0,g
+Marked Zone 1 Max - Tension N,17.0,g
+Marked Zone 1 Avg - Pf Process Position,106.99000000000001,cm
+Marked Zone 1 Min - Pf Process Position,43.62,cm
+Marked Zone 1 Max - Pf Process Position,170.36,cm

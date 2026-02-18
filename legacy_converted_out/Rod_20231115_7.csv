@@ -1,0 +1,46 @@
+Parameter Name,Value,Units
+Draw Name,RodF_7,
+Draw Date,2023-11-15 12:00:00,
+Process Setup Timestamp,2023-11-15 12:00:00,
+Priority,Normal,
+Order Index,,
+Fiber Project,,
+Order Opener,,
+Fiber Geometry Type,Round,
+Tiger Cut (%),0.0,%
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+Octagonal Preform,0,bool
+Octagonal F2F (mm),0.0,mm
+PM Iris System,0,bool
+Iris Mode,Manual,
+Selected Iris Diameter,33.0,mm
+Main Coating,OF-136,
+Secondary Coating,DS-2015,
+Main Coating Temperature (°C),,°C
+Secondary Coating Temperature (°C),,°C
+Done Description,OK,
+Done Timestamp,2023-11-15 13:00:00,
+Preform Number,Rod,
+Order Notes,250 - Traning + Run Test,
+Tension (g),60,g
+Draw Speed (m/min),30,m/min
+Tension Actual (g),60,g
+Draw Speed Actual (m/min),30,m/min
+Fiber Diameter (µm),250,µm
+Entry Fiber Diameter (µm),250,µm
+Main Coating Diameter (µm),315,µm
+Secondary Coating Diameter (µm),375,µm
+Furnace DegC Set,2045,°C
+Preform Shape,Round,
+Preform Diameter,29,mm
+Total Fiber Length (m),100,m
+Total Good Fiber Length (m),0,m
+Cut 1,-,m
+Good fiber 1,0,m
+Cut 2,-,m
+Good fiber 2,0,m
+Good fiber 3,0,m
+Required Length (m) (for T&M+costumer),-,m
+Good Zones Count,0,count
+Good Zones X Column,Fibre Length,

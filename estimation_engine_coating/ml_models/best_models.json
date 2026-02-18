@@ -1,0 +1,11 @@
+{
+  "best": {
+    "main": "ridge",
+    "secondary": "ridge"
+  },
+  "use_files": {
+    "main": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/ridge_residual_main.joblib",
+    "secondary": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/ridge_residual_secondary.joblib"
+  },
+  "metadata_compare": "/Users/ohadformanair/PycharmProjects/Tower_work/estimation_engine_coating/ml_models/metadata_compare_ridge_huber.json"
+}

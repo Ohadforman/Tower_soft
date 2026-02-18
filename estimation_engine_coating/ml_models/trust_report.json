@@ -1,0 +1,88 @@
+{
+  "created_at": "2026-02-06 05:53:25",
+  "dataset_dir": "../data_set_csv",
+  "only_prefix": "FAKE",
+  "total_files": 60,
+  "parsed_files": 60,
+  "failed_files": 0,
+  "windows": [
+    {
+      "window": 10,
+      "n": 10,
+      "main": {
+        "n_with_improvement_um": 10,
+        "n_with_verdict": 10,
+        "pct_improved": 80.0,
+        "pct_worse": 20.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 0.7584307,
+        "median_improvement_um": 0.2878,
+        "best_improvement_um": 2.833633,
+        "worst_improvement_um": -0.307416
+      },
+      "secondary": {
+        "n_with_improvement_um": 10,
+        "n_with_verdict": 10,
+        "pct_improved": 100.0,
+        "pct_worse": 0.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 1.2426254,
+        "median_improvement_um": 1.093684,
+        "best_improvement_um": 3.670339,
+        "worst_improvement_um": 0.035936
+      }
+    },
+    {
+      "window": 20,
+      "n": 20,
+      "main": {
+        "n_with_improvement_um": 20,
+        "n_with_verdict": 20,
+        "pct_improved": 85.0,
+        "pct_worse": 15.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 0.7852410999999999,
+        "median_improvement_um": 0.399895,
+        "best_improvement_um": 3.930727,
+        "worst_improvement_um": -0.307416
+      },
+      "secondary": {
+        "n_with_improvement_um": 20,
+        "n_with_verdict": 20,
+        "pct_improved": 80.0,
+        "pct_worse": 20.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 0.78061005,
+        "median_improvement_um": 0.5355639999999999,
+        "best_improvement_um": 3.670339,
+        "worst_improvement_um": -0.969903
+      }
+    },
+    {
+      "window": 50,
+      "n": 50,
+      "main": {
+        "n_with_improvement_um": 50,
+        "n_with_verdict": 50,
+        "pct_improved": 80.0,
+        "pct_worse": 20.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 0.7914574799999999,
+        "median_improvement_um": 0.618406,
+        "best_improvement_um": 3.930727,
+        "worst_improvement_um": -1.160024
+      },
+      "secondary": {
+        "n_with_improvement_um": 50,
+        "n_with_verdict": 50,
+        "pct_improved": 80.0,
+        "pct_worse": 20.0,
+        "pct_same": 0.0,
+        "mean_improvement_um": 0.6547209600000002,
+        "median_improvement_um": 0.3711585,
+        "best_improvement_um": 3.670339,
+        "worst_improvement_um": -1.64883
+      }
+    }
+  ]
+}

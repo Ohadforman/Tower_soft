@@ -1,0 +1,3 @@
+maintenance_id,maintenance_ts,maintenance_component,maintenance_task,maintenance_task_id,maintenance_mode,maintenance_hours_source,maintenance_done_date,maintenance_done_hours,maintenance_done_draw,maintenance_source_file,maintenance_actor,maintenance_note
+1770830174587,2026-02-11 19:16:14,Bare Fibre Diameter Gauge,Align bare fibre diameter gauge to fibre line using tightened line,ALGN-003,event,nan,2026-02-11,,,TowerAlignment_Maintenance_Tracker_Template.xlsx,,
+1770834663031,2026-02-11 20:31:03,63mm Furnace System,Before operation: check top sleeve + water-cooled top ring for soot; clean if needed,FUR-MNT-002,event,FURNACE,2026-02-11,1006.0,,Furnace63_Maintenance_Tracker_Template.xlsx,,

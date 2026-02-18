@@ -1,0 +1,9 @@
+{
+  "current_date": "2026-02-14",
+  "furnace_hours": 1007.0,
+  "uv1_hours": 200.0,
+  "uv2_hours": 200.0,
+  "warn_days": 7,
+  "warn_hours": 20.0,
+  "last_draw_count": 44
+}

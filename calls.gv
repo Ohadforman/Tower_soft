@@ -1,0 +1,59 @@
+digraph G {
+concentrate=true;
+splines="ortho";
+rankdir="LR";
+subgraph legend{
+    rank = min;
+    label = "legend";
+    Legend [shape=none, margin=0, label = <
+        <table cellspacing="0" cellpadding="0" border="1"><tr><td>Code2flow Legend</td></tr><tr><td>
+        <table cellspacing="0">
+        <tr><td>Regular function</td><td width="50px" bgcolor='#cccccc'></td></tr>
+        <tr><td>Trunk function (nothing calls this)</td><td bgcolor='#966F33'></td></tr>
+        <tr><td>Leaf function (this calls nothing else)</td><td bgcolor='#6db33f'></td></tr>
+        <tr><td>Function call</td><td><font color='black'>&#8594;</font></td></tr>
+        </table></td></tr></table>
+        >];
+}node_98b2a451 [label="0: (global)()" name="dash_try::(global)" shape="rect" style="rounded,filled" fillcolor="#966F33" ];
+node_58f60146 [label="4933: _ensure_cols()" name="dash_try::_ensure_cols" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_1695035b [label="631: _parse_zones_from_params()" name="dash_try::_parse_zones_from_params" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_14cb7a01 [label="617: _read_dataset_params_csv_for_log()" name="dash_try::_read_dataset_params_csv_for_log" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_f7cc29f6 [label="4942: auto_move_failed_to_pending()" name="dash_try::auto_move_failed_to_pending" shape="rect" style="rounded,filled" fillcolor="#cccccc" ];
+node_9abfd568 [label="1128: calculate_coated_diameter_um()" name="dash_try::calculate_coated_diameter_um" shape="rect" style="rounded,filled" fillcolor="#966F33" ];
+node_197eee40 [label="417: calculate_coating_thickness()" name="dash_try::calculate_coating_thickness" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_74148c32 [label="5125: compute_maintenance_counts_for_home()" name="dash_try::compute_maintenance_counts_for_home" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_c6427a69 [label="4666: decrement_sap_rods_set_by_one()" name="dash_try::decrement_sap_rods_set_by_one" shape="rect" style="rounded,filled" fillcolor="#966F33" ];
+node_d1d8d284 [label="4653: ensure_sap_inventory_file()" name="dash_try::ensure_sap_inventory_file" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_c93dd592 [label="4311: render_done_home_section()" name="dash_try::render_done_home_section" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_e346ebf1 [label="4983: render_failed_home_popup()" name="dash_try::render_failed_home_popup" shape="rect" style="rounded,filled" fillcolor="#cccccc" ];
+node_43d9d5f5 [label="2849: render_faults_section()" name="dash_try::render_faults_section" shape="rect" style="rounded,filled" fillcolor="#966F33" ];
+node_8970c4e2 [label="715: render_home_draw_orders_overview()" name="dash_try::render_home_draw_orders_overview" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_ea63c91b [label="1405: render_parts_orders_home_all()" name="dash_try::render_parts_orders_home_all" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_6e6b3e28 [label="1152: render_schedule_home_minimal()" name="dash_try::render_schedule_home_minimal" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_a334d67b [label="3262: render_tm_drum_fiber_visual_from_csv()" name="dash_try::render_tm_drum_fiber_visual_from_csv" shape="rect" style="rounded,filled" fillcolor="#6db33f" ];
+node_22144b39 [label="3388: render_tm_home_section()" name="dash_try::render_tm_home_section" shape="rect" style="rounded,filled" fillcolor="#966F33" ];
+node_98b2a451 -> node_1695035b [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_14cb7a01 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_f7cc29f6 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_74148c32 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_c93dd592 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_e346ebf1 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_8970c4e2 [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_ea63c91b [color="#E69F00" penwidth="2"];
+node_98b2a451 -> node_6e6b3e28 [color="#E69F00" penwidth="2"];
+node_f7cc29f6 -> node_58f60146 [color="#D55E00" penwidth="2"];
+node_9abfd568 -> node_197eee40 [color="#000000" penwidth="2"];
+node_c6427a69 -> node_d1d8d284 [color="#E69F00" penwidth="2"];
+node_e346ebf1 -> node_58f60146 [color="#E69F00" penwidth="2"];
+node_43d9d5f5 -> node_58f60146 [color="#0072B2" penwidth="2"];
+node_43d9d5f5 -> node_58f60146 [color="#0072B2" penwidth="2"];
+node_43d9d5f5 -> node_58f60146 [color="#0072B2" penwidth="2"];
+node_22144b39 -> node_a334d67b [color="#E69F00" penwidth="2"];
+subgraph cluster_3bc7b044 {
+    node_197eee40 node_14cb7a01 node_1695035b node_8970c4e2 node_9abfd568 node_6e6b3e28 node_ea63c91b node_43d9d5f5 node_a334d67b node_22144b39 node_c93dd592 node_d1d8d284 node_c6427a69 node_58f60146 node_f7cc29f6 node_e346ebf1 node_74148c32 node_98b2a451;
+    label="File: dash_try";
+    name="dash_try";
+    style="filled";
+    graph[style=dotted];
+};
+}

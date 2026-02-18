@@ -1,0 +1,39 @@
+{
+  "FP0111_2.csv": {
+    "1": true
+  },
+  "FT055555_1.csv": {
+    "1": true,
+    "2": true,
+    "3": true,
+    "4": true,
+    "5": true
+  },
+  "FTT111_1.csv": {
+    "1": false,
+    "2": false,
+    "3": false,
+    "4": false
+  },
+  "FTT00_1.csv": {
+    "1": false,
+    "2": false,
+    "3": false,
+    "4": false,
+    "5": false,
+    "6": false
+  },
+  "FTT999_1.csv": {
+    "1": false,
+    "2": false,
+    "3": false,
+    "4": false
+  },
+  "FTT666_1.csv": {
+    "1": false,
+    "2": false,
+    "3": false,
+    "4": false,
+    "5": false
+  }
+}

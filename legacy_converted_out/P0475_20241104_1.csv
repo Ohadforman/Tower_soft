@@ -1,0 +1,69 @@
+Parameter Name,Value,Units
+Draw Name,P0475F_1,
+Draw Date,2024-11-04 12:00:00,
+Process Setup Timestamp,2024-11-04 12:00:00,
+Priority,Normal,
+Order Index,,
+Fiber Project,,
+Order Opener,,
+Fiber Geometry Type,Round,
+Tiger Cut (%),0.0,%
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+Octagonal Preform,0,bool
+Octagonal F2F (mm),0.0,mm
+PM Iris System,0,bool
+Iris Mode,Manual,
+Selected Iris Diameter,32.0,mm
+Main Coating,OF-136,
+Secondary Coating,DS-2015,
+Main Coating Temperature (°C),,°C
+Secondary Coating Temperature (°C),,°C
+Done Description,,
+Done Timestamp,2024-11-04 13:00:00,
+Preform Number,P0475,
+Order Notes,400 - Active,
+Tension (g),60,g
+Draw Speed (m/min),20,m/min
+Tension Actual (g),59.04,g
+Draw Speed Actual (m/min),19.9,m/min
+Fiber Diameter (µm),400,µm
+Entry Fiber Diameter (µm),400,µm
+Main Coating Diameter (µm),475,µm
+Secondary Coating Diameter (µm),560,µm
+Furnace DegC Set,2156,°C
+Preform Shape,Round,
+Preform Diameter,26.5,mm
+Total Fiber Length (m),869,m
+Total Good Fiber Length (m),169,m
+Cut 1,48,m
+Good fiber 1,169,m
+Cut 2,-,m
+Good fiber 2,0,m
+Cut 3,-,m
+Good fiber 3,0,m
+Required Length (m) (for T&M+costumer),150,m
+Good Zones Count,1,count
+Good Zones X Column,Fibre Length,
+Zone 1 Start,legacy_fibre_km=0.652,index/label
+Zone 1 End,legacy_fibre_km=0.821,index/label
+Good Zone 1 (km from end) Start,0.04800000000000004,km
+Good Zone 1 (km from end) End,0.21699999999999997,km
+Good Zone 1 Length,0.16899999999999993,km
+Good Zone 1 Fibre Length Min,0.652,km
+Good Zone 1 Fibre Length Max,0.821,km
+Marked Zone 1 Avg - Bare Fibre Diameter,400.0,
+Marked Zone 1 Min - Bare Fibre Diameter,400.0,
+Marked Zone 1 Max - Bare Fibre Diameter,400.0,
+Marked Zone 1 Avg - Furnace DegC Actual,2156.0,
+Marked Zone 1 Min - Furnace DegC Actual,2156.0,
+Marked Zone 1 Max - Furnace DegC Actual,2156.0,
+Marked Zone 1 Avg - Capstan Speed,19.9,
+Marked Zone 1 Min - Capstan Speed,19.9,
+Marked Zone 1 Max - Capstan Speed,19.9,
+Marked Zone 1 Avg - Tension N,59.04,g
+Marked Zone 1 Min - Tension N,59.04,g
+Marked Zone 1 Max - Tension N,59.04,g
+Marked Zone 1 Avg - Pf Process Position,186.085,cm
+Marked Zone 1 Min - Pf Process Position,166.71,cm
+Marked Zone 1 Max - Pf Process Position,205.46,cm
