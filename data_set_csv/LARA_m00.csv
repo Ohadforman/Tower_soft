@@ -1,0 +1,18 @@
+Parameter Name,Value,Units
+Draw Name,LARA_m00,
+Draw Date,2025-11-12 13:28:36.002828,
+Entry Fiber Diameter,400.0,µm
+First Coating Diameter (Theoretical),469.85052338273306,µm
+Second Coating Diameter (Theoretical),551.3049883781413,µm
+Primary Coating,Coating_OF_136,
+Secondary Coating,DS-2015,
+First Coating Entry Die,700.0,µm
+Second Coating Entry Die,800.0,µm
+Primary Coating Temperature,36.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,543,µm
+Secondary Die Diameter,637,µm
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.62,mm

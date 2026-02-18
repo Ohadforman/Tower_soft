@@ -1,67 +1,216 @@
-import streamlit as st
-import base64
+import os
+from datetime import datetime
 import pandas as pd
-import json
-CSV_SELECTION_FILE = "selected_csv.json"
+import numpy as np
 import plotly.express as px
+import json
 import math
-import duckdb, os
-import os, re
-import numpy as np
-import pandas as pd
+from typing import Tuple, Optional, List
+from helpers.vis_ds2015 import get_viscosityDS2015, get_viscosityDP1032
 import streamlit as st
-import plotly.graph_objects as go
-import os
-import re
-from datetime import datetime
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-import os
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import streamlit as st
-import os
-import json
-import numpy as np
-import pandas as pd
-import streamlit as st
-from datetime import datetime
-DB_PATH = os.path.join(os.getcwd(), "tower.duckdb")
+from hooks.after_done import run_after_done_hook
+from orders.lifecycle import ensure_orders_cols
+from app_io.paths import P, dataset_csv_path
+from helpers.orders_status import (
+    STATUS_COL, STATUS_UPDATED_COL, FAILED_REASON_COL,
+    ensure_orders_cols, now_str,parse_dt_safe
+)
+from helpers.ui_state import safe_str_from_state
+#from renders.process_setup import render_process_setup_tab
+from renders.process_setup import render_scheduled_quick_start
+from renders.process_setup import render_create_draw_dataset_csv,find_associated_dataset_csv
+from renders.process_setup import process_setup_buttons
+from renders.drum import render_drum_selection_section_collect
+from renders.pid_tf import render_pid_tf_section_collect
+from renders.iris import render_iris_selection_section_collect
+from helpers.text_utils import safe_str, to_float, safe_int, now_str
+from app_io.config import coating_options_from_cfg
+from helpers.params_io import get_value, param_map, get_float_param
+from helpers.format_utils import fmt_float, fmt_int
+from helpers.constants import (
+    STATUS_COL,
+    STATUS_UPDATED_COL,
+    FAILED_DESC_COL,
+    TRY_COUNT_COL,
+    LAST_TRY_TIME_COL,
+    LAST_TRY_DATASET_COL,
+    MSG_SCHED,
+    MSG_FAILED,
+)
+from helpers.dataset_io import append_rows_to_dataset_csv
+from helpers.json_io import load_json
+from helpers.assets import get_base64_image
+from helpers.style_utils import color_priority, color_status
+from helpers.duckdb_io import get_duckdb_conn
+from renders.coating import render_coating_section
+# and
+from renders.save_all import render_save_all_block
+from renders.process_setup import render_process_setup_tab
+from helpers.dataset_param_parsers import (
+    param_map,
+    _parse_steps,
+    _parse_zones_from_end,
+    zone_lengths_from_log_km,
+    _parse_marked_zone_lengths,
+    _find_zone_avg_values,
+    build_tm_instruction_rows_auto_from_good_zones,
+    build_tm_instruction_rows_auto_from_good_zones,   # ✅ ADD THIS
+)
+from helpers.dates import compute_next_planned_draw_date
+from app_io.paths import P, ensure_logs_dir, ensure_gas_reports_dir, gas_report_path, _abs, ensure_dir
+from helpers.process_setup_state import apply_order_row_to_process_setup_state
+from renders.navigation import render_navigation
 
-if "tower_con" not in st.session_state:
-    st.session_state.tower_con = duckdb.connect(DB_PATH)
+CSV_SELECTION_FILE = P.selected_csv_json
+SAP_INVENTORY_FILE = P.sap_rods_inventory_csv
+DB_PATH = P.duckdb_path
+PID_CONFIG_PATH = P.pid_config_json
+ORDERS_FILE = P.orders_csv
+PREFORMS_FILE = P.preform_inventory_csv
+DATA_FOLDER = P.logs_dir
+HISTORY_FILE = P.history_csv
+PARTS_DIRECTORY = P.parts_dir
+DEVELOPMENT_FILE = P.development_csv
+DATASET_FOLDER = P.dataset_dir
+con = get_duckdb_conn(P.duckdb_path)
+DATASET_DIR = P.dataset_dir
 
-con = st.session_state.tower_con
-def save_selected_csv(selected_csv):
-    """Save the selected CSV file path in a JSON file"""
-    with open(CSV_SELECTION_FILE, 'w') as file:
-        json.dump({"selected_csv": selected_csv}, file)
-def load_selected_csv():
-    """Load the selected CSV file path from the JSON file"""
-    if os.path.exists(CSV_SELECTION_FILE):
-        with open(CSV_SELECTION_FILE, 'r') as file:
-            data = json.load(file)
-            return data.get("selected_csv")
-    return None
+image_base64 = get_base64_image("IMG_1094.JPEG")
+
+st.set_page_config(
+    page_title="Tower",
+    #layout="wide",
+    initial_sidebar_state="collapsed",  # <-- default collapsed
+)
+@st.cache_data(show_spinner=False)
+def load_coating_config():
+    return load_json(P.coating_config_json)
+
+coating_cfg = load_json(P.coating_config_json)
+COATING_OPTIONS = coating_options_from_cfg(coating_cfg)
+if not COATING_OPTIONS:
+    COATING_OPTIONS = [""]  # safe fallback so selectbox won't crash
+
+def render_failed_home_section(days_visible: int = 4, orders_file: str = ORDERS_FILE):
+    st.subheader("❌ Failed (last 4 days)")
+
+    if not os.path.exists(orders_file):
+        st.info("No orders file yet.")
+        return
+
+    try:
+        df = pd.read_csv(orders_file)
+    except Exception as e:
+        st.error(f"Failed to read {orders_file}: {e}")
+        return
+
+    df = ensure_orders_cols(df, STATUS_COL, STATUS_UPDATED_COL, FAILED_REASON_COL)
+    if df.empty:
+        st.info("No orders.")
+        return
+
+    # filter Failed
+    failed = df[df[STATUS_COL].astype(str).str.lower().eq("failed")].copy()
+    if failed.empty:
+        st.success("No Failed orders right now ✅")
+        return
+
+    # keep only last <days_visible> days (based on Status Updated At)
+    now = pd.Timestamp(dt.datetime.now())
+    cutoff = now - pd.Timedelta(days=days_visible)
+
+    failed["_dt"] = failed[STATUS_UPDATED_COL].apply(parse_dt_safe)
+    # if missing timestamp -> treat as "now" so it shows up, and gets stamped by auto-move helper
+    failed["_dt"] = failed["_dt"].fillna(now)
+
+    recent = failed[failed["_dt"] >= cutoff].copy()
+    older = failed[failed["_dt"] < cutoff].copy()
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    c1.metric("❌ Failed (recent)", int(len(recent)))
+    c2.metric("⏳ Failed (older than 4d)", int(len(older)))
+    if len(older) > 0:
+        c3.warning("Some Failed orders are older than 4 days — they will be moved back to Pending automatically.")
+    else:
+        c3.info("Failed orders stay here for 4 days, then auto-return to Pending.")
+
+    # Show recent failed in expanders
+    recent = recent.sort_values("_dt", ascending=False)
+
+    # Pick display columns if exist
+    nice_cols = []
+    for col in [
+        "Order ID", "Fiber Type", "Preform Number", "Required Length (m) (for T&M+costumer)",
+        "Required Length (m)", "Priority", "Notes", "Dataset CSV", "Assigned Dataset CSV"
+    ]:
+        if col in recent.columns and col not in nice_cols:
+            nice_cols.append(col)
+
+    # Always show these if exist
+    if FAILED_REASON_COL in recent.columns and FAILED_REASON_COL not in nice_cols:
+        nice_cols.append(FAILED_REASON_COL)
+    if STATUS_UPDATED_COL in recent.columns and STATUS_UPDATED_COL not in nice_cols:
+        nice_cols.append(STATUS_UPDATED_COL)
+
+    # Fallback: show everything if we found nothing
+    if not nice_cols:
+        nice_cols = list(recent.columns)
+
+    for idx, row in recent.iterrows():
+        title_bits = []
+        if "Preform Number" in recent.columns:
+            title_bits.append(f"PF: {row.get('Preform Number', '')}")
+        if "Fiber Type" in recent.columns:
+            title_bits.append(str(row.get("Fiber Type", "")))
+        title_bits.append(f"Updated: {row.get(STATUS_UPDATED_COL, '')}")
+
+        with st.expander(" | ".join([b for b in title_bits if b.strip()]), expanded=False):
+            st.dataframe(pd.DataFrame([row[nice_cols]]), use_container_width=True)
+
+            # Optional: If you have a dataset csv reference, show the same “done summary” widget you already have.
+            # Try these common columns; adjust to your real one:
+            dataset_csv = None
+            for k in ["Dataset CSV", "Assigned Dataset CSV", "dataset_csv", "CSV File"]:
+                if k in recent.columns:
+                    v = str(row.get(k, "")).strip()
+                    if v and v.lower() != "nan":
+                        dataset_csv = v
+                        break
+
+            if dataset_csv:
+                st.markdown("**📄 Dataset summary (same idea as Done):**")
+                # If you already have a function for this, call it here:
+                # render_done_summary_from_dataset_csv(dataset_csv)
+                # Otherwise keep a simple link:
+                st.caption(f"Dataset CSV: `{dataset_csv}`")
+
+            if str(row.get(FAILED_REASON_COL, "")).strip():
+                st.error(f"Reason: {row.get(FAILED_REASON_COL)}")
+            else:
+                st.caption("No failed reason recorded.")
+
+    if not older.empty:
+        with st.expander("🗂️ Older Failed (will auto-return to Pending)", expanded=False):
+            show_cols = [c for c in ["Order ID", "Fiber Type", "Preform Number", FAILED_REASON_COL, STATUS_UPDATED_COL] if c in older.columns]
+            if not show_cols:
+                show_cols = list(older.columns)
+            st.dataframe(older[show_cols].sort_values("_dt", ascending=False), use_container_width=True)
+
 def maintenance_quick_counts(
-    base_dir: str,
-    current_date,
-    furnace_hours: float = 0.0,
-    uv1_hours: float = 0.0,
-    uv2_hours: float = 0.0,
-    warn_days: int = 14,
-    warn_hours: float = 50.0,
+        base_dir: str,
+        current_date,
+        furnace_hours: float = 0.0,
+        uv1_hours: float = 0.0,
+        uv2_hours: float = 0.0,
+        warn_days: int = 14,
+        warn_hours: float = 50.0,
 ):
     """
     Returns (overdue_count, due_soon_count). Loads ALL xlsx/xls/csv from /maintenance.
     Uses the same rules as the maintenance tab.
     """
 
-    maint_folder = os.path.join(base_dir, "maintenance")
+    maint_folder = P.maintenance_dir
     if not os.path.isdir(maint_folder):
         return 0, 0
 
@@ -125,7 +274,8 @@ def maintenance_quick_counts(
                 continue
             df = df.rename(columns={c: normalize_map.get(str(c).strip().lower(), c) for c in df.columns})
             # ensure columns exist
-            for col in ["Tracking_Mode", "Interval_Value", "Interval_Unit", "Hours_Source", "Due_Threshold_Days", "Last_Done_Date", "Last_Done_Hours"]:
+            for col in ["Tracking_Mode", "Interval_Value", "Interval_Unit", "Hours_Source", "Due_Threshold_Days",
+                        "Last_Done_Date", "Last_Done_Hours"]:
                 if col not in df.columns:
                     df[col] = np.nan
             frames.append(df)
@@ -233,75 +383,80 @@ def maintenance_quick_counts(
     due_soon_count = int((statuses == "DUE SOON").sum())
 
     return overdue_count, due_soon_count
+
 # Load coatings and dies from the configuration file
-with open("config_coating.json", "r") as config_file:
+with open(P.coating_config_json, "r") as config_file:
     config = json.load(config_file)
 coatings = config.get("coatings", {})
 dies = config.get("dies", {})
-with open("config_coating.json", "r") as config_file:
+with open(P.coating_config_json, "r") as config_file:
     config = json.load(config_file)
 # Ensure coatings and dies are properly loaded
 if not coatings or not dies:
     st.error("Coatings and/or Dies not configured in config_coating.json")
     st.stop()
 
-tab_labels = [
-    "🏠 Home",
-    "📅 Schedule",
-    "🍃 Tower state - Consumables and dies",
-    "⚙️ Process Setup",
-    "🧰 Maintenance",
-    "📦 Order Draw",
-    "🛠️ Tower Parts",
-    "📋 Protocols",
-    "📊 Dashboard",
-    "🧪 Development Process",
-    "📝 History Log",
-    "✅ Closed Processes"
-]
-
+# =========================================================
+# Minimal global session state (NO logic here)
+# =========================================================
 if "selected_tab" not in st.session_state:
     st.session_state["selected_tab"] = None
+
 if "tab_select" not in st.session_state:
     st.session_state["tab_select"] = "🏠 Home"
+
 if "last_tab" not in st.session_state:
     st.session_state["last_tab"] = "🏠 Home"
-    if "tab_labels" not in st.session_state:
-        st.session_state["tab_labels"] = tab_labels
-if st.session_state.get("selected_tab"):
-    st.session_state["tab_select"] = st.session_state["selected_tab"]
-    st.session_state["last_tab"] = st.session_state["selected_tab"]
-st.session_state["selected_tab"] = None
+
+if "nav_last_tab_by_group" not in st.session_state:
+    st.session_state["nav_last_tab_by_group"] = {}
+
 if "good_zones" not in st.session_state:
     st.session_state["good_zones"] = []
-def get_base64_image(image_path):
-    """Encodes an image to base64 format for inline CSS."""
-    with open(image_path, "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode()
-# Ensure the image file exists in the project folder
-image_base64 = get_base64_image("Martin.jpeg")
+
 def calculate_coating_thickness(entry_fiber_diameter, die_diameter, mu, rho, L, V, g):
     """Calculates coating thickness and coated fiber diameter."""
-    R = (die_diameter / 2) * 10**-6  # Die Radius (m)
-    r = (entry_fiber_diameter / 2) * 10**-6  # Fiber Radius (m)
+    import math
+
+    R = (die_diameter / 2) * 1e-6   # Die Radius (m)
+    r = (entry_fiber_diameter / 2) * 1e-6  # Fiber Radius (m)
+
+    # ---- Guards ----
+    if R <= 0 or r <= 0:
+        return float("nan")
+
+    # Fiber must fit inside die (strict!)
+    if r >= R:
+        return float("nan")
+
     k = r / R
-    if k <= 0:
-        return entry_fiber_diameter  # Return input value if k is invalid
+    # k in (0,1) so ln(k) is negative and not close to 0
     ln_k = math.log(k)
+
+    # Protect against numeric edge cases (k≈1 -> ln_k≈0)
+    if not math.isfinite(ln_k) or abs(ln_k) < 1e-12:
+        return float("nan")
 
     # Pressure drop calculation
     delta_P = L * rho * g
 
     # Φ calculation
-    Phi = (delta_P * R**2) / (8 * mu * L * V)
+    if mu == 0 or L == 0 or V == 0:
+        return float("nan")
+    Phi = (delta_P * R ** 2) / (8 * mu * L * V)
 
-    # Calculate the coating thickness (t)
-    term1 = Phi * (1 - k**4 + ((1 - k**2)**2) / ln_k)
-    term2 = - (k**2 + (1 - k**2) / (2 * ln_k))  # Ensure valid sqrt input
-    t = R * ((term1 + term2 + k**2)**0.5 - k)
+    term1 = Phi * (1 - k ** 4 + ((1 - k ** 2) ** 2) / ln_k)
+    term2 = - (k ** 2 + (1 - k ** 2) / (2 * ln_k))
 
-    coated_fiber_diameter = entry_fiber_diameter + (t * 2 * 1e6)  # Convert thickness to microns
+    inside = (term1 + term2 + k ** 2)
+    if inside <= 0 or not math.isfinite(inside):
+        return float("nan")
+
+    t = R * (math.sqrt(inside) - k)
+
+    coated_fiber_diameter = entry_fiber_diameter + (t * 2 * 1e6)  # thickness -> microns
     return coated_fiber_diameter
+
 def evaluate_viscosity(T, function_str):
     """Computes viscosity by evaluating the stored function string from config."""
     try:
@@ -309,12 +464,6 @@ def evaluate_viscosity(T, function_str):
     except Exception as e:
         st.error(f"Error evaluating viscosity function: {e}")
         return None
-# Load configuration
-DATA_FOLDER = config.get("logs_directory", "./logs")
-HISTORY_FILE = "history_log.csv"
-PARTS_DIRECTORY = config.get("parts_directory", "./parts")
-DEVELOPMENT_FILE = "development_process.csv"
-DATASET_FOLDER = "./data_set_csv"
 
 # ---------------- Sidebar Navigation (Grouped, stable) ----------------
 with st.sidebar:
@@ -332,6 +481,7 @@ with st.sidebar:
             "⚙️ Process Setup",
             "🧰 Maintenance",
             "📊 Dashboard",
+            "✅ Draw Finalize",
             "📈 Correlation & Outliers",
             "🛠️ Tower Parts",
             "📋 Protocols"
@@ -340,10 +490,7 @@ with st.sidebar:
             "🧪 SQL Lab",
             "🧪 Development Process",
         ],
-        "🗂 Documentation ": [
-            "📝 History Log",
-            "✅ Closed Processes"
-        ],
+
     }
 
     TAB_TO_GROUP = {t: g for g, tabs in NAV_GROUPS.items() for t in tabs}
@@ -351,10 +498,10 @@ with st.sidebar:
 
     # If a shortcut tab was set elsewhere, honor it once
     desired_tab = (
-        st.session_state.get("selected_tab")
-        or st.session_state.get("tab_select")
-        or st.session_state.get("last_tab")
-        or "🏠 Home"
+            st.session_state.get("selected_tab")
+            or st.session_state.get("tab_select")
+            or st.session_state.get("last_tab")
+            or "🏠 Home"
     )
     st.session_state["selected_tab"] = None
 
@@ -368,19 +515,31 @@ with st.sidebar:
         st.session_state["nav_last_tab_by_group"] = {}
 
     # force state consistent BEFORE widgets render
-    if st.session_state.get("nav_group_select") not in GROUPS:
-        st.session_state["nav_group_select"] = desired_group
-    if st.session_state.get("tab_select") not in tab_labels:
-        st.session_state["tab_select"] = desired_tab
+    # force state consistent BEFORE widgets render
+    # ✅ If we got a "selected_tab" shortcut, FORCE jump (group + page)
+    jump_tab = desired_tab  # desired_tab already includes selected_tab if provided
+
+    jump_group = TAB_TO_GROUP.get(jump_tab, desired_group)
+
+    st.session_state["nav_group_select"] = jump_group
+    st.session_state["tab_select"] = jump_tab
+    st.session_state["last_tab"] = jump_tab
+
+    # (optional) keep last_tab_by_group correct
+    st.session_state.setdefault("nav_last_tab_by_group", {})
+    st.session_state["nav_last_tab_by_group"][jump_group] = jump_tab
+
 
     def _on_group_change():
         g = st.session_state.get("nav_group_select")
         last_by_group = st.session_state.get("nav_last_tab_by_group", {})
-        next_tab = last_by_group.get(g, NAV_GROUPS[g][0])
-        st.session_state["tab_select"] = next_tab
-        st.session_state["last_tab"] = next_tab
-        st.session_state.setdefault("nav_last_tab_by_group", {})
-        st.session_state["nav_last_tab_by_group"][g] = next_tab
+        next_tab = last_by_group.get(g, NAV_GROUPS.get(g, [None])[0])
+        if next_tab:
+            st.session_state["tab_select"] = next_tab
+            st.session_state["last_tab"] = next_tab
+            st.session_state.setdefault("nav_last_tab_by_group", {})
+            st.session_state["nav_last_tab_by_group"][g] = next_tab
+
 
     def _on_page_change():
         t = st.session_state.get("tab_select")
@@ -388,6 +547,7 @@ with st.sidebar:
         st.session_state["last_tab"] = t
         st.session_state.setdefault("nav_last_tab_by_group", {})
         st.session_state["nav_last_tab_by_group"][g] = t
+
 
     group = st.selectbox(
         "📁 Group",
@@ -416,8 +576,6 @@ with st.sidebar:
 
 df = pd.DataFrame()  # Initialize an empty DataFrame to avoid NameError
 
-df = pd.DataFrame()  # Initialize an empty DataFrame to avoid NameError
-
 if tab_selection == "📊 Dashboard":
     csv_files = [f for f in os.listdir(DATA_FOLDER) if f.lower().endswith(".csv")]
 
@@ -425,7 +583,6 @@ if tab_selection == "📊 Dashboard":
         st.error("No CSV files found in the directory.")
         st.stop()
 
-    # newest first (by modified time)
     csv_files_sorted = sorted(
         csv_files,
         key=lambda fn: os.path.getmtime(os.path.join(DATA_FOLDER, fn)),
@@ -433,11 +590,13 @@ if tab_selection == "📊 Dashboard":
     )
     latest_file = csv_files_sorted[0]
 
-    # ✅ Force default to latest ONLY when entering Dashboard
-    if st.session_state.get("_last_tab_for_log_default") != "📊 Dashboard":
+    # ✅ Default to latest ONLY if nothing is selected yet
+    if not st.session_state.get("dataset_select"):
         st.session_state["dataset_select"] = latest_file
 
-    st.session_state["_last_tab_for_log_default"] = "📊 Dashboard"
+    # ✅ If selection doesn't exist in THIS folder -> fallback
+    if st.session_state.get("dataset_select") not in csv_files_sorted:
+        st.session_state["dataset_select"] = latest_file
 
     selected_file = st.sidebar.selectbox(
         "Select a dataset",
@@ -448,7 +607,92 @@ if tab_selection == "📊 Dashboard":
     st.sidebar.caption(f"Latest: **{latest_file}**")
 
     df = pd.read_csv(os.path.join(DATA_FOLDER, selected_file))
-# Ensure df is only processed if it contains data
+
+
+    # ==========================================================
+    # ✅ Auto-load GOOD ZONES when coming from SQL Lab
+    # - Reads zone boundaries from the DATASET CSV (data_set_csv/<selected_file>)
+    # - Writes into st.session_state["good_zones"] so your existing plot vrects work
+    # ==========================================================
+    def _read_dataset_params_csv_for_log(selected_log_file: str) -> pd.DataFrame:
+        # dataset CSV has same filename as log selection in your system
+        pth = os.path.join(DATASET_DIR, os.path.basename(selected_log_file))
+        if not os.path.exists(pth):
+            return pd.DataFrame()
+        try:
+            return pd.read_csv(pth, keep_default_na=False)
+        except Exception:
+            return pd.DataFrame()
+
+
+
+
+
+    def _parse_zones_from_params(df_params: pd.DataFrame):
+        """
+        Returns zones as list of (start_m, end_m) in meters from START (absolute).
+        Supports:
+          - Zone i Start / Zone i End  (saved by your dashboard)
+        """
+        if df_params is None or df_params.empty:
+            return []
+
+        if "Parameter Name" not in df_params.columns or "Value" not in df_params.columns:
+            return []
+
+        p = df_params.copy()
+        p["Parameter Name"] = p["Parameter Name"].astype(str).str.strip()
+        p["Value"] = p["Value"].astype(str).str.strip()
+
+        start_pat = re.compile(r"^Zone\s*(\d+)\s*Start$", re.IGNORECASE)
+        end_pat = re.compile(r"^Zone\s*(\d+)\s*End$", re.IGNORECASE)
+
+        starts = {}
+        ends = {}
+
+        for _, row in p.iterrows():
+            nm = row["Parameter Name"]
+            val = row["Value"]
+            try:
+                fv = float(val)
+            except Exception:
+                continue
+
+            ms = start_pat.match(nm)
+            me = end_pat.match(nm)
+            if ms:
+                starts[int(ms.group(1))] = fv
+            if me:
+                ends[int(me.group(1))] = fv
+
+        zones = []
+        for i in sorted(set(starts) & set(ends)):
+            a = float(starts[i])
+            b = float(ends[i])
+            zones.append((min(a, b), max(a, b)))
+
+        # remove invalid
+        zones = [(a, b) for a, b in zones if b > a]
+        return zones
+
+
+    # one-shot trigger from SQL Lab
+    autoload = bool(st.session_state.get("dash_autoload_zones", False))
+    autoload_for = (st.session_state.get("dash_autoload_zones_for") or "").replace("\\", "/").split("/")[-1]
+
+    if autoload and (autoload_for == os.path.basename(selected_file)):
+        df_params_for_log = _read_dataset_params_csv_for_log(selected_file)
+        zones_m = _parse_zones_from_params(df_params_for_log)
+
+        if zones_m:
+            # store zones in the exact format your plot already uses
+            st.session_state["good_zones"] = zones_m
+            st.success(f"✅ Loaded {len(zones_m)} good zone(s) from dataset CSV for {selected_file}")
+        else:
+            st.info("ℹ️ No saved Zone i Start/End found in dataset CSV (nothing to auto-mark).")
+
+        # consume the flag (do once)
+        st.session_state["dash_autoload_zones"] = False
 if not df.empty and "Date/Time" in df.columns:
     def try_parse_datetime(dt_str):
         try:
@@ -463,14 +707,15 @@ if not df.empty and "Date/Time" in df.columns:
                 return pd.NaT
         return pd.NaT
 
+
     df["Date/Time"] = df["Date/Time"].apply(try_parse_datetime)
 
 column_options = df.columns.tolist() if not df.empty else []
 
 def render_home_draw_orders_overview(
-    orders_file: str = "draw_orders.csv",
-    title: str = "📦 Draw Orders",
-    height: int = 360,
+        orders_file: str = P.orders_csv,
+        title: str = "📦 Draw Orders",
+        height: int = 360,
 ):
     import os
     import pandas as pd
@@ -658,481 +903,220 @@ def render_home_draw_orders_overview(
     # ==========================================================
     # TABLE
     # ==========================================================
-    st.markdown("### 📋 Orders Table")
 
-    show_cols = [
-        "Status",
-        "Priority",
-        "Fiber Project",
-        "Preform Number",
-        "Desired Date",
-        "Length (m)",
-        "Spools",
-        "Timestamp",
-        "Notes",
-        "Done CSV",
-        "Done Description",
-    ]
-    show_cols = [c for c in show_cols if c in df_visible.columns]
-    table_df = df_visible[show_cols].copy()
 
-    table_df = table_df.sort_values(
-        by=["Desired Date", "Timestamp"],
-        ascending=[True, False],
+def render_open_in_dashboard_from_filter(df_all: pd.DataFrame):
+    st.subheader("🚀 Open matched draw in Dashboard")
+
+    if df_all is None or df_all.empty:
+        st.info("Run a filter first.")
+        return
+
+    # Keep only dataset rows (draws)
+    ds = df_all[df_all["source_kind"].astype(str) == "dataset"].copy()
+    if ds.empty:
+        st.info("Filter matched no dataset draws (only maintenance / none).")
+        return
+
+    # Prefer draw id (event_id) + filename when available
+    # event_id is your draw id, filename points to csv file
+    cols = ds.columns.tolist()
+    if "filename" in cols:
+        # unique draws with filename
+        draws = (
+            ds[["event_id", "filename", "event_ts"]]
+            .dropna(subset=["event_id"])
+            .drop_duplicates(subset=["event_id"])
+            .sort_values("event_ts", ascending=False, na_position="last")
+        )
+    else:
+        draws = (
+            ds[["event_id", "event_ts"]]
+            .dropna(subset=["event_id"])
+            .drop_duplicates(subset=["event_id"])
+            .sort_values("event_ts", ascending=False, na_position="last")
+        )
+        draws["filename"] = None
+
+    if draws.empty:
+        st.info("No unique draws found.")
+        return
+
+    # nice labels
+    def _label_row(r):
+        ts = r.get("event_ts")
+        ts_s = ""
+        try:
+            if pd.notna(ts):
+                ts_s = pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
+
+        draw_id = str(r.get("event_id", "")).strip()
+        file_s = str(r.get("filename", "")).strip()
+        file_short = file_s.split("/")[-1] if file_s else ""
+        if ts_s and file_short:
+            return f"{draw_id}  •  {ts_s}  •  {file_short}"
+        if ts_s:
+            return f"{draw_id}  •  {ts_s}"
+        return draw_id
+
+    draw_options = draws.to_dict("records")
+    labels = [_label_row(r) for r in draw_options]
+
+    chosen_idx = st.selectbox(
+        "Choose one matched draw",
+        list(range(len(draw_options))),
+        format_func=lambda i: labels[i],
+        key="sql_open_dash_choice",
     )
 
-    def _status_style(val):
-        bg = {
-            "Pending": "#ffb020",
-            "Scheduled": "#2d7ff9",
-            "Done": "#2ecc71",
-            "Failed": "#ff3b30",
-            "In progress": "#b77bff",
-        }.get(str(val), "#333")
-        return f"background-color:{bg};color:black;font-weight:900;"
-
-    styled = table_df.style
-    if "Status" in table_df.columns:
-        styled = styled.applymap(_status_style, subset=["Status"])
-
-    st.dataframe(styled, use_container_width=True, height=height)
-# ================== PROCESS SETUP (Coating + Iris + PID/TF) ==================
-def render_create_draw_dataset_csv():
-    st.subheader("🆕 Create New Draw Dataset CSV")
-
-    csv_name1 = st.text_input(
-        "Enter Unique CSV Name For Drawing Data Set Creation",
-        "",
-        key="create_draw_csv_name_input",
-    )
-
-    csv_name = csv_name1 + ".csv" if csv_name1 and not csv_name1.endswith(".csv") else csv_name1
-
-    if st.button("Create New CSV for Data Program", key="create_draw_csv_btn"):
-        if not csv_name:
-            st.warning("Please enter a valid name for the CSV file.")
-            return
-
-        if not os.path.exists("data_set_csv"):
-            os.makedirs("data_set_csv")
-
-        csv_path = os.path.join("data_set_csv", csv_name)
-
-        if os.path.exists(csv_path):
-            st.warning(f"CSV file '{csv_name1}' already exists.")
-            return
-
-        columns = ["Parameter Name", "Value", "Units"]
-        df_new = pd.DataFrame(columns=columns)
-
-        new_rows = [
-            {"Parameter Name": "Draw Name", "Value": csv_name1, "Units": "N/A"},
-            {"Parameter Name": "Draw Date", "Value": pd.Timestamp.now(), "Units": "N/A"},
-        ]
-
-        df_new = pd.concat([df_new, pd.DataFrame(new_rows)], ignore_index=True)
-        df_new.to_csv(csv_path, index=False)
-        st.success(f"New CSV '{csv_name}' created in the 'data_set_csv' folder!")
-
-        new_draw_entry = pd.DataFrame([{
-            "Timestamp": pd.Timestamp.now(),
-            "Type": "Draw History",
-            "Draw Name": csv_name1,
-            "First Coating": "N/A",
-            "First Coating Temperature": "N/A",
-            "First Coating Die Size": "N/A",
-            "Second Coating": "N/A",
-            "Second Coating Temperature": "N/A",
-            "Second Coating Die Size": "N/A",
-            "Fiber Diameter": "N/A"
-        }])
-
-        if os.path.exists(HISTORY_FILE):
-            history_df = pd.read_csv(HISTORY_FILE)
-        else:
-            history_df = pd.DataFrame(columns=[
-                "Timestamp", "Type", "Draw Name",
-                "First Coating", "First Coating Temperature", "First Coating Die Size",
-                "Second Coating", "Second Coating Temperature", "Second Coating Die Size",
-                "Fiber Diameter"
-            ])
-
-        history_df = pd.concat([history_df, new_draw_entry], ignore_index=True)
-        history_df.to_csv(HISTORY_FILE, index=False)
-        st.success(f"Draw history for {csv_name} added successfully!")
-def _process_setup_buttons() -> str:
-    """Returns which section to show: 'all' | 'coating' | 'iris' | 'pid'."""
-    if "process_setup_view" not in st.session_state:
-        st.session_state["process_setup_view"] = "all"
-
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2 = st.columns([1, 1])
     with c1:
-        if st.button("🧴 Coating", use_container_width=True):
-            st.session_state["process_setup_view"] = "coating"
-            st.rerun()
+        open_btn = st.button("📊 Open in Dashboard", use_container_width=True, key="sql_open_in_dashboard_btn")
     with c2:
-        if st.button("🔍 Iris", use_container_width=True):
-            st.session_state["process_setup_view"] = "iris"
-            st.rerun()
-    with c3:
-        if st.button("🎛 PID & TF", use_container_width=True):
-            st.session_state["process_setup_view"] = "pid"
-            st.rerun()
-    with c4:
-        if st.button("✅ All", use_container_width=True):
-            st.session_state["process_setup_view"] = "all"
-            st.rerun()
+        st.caption("Loads the selected draw CSV + zones in the Dashboard tab.")
 
-    return st.session_state["process_setup_view"]
-def render_iris_selection_section():
-    import os
-    import numpy as np
-    import pandas as pd
-    import streamlit as st
+    if open_btn:
+        r = draw_options[int(chosen_idx)]
 
-    st.title("🔍 Iris Selection")
-    st.subheader("Iris Selection Tool")
+        target_file = (str(r.get("filename", "")).strip() or "")
+        target_file = target_file.replace("\\", "/").split("/")[-1] if target_file else None
 
-    # ----------------------------
-    # Inputs
-    # ----------------------------
-    st.markdown("### 📐 Preform geometry")
+        if not target_file:
+            target_file = f"{str(r.get('event_id', '')).strip()}.csv"
 
-    is_octagonal = st.checkbox("✅ Octagonal preform (use F2F instead of circular diameter)", value=False, key="iris_octagonal_flag")
+        # ✅ IMPORTANT: store only basename that exists in DATA_FOLDER
+        st.session_state["dataset_select"] = target_file
+        st.session_state["dash_autoload_zones"] = True
+        st.session_state["dash_autoload_zones_for"] = target_file  # remember which file
+        st.session_state["selected_tab"] = "📊 Dashboard"
+        st.rerun()
 
-    if is_octagonal:
-        f2f_mm = st.number_input("Enter Octagon Flat-to-Flat (F2F) (mm)", min_value=0.0, step=0.1, format="%.2f", key="iris_f2f_mm")
-        preform_diameter = f2f_mm  # keep old variable name for compatibility
-    else:
-        preform_diameter = st.number_input("Enter Preform Diameter (mm)", min_value=0.0, step=0.1, format="%.2f", key="iris_circ_diam_mm")
-
-    st.markdown("### 🐯 Tiger cut")
-    tiger_cut = st.checkbox("Is it a Tiger?", value=False, key="iris_tiger_flag")
-    cut_percentage = 0
-    if tiger_cut:
-        cut_percentage = st.number_input("Enter Cut Percentage (%)", min_value=0, max_value=100, value=20, step=1, key="iris_cut_pct")
-
-    # ----------------------------
-    # Geometry helpers
-    # ----------------------------
-    def area_circle_from_diameter(d_mm: float) -> float:
-        return np.pi * (d_mm / 2.0) ** 2
-
-    def area_octagon_from_f2f(d_f2f_mm: float) -> float:
-        # A = 2(√2 - 1) d^2  (regular octagon from flat-to-flat)
-        return 2.0 * (np.sqrt(2.0) - 1.0) * (d_f2f_mm ** 2)
-
-    def apply_tiger_cut(area_mm2: float, cut_pct: float) -> float:
-        return area_mm2 * (1.0 - cut_pct / 100.0)
-
-    def effective_diameter_from_area(area_mm2: float) -> float:
-        # equal-area round rod diameter
-        return 2.0 * np.sqrt(area_mm2 / np.pi)
-
-    # ----------------------------
-    # Calculate areas + effective diameter
-    # ----------------------------
-    if preform_diameter <= 0:
-        st.warning("Please enter a valid value (> 0).")
+def _append_dict_rows(rows, data: dict, units_map: dict = None):
+    if not data:
         return
+    units_map = units_map or {}
+    for k, v in data.items():
+        if v is None:
+            continue
+        # avoid writing empty strings
+        if isinstance(v, str) and v.strip() == "":
+            continue
+        rows.append({
+            "Parameter Name": str(k),
+            "Value": v,
+            "Units": units_map.get(k, "")
+        })
 
-    if is_octagonal:
-        base_area = area_octagon_from_f2f(preform_diameter)
-        st.write(f"**Octagonal Area (from F2F {preform_diameter:.2f} mm):** {base_area:.2f} mm²")
-    else:
-        base_area = area_circle_from_diameter(preform_diameter)
-        st.write(f"**Circular Area (from D {preform_diameter:.2f} mm):** {base_area:.2f} mm²")
+def calculate_coating_thickness_diameter_um(
+    entry_fiber_diameter_um: float,
+    die_diameter_um: float,
+    mu_kg_m_s: float,
+    rho_kg_m3: float,
+    neck_length_m: float,
+    pulling_speed_m_s: float,
+    g_m_s2: float = 9.80665,
+) -> float:
+    """
+    Your exact model, returns COATED DIAMETER in µm.
+    """
+    entry_fiber_diameter_um = to_float(entry_fiber_diameter_um, 0.0)
+    die_diameter_um = to_float(die_diameter_um, 0.0)
+    mu = to_float(mu_kg_m_s, 1.0)
+    rho = to_float(rho_kg_m3, 1000.0)
+    L = to_float(neck_length_m, 0.01)
+    V = to_float(pulling_speed_m_s, 0.917)
+    g = to_float(g_m_s2, 9.80665)
 
-    adjusted_area = apply_tiger_cut(base_area, cut_percentage)
-    st.write(f"**Adjusted Area:** {adjusted_area:.2f} mm²")
+    if entry_fiber_diameter_um <= 0 or die_diameter_um <= 0 or mu <= 0 or rho <= 0 or L <= 0 or V <= 0:
+        return float(entry_fiber_diameter_um)
 
-    effective_diameter = effective_diameter_from_area(adjusted_area)
-    st.write(f"**Effective Diameter (equal-area round):** {effective_diameter:.2f} mm")
+    R = (die_diameter_um / 2.0) * 1e-6  # die radius (m)
+    r = (entry_fiber_diameter_um / 2.0) * 1e-6  # fiber radius (m)
 
-    # ----------------------------
-    # Iris selection
-    # ----------------------------
-    iris_diameters = [round(x * 0.5, 1) for x in range(20, 91)]  # 10..45 step 0.5
-    valid_iris = [d for d in iris_diameters if d > effective_diameter]
+    if r <= 0 or R <= 0 or r >= R:
+        return float(entry_fiber_diameter_um)
 
-    if not valid_iris:
-        st.warning("No iris diameter is larger than the effective preform diameter.")
-        return
+    k = r / R
+    ln_k = math.log(k)  # k<1 => ln(k)<0 ok
 
-    # Choose best gap closest to 200 mm^2
-    results = [(d, (np.pi / 4.0) * (d**2 - effective_diameter**2)) for d in valid_iris]
-    best = min(results, key=lambda x: abs(x[1] - 200.0))
+    delta_P = L * rho * g
+    Phi = (delta_P * (R ** 2)) / (8.0 * mu * L * V)
 
-    selected_iris = st.selectbox("Select Iris Diameter", valid_iris, index=valid_iris.index(best[0]), key="iris_selected_diam")
-    gap_area = (np.pi / 4.0) * (selected_iris**2 - effective_diameter**2)
-    st.write(f"**Gap Area:** {gap_area:.2f} mm²")
+    term1 = Phi * (1.0 - k**4 + ((1.0 - k**2)**2) / ln_k)
+    term2 = -(k**2 + (1.0 - k**2) / (2.0 * ln_k))
 
-    # ----------------------------
-    # Save to CSV
-    # ----------------------------
-    st.markdown("### 💾 Save to dataset CSV")
+    inside = term1 + term2 + k**2
+    if inside <= 0:
+        return float(entry_fiber_diameter_um)
 
-    recent_csv_files = [f for f in os.listdir("data_set_csv") if f.endswith(".csv")]
-    if not recent_csv_files:
-        st.info("No CSV files found in data_set_csv/")
-        return
+    t = R * (math.sqrt(inside) - k)  # meters
+    coated_um = entry_fiber_diameter_um + (t * 2.0 * 1e6)
+    return float(coated_um)
 
-    selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="iris_select_csv_update")
+def _match_key_case_insensitive(name: str, keys: List[str]) -> Optional[str]:
+    """Find best match of name in keys (case-insensitive, trims)."""
+    n = str(name or "").strip()
+    if not n:
+        return None
+    low = n.lower()
 
-    if st.button("Update Dataset CSV", key="iris_update_dataset_csv"):
-        tiger_cut_value = cut_percentage if tiger_cut else 0
-        oct_flag = 1 if is_octagonal else 0
+    for k in keys:
+        if str(k).strip().lower() == low:
+            return k
 
-        data_to_add = [
-            {"Parameter Name": "Preform Diameter", "Value": ("" if is_octagonal else preform_diameter), "Units": "mm"},
-            {"Parameter Name": "Octagonal Preform", "Value": oct_flag, "Units": "bool"},
-            {"Parameter Name": "Octagonal F2F", "Value": (preform_diameter if is_octagonal else ""), "Units": "mm"},
-            {"Parameter Name": "Octagonal Area", "Value": (base_area if is_octagonal else ""), "Units": "mm^2"},
-            {"Parameter Name": "Tiger Cut", "Value": tiger_cut_value, "Units": "%"},
-            {"Parameter Name": "Adjusted Area", "Value": adjusted_area, "Units": "mm^2"},
-            {"Parameter Name": "Effective Preform Diameter", "Value": effective_diameter, "Units": "mm"},
-            {"Parameter Name": "Selected Iris Diameter", "Value": selected_iris, "Units": "mm"},
-            {"Parameter Name": "Gap Area", "Value": gap_area, "Units": "mm^2"},
-        ]
+    for k in keys:
+        kl = str(k).strip().lower()
+        if low in kl or kl in low:
+            return k
 
-        csv_path = os.path.join("data_set_csv", selected_csv)
-        df = pd.read_csv(csv_path)
-        df = pd.concat([df, pd.DataFrame(data_to_add)], ignore_index=True)
-        df.to_csv(csv_path, index=False)
+    return None
 
-        st.success(f"CSV '{selected_csv}' updated (octagon/tiger + effective diameter saved).")
-def render_coating_section():
-    st.subheader("🧴 Coating")
-    st.title("💧 Coating Calculation")
+def _get_viscosity_for_coating(coating_name: str, temp_c: float) -> float:
+    """
+    Uses your known functions.
+    Extend here if you add more coatings.
+    """
+    name = str(coating_name or "").strip().lower()
 
-    # **User Input Section**
-    st.subheader("Input Parameters")
+    if "dp1032" in name or "dp-1032" in name:
+        return float(get_viscosityDP1032(float(temp_c)))
 
-    # Viscosity Fitting Parameters for Primary Coating
-    # Viscosity function is now sourced from config_coating.json; UI inputs removed.
+    if name.startswith("ds") or "ds2015" in name or "ds2032" in name or "ds-2015" in name or "ds-2032" in name:
+        return float(get_viscosityDS2015(float(temp_c)))
 
-    # Viscosity Fitting Parameters for Secondary Coating
-    # Viscosity function is now sourced from config_coating.json; UI inputs removed.
-    entry_fiber_diameter = st.number_input("Entry Fiber Diameter (µm)", min_value=0.0, step=0.1, format="%.1f")
-    if "primary_temperature" not in st.session_state:
-        st.session_state.primary_temperature = 25.0
-    if "secondary_temperature" not in st.session_state:
-        st.session_state.secondary_temperature = 25.0
+    return float(get_viscosityDS2015(float(temp_c)))
 
-    primary_temperature = st.number_input("Primary Coating Temperature (°C)",
-                                          value=st.session_state.primary_temperature, step=0.1,
-                                          key="primary_temperature")
-    secondary_temperature = st.number_input("Secondary Coating Temperature (°C)",
-                                            value=st.session_state.secondary_temperature, step=0.1,
-                                            key="secondary_temperature")
-    # Removed st.rerun() to allow live updates of temperature values
+def calculate_coated_diameter_um(entry_fiber_diameter_um, die_diameter_um, mu, rho, L, V, g=9.80665):
+    """
+    Wrapper around your model, returns predicted coated diameter [um] or NaN if invalid.
+    """
+    # Your function already returns diameter in um, but protect invalid geometries
+    if die_diameter_um is None or entry_fiber_diameter_um is None:
+        return float("nan")
 
-    dies = config.get("dies")
-    coatings = config.get("coatings")
-    if not dies or not coatings:
-        st.error("Dies and/or Coatings not configured in config.json")
-        st.stop()
+    if die_diameter_um <= 0 or entry_fiber_diameter_um <= 0:
+        return float("nan")
 
-    # **Dropdowns for Die and Coating Selection**
-    primary_die = st.selectbox("Select Primary Die", dies.keys())
-    secondary_die = st.selectbox("Select Secondary Die", dies.keys())
+    # Fiber must fit in die
+    if entry_fiber_diameter_um >= die_diameter_um:
+        return float("nan")
 
-    primary_coating = st.selectbox("Select Primary Coating", coatings.keys())
-    secondary_coating = st.selectbox("Select Secondary Coating", coatings.keys())
-    first_entry_die = st.number_input("First Coating Entry Die (µm)", min_value=0.0, step=0.1)
-    second_entry_die = st.number_input("Second Coating Entry Die (µm)", min_value=0.0, step=0.1)
-
-    # **Load Selected Die and Coating Data**
-    primary_die_config = dies[primary_die]
-    secondary_die_config = dies[secondary_die]
-    primary_coating_config = coatings[primary_coating]
-    secondary_coating_config = coatings[secondary_coating]
-
-    # **Extract necessary parameters for calculations**
     try:
-        primary_density = primary_coating_config.get("Density", None)
-        primary_neck_length = primary_die_config.get("Neck_Length", 0.002)
-        primary_die_diameter = primary_die_config["Die_Diameter"]
+        return calculate_coating_thickness(
+            entry_fiber_diameter_um,
+            die_diameter_um,
+            mu, rho, L, V, g
+        )
+    except Exception:
+        return float("nan")
 
-        secondary_density = secondary_coating_config.get("Density", None)
-        secondary_neck_length = secondary_die_config.get("Neck_Length", 0.002)
-        secondary_die_diameter = secondary_die_config["Die_Diameter"]
-
-        primary_viscosity_function = primary_coating_config.get("viscosity_fit_params", {}).get("function", "T**0.5")
-        secondary_viscosity_function = secondary_coating_config.get("viscosity_fit_params", {}).get("function",
-                                                                                                    "T**0.5")
-
-        primary_viscosity = evaluate_viscosity(primary_temperature, primary_viscosity_function)
-        secondary_viscosity = evaluate_viscosity(secondary_temperature, secondary_viscosity_function)
-
-        # Ensure no missing parameters
-        if None in [primary_viscosity, primary_density, secondary_viscosity, secondary_density]:
-            st.error("Viscosity values could not be computed. Please check the configuration file.")
-            st.stop()
-
-
-
-    except KeyError as e:
-        st.error(f"Missing key in configuration: {e}")
-        st.stop()
-
-    # **Constants**
-    V = 0.917  # Pulling speed (m/s)
-    g = 9.8  # Gravity (m/s²)
-
-    # Recalculate viscosity based on the updated temperature
-    primary_viscosity = evaluate_viscosity(primary_temperature, primary_viscosity_function)
-    secondary_viscosity = evaluate_viscosity(secondary_temperature, secondary_viscosity_function)
-
-    # Compute coating thickness for Primary and Secondary coatings
-    FC_diameter = calculate_coating_thickness(
-        entry_fiber_diameter,
-        primary_die_diameter,
-        primary_viscosity,  # Ensure dynamically updated viscosity is used
-        primary_density,
-        primary_neck_length,
-        V, g
-    )
-
-    SC_diameter = calculate_coating_thickness(
-        FC_diameter,
-        secondary_die_diameter,
-        secondary_viscosity,  # Updated viscosity based on temperature
-        secondary_density,
-        secondary_neck_length,
-        V, g
-    )
-
-    # **Display Computed Coating Dimensions**
-    st.write("### Coating Dimensions")
-    st.write(f"**Fiber Diameter:** {entry_fiber_diameter:.1f} µm")
-    st.write(f"**First Coating Diameter:** {FC_diameter:.1f} µm - Using Die coat {primary_die} & {primary_coating}")
-    st.write(
-        f"**Second Coating Diameter:** {SC_diameter:.1f} µm - Using Die coat {secondary_die} & {secondary_coating}")
-
-    st.subheader("Coating Info")
-    st.write("---")
-
-    # Organize coating info layout
-    coating_col1, coating_col2 = st.columns([1, 2])
-
-    with coating_col1:
-        selected_coating_info = st.selectbox("Select Coating to View Details", list(coatings.keys()),
-                                             key="coating_info_select")
-
-    with coating_col2:
-        if selected_coating_info:
-            coating_info = coatings[selected_coating_info]
-
-            # Styling for a better look
-            st.markdown(
-                f"""
-                    <div style="border: 2px solid #4CAF50; padding: 15px; border-radius: 10px; background-color: #ffffff; color: #000000;">
-                        <h3 style="color: #4CAF50;">Coating Name: {selected_coating_info}</h3>
-                        <p><b>Viscosity:</b> {coating_info.get('Viscosity', 'N/A')} Pa·s</p>
-                        <p><b>Density:</b> {coating_info.get('Density', 'N/A')} kg/m³</p>
-                        <p><b>Description:</b> {coating_info.get('Description', 'No description available')}</p>
-                    </div>
-                    """,
-                unsafe_allow_html=True
-            )
-    recent_csv_files = [f for f in os.listdir('data_set_csv') if f.endswith(".csv")]
-    selected_csv = st.selectbox("Select CSV to Update", recent_csv_files, key="coating_select_csv_update")
-    if st.button("Update Dataset CSV", key="coating_update_dataset_csv"):
-        if selected_csv:
-            st.write(f"Selected CSV: {selected_csv}")
-            # Use calculated die diameters from the coating calculation
-            primary_die_main_diameter = primary_die_diameter
-            secondary_die_main_diameter = secondary_die_diameter
-
-            data_to_add = [
-                {"Parameter Name": "Entry Fiber Diameter", "Value": entry_fiber_diameter, "Units": "µm"},
-                {"Parameter Name": "First Coating Diameter (Theoretical)", "Value": FC_diameter, "Units": "µm"},
-                {"Parameter Name": "Second Coating Diameter (Theoretical)", "Value": SC_diameter, "Units": "µm"},
-                {"Parameter Name": "Primary Coating", "Value": primary_coating, "Units": ""},
-                {"Parameter Name": "Secondary Coating", "Value": secondary_coating, "Units": ""},
-                {"Parameter Name": "First Coating Entry Die", "Value": first_entry_die, "Units": "µm"},
-                {"Parameter Name": "Second Coating Entry Die", "Value": second_entry_die, "Units": "µm"},
-                {"Parameter Name": "Primary Coating Temperature", "Value": primary_temperature, "Units": "°C"},
-                {"Parameter Name": "Secondary Coating Temperature", "Value": secondary_temperature, "Units": "°C"},
-                {"Parameter Name": "Primary Die Diameter", "Value": primary_die_main_diameter, "Units": "µm"},
-                {"Parameter Name": "Secondary Die Diameter", "Value": secondary_die_main_diameter, "Units": "µm"},
-            ]
-            csv_path = os.path.join('data_set_csv', selected_csv)
-            try:
-                df_csv = pd.read_csv(csv_path)
-            except FileNotFoundError:
-                st.error(f"CSV file '{selected_csv}' not found.")
-                st.stop()
-            new_rows = pd.DataFrame(data_to_add)
-            df_csv = pd.concat([df_csv, new_rows], ignore_index=True)
-            df_csv.to_csv(csv_path, index=False)
-            st.success(f"CSV '{selected_csv}' updated with new data!")
-def render_pid_tf_section():
-    st.subheader("🎛 PID & TF")
-
-    st.title("🔧 PID and TF Configuration")
-
-    # Load previous configuration if exists
-    pid_config_path = "pid_config.json"
-    if os.path.exists(pid_config_path):
-        with open(pid_config_path, "r") as f:
-            pid_config = json.load(f)
-    else:
-        pid_config = {}
-
-    st.subheader("PID and TF Settings")
-
-    # Input fields for P Gain and I Gain
-    p_gain = st.number_input("P Gain (Diameter Control)", min_value=0.0, step=0.1, value=pid_config.get("p_gain", 1.0))
-    i_gain = st.number_input("I Gain (Diameter Control)", min_value=0.0, step=0.1, value=pid_config.get("i_gain", 1.0))
-    # Winder Configuration
-    winder_mode = st.selectbox("TF Mode", ["Winder", "Straight Mode"],
-                               index=["Winder", "Straight Mode"].index(pid_config.get("winder_mode", "Winder")))
-
-    # Increment Value for Winder
-    increment_value = st.number_input("Increment Value [mm]", min_value=0.0, step=0.1,
-                                      value=pid_config.get("increment_value", 0.5))
-
-    # Select CSV to save the configuration
-    selected_csv = st.selectbox("Select CSV to Save PID and TF Configuration",
-                                [f for f in os.listdir('data_set_csv') if f.endswith('.csv')])
-
-    if st.button("💾 Save PID and TF Configuration"):
-        if not selected_csv:
-            st.error("Please select a CSV file before saving.")
-        else:
-            pid_config["p_gain"] = p_gain
-            pid_config["i_gain"] = i_gain
-            pid_config["winder_mode"] = winder_mode
-            pid_config["increment_value"] = increment_value
-
-            # Save the PID configuration to a JSON file
-            with open(pid_config_path, "w") as f:
-                json.dump(pid_config, f, indent=4)
-
-            st.success(f"PID and TF configuration saved to '{selected_csv}'!")
-
-            # Save to the chosen CSV
-            csv_path = os.path.join('data_set_csv', selected_csv)
-            df_csv = pd.read_csv(csv_path)
-
-            new_data = [
-                {"Parameter Name": "P Gain (Diameter Control)", "Value": p_gain, "Units": ""},
-                {"Parameter Name": "I Gain (Diameter Control)", "Value": i_gain, "Units": ""},
-                {"Parameter Name": "TF Mode", "Value": winder_mode, "Units": ""},
-                {"Parameter Name": "Increment TF Value", "Value": increment_value, "Units": "mm"}
-            ]
-            new_df = pd.DataFrame(new_data)
-            df_csv = pd.concat([df_csv, new_df], ignore_index=True)
-
-            # Save back to CSV
-            df_csv.to_csv(csv_path, index=False)
-            # st.success(f"PID and TF configuration saved to '{selected_csv}'!")
 def render_schedule_home_minimal():
+    import plotly.express as px
     st.subheader("📅 Schedule")
 
-    SCHEDULE_FILE = "tower_schedule.csv"
+    SCHEDULE_FILE = P.schedule_csv
     required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
 
     # Ensure file exists (works even if empty / no events)
@@ -1152,7 +1136,7 @@ def render_schedule_home_minimal():
     schedule_df["Start DateTime"] = pd.to_datetime(schedule_df["Start DateTime"], errors="coerce")
     schedule_df["End DateTime"] = pd.to_datetime(schedule_df["End DateTime"], errors="coerce")
 
-    # Clean Description/Recurrence strings (safe, but the REAL fix is hovertemplate=None below)
+    # Clean Description/Recurrence strings
     schedule_df["Description"] = (
         schedule_df["Description"]
         .fillna("")
@@ -1239,7 +1223,9 @@ def render_schedule_home_minimal():
 
             # Non-recurring
             if rec_low in ("", "none", "nan"):
-                out_rows.append(r.to_dict())
+                d0 = r.to_dict()
+                d0["Recurrence"] = "None"
+                out_rows.append(d0)
                 continue
 
             def _add_step(ts: pd.Timestamp) -> pd.Timestamp:
@@ -1253,7 +1239,9 @@ def render_schedule_home_minimal():
 
             # Unknown recurrence -> treat as non-recurring
             if pd.isna(_add_step(pd.Timestamp(st0))):
-                out_rows.append(r.to_dict())
+                d0 = r.to_dict()
+                d0["Recurrence"] = "None"
+                out_rows.append(d0)
                 continue
 
             cur_start = pd.Timestamp(st0)
@@ -1277,6 +1265,7 @@ def render_schedule_home_minimal():
                     d = r.to_dict()
                     d["Start DateTime"] = cur_start
                     d["End DateTime"] = cur_end
+                    d["Recurrence"] = rec if rec else "None"
                     out_rows.append(d)
 
                 nxt = _add_step(cur_start)
@@ -1295,6 +1284,10 @@ def render_schedule_home_minimal():
         out = out[df_in.columns]
         out["Start DateTime"] = pd.to_datetime(out["Start DateTime"], errors="coerce")
         out["End DateTime"] = pd.to_datetime(out["End DateTime"], errors="coerce")
+
+        # Ensure Recurrence always has a nice value
+        out["Recurrence"] = out["Recurrence"].fillna("None").astype(str).str.strip()
+        out.loc[out["Recurrence"].isin(["", "none", "None", "nan", "NaN"]), "Recurrence"] = "None"
         return out
 
     win_start = pd.to_datetime(start_filter)
@@ -1326,6 +1319,16 @@ def render_schedule_home_minimal():
         st.info("No events in the selected range (or schedule is empty).")
         return
 
+    # =========================================================
+    # ✅ HOVER FIX (ONLY CHANGE YOU ASKED FOR)
+    # px.timeline hover can't reliably format x_end, so we precompute strings
+    # and force a clean hovertemplate (like the Schedule tab)
+    # =========================================================
+    filtered["StartStr"] = pd.to_datetime(filtered["Start DateTime"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+    filtered["EndStr"] = pd.to_datetime(filtered["End DateTime"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+    filtered["RecurrenceDisp"] = filtered["Recurrence"].fillna("None").astype(str).str.strip()
+    filtered.loc[filtered["RecurrenceDisp"].isin(["", "none", "None", "nan", "NaN"]), "RecurrenceDisp"] = "None"
+
     fig = px.timeline(
         filtered,
         x_start="Start DateTime",
@@ -1334,17 +1337,22 @@ def render_schedule_home_minimal():
         color="Event Type",
         color_discrete_map=event_colors,
         title="Tower Schedule",
-        hover_data={
-            "Description": True,
-            "Recurrence": True,
-            "Start DateTime": True,
-            "End DateTime": True,
-        },
+        custom_data=["StartStr", "EndStr", "RecurrenceDisp", "Description"],
     )
 
-    # ✅ This is the key line: kills the leaked %{customdata[0]} hovertemplate
-    fig.update_traces(hovertemplate=None)
+    # Force clean hover (NO weird %{customdata[0]} text leaks, NO broken x_end formatting)
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Start: %{customdata[0]}<br>"
+            "End: %{customdata[1]}<br>"
+            "Recurrence: %{customdata[2]}<br>"
+            "Description: %{customdata[3]}"
+            "<extra></extra>"
+        )
+    )
 
+    # Keep your layout exactly as you had it
     fig.update_layout(
         paper_bgcolor="rgba(15,15,20,0.92)",
         plot_bgcolor="rgba(15,15,20,0.70)",
@@ -1356,10 +1364,11 @@ def render_schedule_home_minimal():
     fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)")
 
     st.plotly_chart(fig, use_container_width=True)
+
 def render_parts_orders_home_all():
     st.subheader("🧩 Parts Orders")
 
-    ORDER_FILE = "part_orders.csv"
+    ORDER_FILE = P.parts_orders_csv
 
     # ✅ NEW canonical statuses (Needed -> Opened)
     status_order = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
@@ -1592,6 +1601,7 @@ def render_parts_orders_home_all():
         use_container_width=True,
         height=360
     )
+
 def render_corr_outliers_tab(DRAW_FOLDER: str, MAINT_FOLDER: str):
     st.subheader("📈 Correlation & Outliers (auto, incremental)")
     st.caption(
@@ -1616,11 +1626,11 @@ def render_corr_outliers_tab(DRAW_FOLDER: str, MAINT_FOLDER: str):
         "Date/Time", "DateTime", "Datetime", "Timestamp", "Time", "time", "datetime", "date_time", "date"
     ]
 
-    CORR_METHOD = "spearman"          # robust
-    TIME_WINDOW_SECONDS = 60          # corr point every 60s (if timestamp exists)
-    ROW_WINDOW = 1500                 # if no timestamp -> window by rows
+    CORR_METHOD = "spearman"  # robust
+    TIME_WINDOW_SECONDS = 60  # corr point every 60s (if timestamp exists)
+    ROW_WINDOW = 1500  # if no timestamp -> window by rows
     MIN_POINTS_PER_WINDOW = 80
-    MAX_NUMERIC_COLS = 28             # safety: pairs explode fast (28 => 378 pairs)
+    MAX_NUMERIC_COLS = 28  # safety: pairs explode fast (28 => 378 pairs)
     DROP_CONSTANT_COLS = True
 
     # Outlier settings (MAD on correlation time-series per pair)
@@ -1995,7 +2005,7 @@ def render_corr_outliers_tab(DRAW_FOLDER: str, MAINT_FOLDER: str):
 
     a = (page - 1) * plots_per_page
     b = min(len(pair_list), a + plots_per_page)
-    st.caption(f"Showing pairs {a+1}–{b} of {len(pair_list)}")
+    st.caption(f"Showing pairs {a + 1}–{b} of {len(pair_list)}")
 
     show_pairs = pair_list[a:b]
 
@@ -2133,11 +2143,11 @@ def render_maintenance_load_report(files, load_errors):
             )
 
 def render_new_draw_checklist(
-    dfm,
-    current_draw_count: int,
-    state: dict,
-    state_path: str,
-    save_state_fn,
+        dfm,
+        current_draw_count: int,
+        state: dict,
+        state_path: str,
+        save_state_fn,
 ):
     import streamlit as st
 
@@ -2158,11 +2168,11 @@ def render_new_draw_checklist(
 
     routine = dfm[dfm["Tracking_Mode"].str.lower().eq("event")].copy()
     text = (
-        routine["Task"].fillna("")
-        + " "
-        + routine["Notes"].fillna("")
-        + " "
-        + routine["Procedure_Summary"].fillna("")
+            routine["Task"].fillna("")
+            + " "
+            + routine["Notes"].fillna("")
+            + " "
+            + routine["Procedure_Summary"].fillna("")
     ).str.lower()
 
     pre = routine[text.str.contains(r"\bpre\b|\bbefore\b|\bstartup\b")].copy()
@@ -2178,7 +2188,7 @@ def render_new_draw_checklist(
                 st.info("No pre-draw routine tasks found.")
             for i, r in pre.iterrows():
                 st.checkbox(
-                    f"{r.get('Component','')} — {r.get('Task','')}",
+                    f"{r.get('Component', '')} — {r.get('Task', '')}",
                     key=f"pre_{i}"
                 )
 
@@ -2188,7 +2198,7 @@ def render_new_draw_checklist(
                 st.info("No post-draw routine tasks found.")
             for i, r in post.iterrows():
                 st.checkbox(
-                    f"{r.get('Component','')} — {r.get('Task','')}",
+                    f"{r.get('Component', '')} — {r.get('Task', '')}",
                     key=f"post_{i}"
                 )
 
@@ -2284,20 +2294,19 @@ def render_maintenance_horizon_selector(current_draw_count: int):
     )
 
 def render_maintenance_roadmaps(
-    dfm: pd.DataFrame,
-    current_date,
-    current_draw_count: int,
-    furnace_hours: float,
-    uv1_hours: float,
-    uv2_hours: float,
-    horizon_hours: int,
-    horizon_days: int,
-    horizon_draws: int,
+        dfm: pd.DataFrame,
+        current_date,
+        current_draw_count: int,
+        furnace_hours: float,
+        uv1_hours: float,
+        uv2_hours: float,
+        horizon_hours: int,
+        horizon_days: int,
+        horizon_draws: int,
 ):
     import plotly.graph_objects as go
     import pandas as pd
     import streamlit as st
-    import datetime as dt
 
     def status_color(s):
         s = str(s).upper()
@@ -2317,7 +2326,7 @@ def render_maintenance_roadmaps(
         if df is not None and not df.empty:
             fig.add_trace(go.Scatter(
                 x=df[xcol],
-                y=[0]*len(df),
+                y=[0] * len(df),
                 mode="markers",
                 marker=dict(
                     size=13,
@@ -2328,7 +2337,7 @@ def render_maintenance_roadmaps(
                 hovertemplate="%{text}<extra></extra>",
             ))
         else:
-            mid = x0 + (x1 - x0)/2
+            mid = x0 + (x1 - x0) / 2
             fig.add_annotation(x=mid, y=0, text="No tasks in horizon", showarrow=False)
 
         fig.update_layout(
@@ -2462,27 +2471,29 @@ def render_maintenance_done_editor(dfm):
     return edited
 
 def render_maintenance_apply_done(
-    edited,
-    *,
-    dfm,
-    current_date,
-    current_draw_count,
-    actor,
-    MAINT_FOLDER,
-    STATE_PATH,
-    con,
-    read_file,
-    write_file,
-    normalize_df,
-    templateize_df,
-    pick_current_hours,
-    mode_norm,
+        edited,
+        *,
+        dfm,
+        current_date,
+        current_draw_count,
+        actor,
+        MAINT_FOLDER,
+        STATE_PATH,
+        con,
+        read_file,
+        write_file,
+        normalize_df,
+        templateize_df,
+        pick_current_hours,
+        mode_norm,
+        MAINT_ACTIONS_CSV,                  # ✅ NEW
+        append_maintenance_actions_csv,      # ✅ NEW
 ):
+    import os
     import streamlit as st
     import pandas as pd
     import datetime as dt
     import time
-    import numpy as np
 
     if not st.button("✅ Apply 'Done Now' updates", type="primary"):
         return
@@ -2495,29 +2506,35 @@ def render_maintenance_apply_done(
     updated = 0
     problems = []
 
+    # ----------------------------
+    # 1) Update each source file
+    # ----------------------------
     for src, grp in done_rows.groupby("Source_File"):
-        path = os.path.join(MAINT_FOLDER, src)
+        path = os.path.join(MAINT_FOLDER, str(src))
         try:
             raw = read_file(path)
             df_src = normalize_df(raw)
             df_src["Tracking_Mode_norm"] = df_src["Tracking_Mode"].apply(mode_norm)
 
             for _, r in grp.iterrows():
-                mode = mode_norm(r["Tracking_Mode"])
+                mode = mode_norm(r.get("Tracking_Mode", ""))
+
                 mask = (
-                    df_src["Component"].astype(str).eq(str(r["Component"])) &
-                    df_src["Task"].astype(str).eq(str(r["Task"]))
+                    df_src["Component"].astype(str).eq(str(r.get("Component", ""))) &
+                    df_src["Task"].astype(str).eq(str(r.get("Task", "")))
                 )
 
                 if not mask.any():
                     continue
 
+                # always set done date
+                df_src.loc[mask, "Last_Done_Date"] = current_date.isoformat()
+
                 if mode == "hours":
-                    df_src.loc[mask, "Last_Done_Hours"] = pick_current_hours(r["Hours_Source"])
+                    df_src.loc[mask, "Last_Done_Hours"] = float(pick_current_hours(r.get("Hours_Source", "")))
                 elif mode == "draws":
                     df_src.loc[mask, "Last_Done_Draw"] = int(current_draw_count)
 
-                df_src.loc[mask, "Last_Done_Date"] = current_date.isoformat()
                 updated += int(mask.sum())
 
             out = templateize_df(df_src, list(raw.columns))
@@ -2528,31 +2545,78 @@ def render_maintenance_apply_done(
 
     st.success(f"Updated {updated} task(s).")
 
-    # ---- Log to DuckDB ----
-    now = dt.datetime.combine(current_date, dt.datetime.now().time())
+    # ----------------------------
+    # 2) Build DONE actions rows (one per selected task)
+    # ----------------------------
+    # Use python datetime (not numpy) to avoid dtype issues
+    now_dt = dt.datetime.now()
+    action_ts = dt.datetime.combine(current_date, now_dt.time())
+
+    base_ms = int(time.time() * 1000)
     actions = []
-    for _, r in done_rows.iterrows():
+
+    for i, (_, r) in enumerate(done_rows.reset_index(drop=True).iterrows()):
+        mode = mode_norm(r.get("Tracking_Mode", ""))
+
+        done_hours = None
+        done_draw = None
+        if mode == "hours":
+            done_hours = float(pick_current_hours(r.get("Hours_Source", "")))
+        elif mode == "draws":
+            done_draw = int(current_draw_count)
+
         actions.append({
-            "action_id": int(time.time() * 1000),
-            "action_ts": now,
-            "component": r["Component"],
-            "task": r["Task"],
+            "action_id": int(base_ms + i),  # ✅ unique per row
+            "action_ts": action_ts,
+            "component": str(r.get("Component", "")),
+            "task": str(r.get("Task", "")),
             "task_id": str(r.get("Task_ID", "")),
-            "tracking_mode": r["Tracking_Mode"],
-            "hours_source": r.get("Hours_Source", ""),
+            "tracking_mode": str(r.get("Tracking_Mode", "")),
+            "hours_source": str(r.get("Hours_Source", "")),
             "done_date": current_date,
-            "done_hours": None,
-            "done_draw": None,
-            "source_file": r["Source_File"],
-            "actor": actor,
-            "note": ""
+            "done_hours": done_hours,
+            "done_draw": done_draw,
+            "source_file": str(r.get("Source_File", "")),
+            "actor": str(actor),
+            "note": "",
         })
 
-    if actions:
-        df_act = pd.DataFrame(actions)
-        con.register("tmp_actions", df_act)
-        con.execute("INSERT INTO maintenance_actions SELECT * FROM tmp_actions")
-        con.unregister("tmp_actions")
+    # ----------------------------
+    # 3) Append to CSV log (one-line rows)
+    # ----------------------------
+    try:
+        append_maintenance_actions_csv(MAINT_ACTIONS_CSV, actions)
+    except Exception as e:
+        st.warning(f"Failed writing maintenance_actions_log.csv: {e}")
+
+    # ----------------------------
+    # 4) Insert into DuckDB safely (no con.register)
+    # ----------------------------
+    try:
+        insert_sql = """
+            INSERT INTO maintenance_actions (
+                action_id, action_ts, component, task, task_id, tracking_mode, hours_source,
+                done_date, done_hours, done_draw, source_file, actor, note
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        for a in actions:
+            con.execute(insert_sql, [
+                int(a["action_id"]),
+                a["action_ts"],  # python datetime
+                a["component"],
+                a["task"],
+                a["task_id"],
+                a["tracking_mode"],
+                a["hours_source"],
+                a["done_date"],  # python date
+                a["done_hours"],
+                a["done_draw"],
+                a["source_file"],
+                a["actor"],
+                a["note"],
+            ])
+    except Exception as e:
+        st.warning(f"DB insert failed (CSV log still written): {e}")
 
     if problems:
         st.warning("Some files had issues:")
@@ -2567,7 +2631,7 @@ def render_maintenance_tasks_snapshot(dfm, con):
     import streamlit as st
 
     def task_key(r):
-        s = f"{r.get('Source_File','')}|{r.get('Task_ID','')}|{r.get('Component','')}|{r.get('Task','')}"
+        s = f"{r.get('Source_File', '')}|{r.get('Task_ID', '')}|{r.get('Component', '')}|{r.get('Task', '')}"
         return hashlib.md5(s.encode("utf-8", errors="ignore")).hexdigest()
 
     df = dfm.copy()
@@ -2613,12 +2677,15 @@ def render_maintenance_tasks_snapshot(dfm, con):
     except Exception as e:
         st.warning(f"DuckDB sync failed: {e}")
 
-def load_maintenance_files(MAINT_FOLDER):
+def load_maintenance_files(MAINT_FOLDER=None):
     import os
     import numpy as np
     import pandas as pd
     import streamlit as st
+    if not MAINT_FOLDER:
+        MAINT_FOLDER = os.path.join(os.getcwd(), "maintenance")
 
+    os.makedirs(MAINT_FOLDER, exist_ok=True)
     normalize_map = {
         "equipment": "Component",
         "task name": "Task",
@@ -2700,13 +2767,13 @@ def load_maintenance_files(MAINT_FOLDER):
     return dfm, files, load_errors
 
 def render_maintenance_tasks_editor(
-    *,
-    MAINT_FOLDER: str,
-    files: list,
-    read_file,
-    write_file,
-    normalize_df,
-    templateize_df,
+        *,
+        MAINT_FOLDER: str,
+        files: list,
+        read_file,
+        write_file,
+        normalize_df,
+        templateize_df,
 ):
     import os
     import pandas as pd
@@ -3066,9 +3133,9 @@ def render_faults_section(*, con, MAINT_FOLDER: str, actor: str):
         filtered = filtered[filtered["Severity"].fillna("").astype(str).isin(filt_sev)]
     if text_q:
         hay = (
-            filtered["Fault ID"].fillna("").astype(str)
-            + " " + filtered["Title"].fillna("").astype(str)
-            + " " + filtered["Component"].fillna("").astype(str)
+                filtered["Fault ID"].fillna("").astype(str)
+                + " " + filtered["Title"].fillna("").astype(str)
+                + " " + filtered["Component"].fillna("").astype(str)
         ).str.lower()
         filtered = filtered[hay.str.contains(text_q, na=False)]
 
@@ -3099,9 +3166,11 @@ def render_faults_section(*, con, MAINT_FOLDER: str, actor: str):
             component = st.selectbox(
                 "Component / Part",
                 options=(components if components else [row.get("Component", "")]),
-                index=(components.index(row.get("Component")) if components and row.get("Component") in components else 0),
+                index=(
+                    components.index(row.get("Component")) if components and row.get("Component") in components else 0),
                 key=f"edit_comp_{fault_id}"
-            ) if components else st.text_input("Component / Part", value=str(row.get("Component", "")), key=f"edit_comp_txt_{fault_id}")
+            ) if components else st.text_input("Component / Part", value=str(row.get("Component", "")),
+                                               key=f"edit_comp_txt_{fault_id}")
         with colB:
             severity = st.selectbox(
                 "Severity",
@@ -3117,21 +3186,29 @@ def render_faults_section(*, con, MAINT_FOLDER: str, actor: str):
                 key=f"edit_status_{fault_id}"
             )
 
-        area = st.text_input("Subsystem/Area", value=str(row.get("Subsystem/Area", "") or ""), key=f"edit_area_{fault_id}")
+        area = st.text_input("Subsystem/Area", value=str(row.get("Subsystem/Area", "") or ""),
+                             key=f"edit_area_{fault_id}")
         title = st.text_input("Title", value=str(row.get("Title", "") or ""), key=f"edit_title_{fault_id}")
-        desc = st.text_area("Description", value=str(row.get("Description", "") or ""), key=f"edit_desc_{fault_id}", height=140)
+        desc = st.text_area("Description", value=str(row.get("Description", "") or ""), key=f"edit_desc_{fault_id}",
+                            height=140)
 
         c4, c5 = st.columns(2)
         with c4:
-            immediate = st.text_area("Immediate Action", value=str(row.get("Immediate Action", "") or ""), key=f"edit_im_{fault_id}", height=90)
+            immediate = st.text_area("Immediate Action", value=str(row.get("Immediate Action", "") or ""),
+                                     key=f"edit_im_{fault_id}", height=90)
             owner = st.text_input("Owner", value=str(row.get("Owner", "") or ""), key=f"edit_owner_{fault_id}")
         with c5:
-            root = st.text_area("Root Cause", value=str(row.get("Root Cause", "") or ""), key=f"edit_root_{fault_id}", height=90)
-            related_draw = st.text_input("Related Draw", value=str(row.get("Related Draw", "") or ""), key=f"edit_draw_{fault_id}")
+            root = st.text_area("Root Cause", value=str(row.get("Root Cause", "") or ""), key=f"edit_root_{fault_id}",
+                                height=90)
+            related_draw = st.text_input("Related Draw", value=str(row.get("Related Draw", "") or ""),
+                                         key=f"edit_draw_{fault_id}")
 
-        corr = st.text_area("Corrective Action", value=str(row.get("Corrective Action", "") or ""), key=f"edit_corr_{fault_id}", height=80)
-        prev = st.text_area("Preventive Action", value=str(row.get("Preventive Action", "") or ""), key=f"edit_prev_{fault_id}", height=80)
-        links = st.text_input("Attachments/Links", value=str(row.get("Attachments/Links", "") or ""), key=f"edit_links_{fault_id}")
+        corr = st.text_area("Corrective Action", value=str(row.get("Corrective Action", "") or ""),
+                            key=f"edit_corr_{fault_id}", height=80)
+        prev = st.text_area("Preventive Action", value=str(row.get("Preventive Action", "") or ""),
+                            key=f"edit_prev_{fault_id}", height=80)
+        links = st.text_input("Attachments/Links", value=str(row.get("Attachments/Links", "") or ""),
+                              key=f"edit_links_{fault_id}")
         notes = st.text_area("Notes", value=str(row.get("Notes", "") or ""), key=f"edit_notes_{fault_id}", height=80)
 
         closed_date = str(row.get("Closed Date", "") or "")
@@ -3142,7 +3219,8 @@ def render_faults_section(*, con, MAINT_FOLDER: str, actor: str):
 
         colX, colY = st.columns([1, 1])
         with colX:
-            save_btn = st.button("💾 Save changes", type="primary", use_container_width=True, key=f"save_fault_{fault_id}")
+            save_btn = st.button("💾 Save changes", type="primary", use_container_width=True,
+                                 key=f"save_fault_{fault_id}")
         with colY:
             st.button("Close", use_container_width=True, key=f"close_fault_{fault_id}")
 
@@ -3170,56 +3248,6 @@ def render_faults_section(*, con, MAINT_FOLDER: str, actor: str):
     if sel:
         _dlg_edit_fault(sel)
 
-DATASET_DIR = "data_set_csv"
-PID_CONFIG_PATH = "pid_config.json"
-
-
-# ============================================================
-# Dataset helpers
-# ============================================================
-def _ensure_dataset_dir():
-    os.makedirs(DATASET_DIR, exist_ok=True)
-
-def _list_dataset_csvs():
-    _ensure_dataset_dir()
-    return sorted([f for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")])
-
-def _most_recent_csv():
-    _ensure_dataset_dir()
-    files = [os.path.join(DATASET_DIR, f) for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")]
-    if not files:
-        return None
-    latest_path = max(files, key=os.path.getmtime)
-    return os.path.basename(latest_path)
-
-def _append_rows_to_dataset_csv(selected_csv: str, rows: list[dict]):
-    if not selected_csv:
-        st.error("No CSV selected.")
-        return
-
-    _ensure_dataset_dir()
-    csv_path = os.path.join(DATASET_DIR, selected_csv)
-
-    if not os.path.exists(csv_path):
-        pd.DataFrame(columns=["Parameter Name", "Value", "Units"]).to_csv(csv_path, index=False)
-
-    df = pd.read_csv(csv_path)
-    for col in ["Parameter Name", "Value", "Units"]:
-        if col not in df.columns:
-            df[col] = pd.Series(dtype="object")
-
-    df = df[["Parameter Name", "Value", "Units"]]
-    new_rows = pd.DataFrame(rows)
-
-    df = pd.concat([df, new_rows], ignore_index=True)
-    df.to_csv(csv_path, index=False)
-
-
-DATASET_DIR = "data_set_csv"
-PID_CONFIG_PATH = "pid_config.json"
-ORDERS_FILE = "draw_orders.csv"
-PREFORMS_FILE = "preforms_inventory.csv"
-
 def append_preform_length(preform_name: str, length_cm: float, source_draw: str):
     import pandas as pd
     from datetime import datetime
@@ -3241,865 +3269,15 @@ def append_preform_length(preform_name: str, length_cm: float, source_draw: str)
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(PREFORMS_FILE, index=False)
     st.success(f"🧱 Preform **{preform_name}** updated → {preform_len_after_cm:.1f} cm remaining.")
-def get_most_recent_dataset_csv(dataset_dir="data_set_csv"):
+
+def get_most_recent_dataset_csv(dataset_dir=P.dataset_dir):
     if not os.path.exists(dataset_dir):
         return None
     files = [os.path.join(dataset_dir, f) for f in os.listdir(dataset_dir) if f.endswith(".csv")]
     if not files:
         return None
     return os.path.basename(max(files, key=os.path.getmtime))
-def mark_draw_order_done_by_dataset_csv(dataset_csv_filename: str):
-    """
-    Your draw_orders.csv schema uses:
-      - Active CSV
-      - Done CSV
-      - Status
-      - Done Description
-    This will:
-      1) Find row where Active CSV == dataset filename (preferred)
-         else row where Done CSV == dataset filename (fallback)
-      2) Set Status = "Done"
-      3) Set Done CSV = dataset filename
-      4) Set Done Description = "Saved from Dashboard"
-      5) Set T&M Moved = True and timestamp (if columns exist)
-    """
-    if not os.path.exists(ORDERS_FILE):
-        return False, f"{ORDERS_FILE} not found (couldn't mark order done)."
 
-    orders = pd.read_csv(ORDERS_FILE)
-
-    # Ensure columns exist (create if missing)
-    for col in ["Status", "Active CSV", "Done CSV", "Done Description", "T&M Moved", "T&M Moved Timestamp"]:
-        if col not in orders.columns:
-            orders[col] = ""
-
-    # Match row
-    active = orders["Active CSV"].astype(str).str.strip()
-    done = orders["Done CSV"].astype(str).str.strip()
-
-    match = (active == dataset_csv_filename)
-    if not match.any():
-        match = (done == dataset_csv_filename)
-
-    if not match.any():
-        return False, f"No matching row found in draw_orders.csv for '{dataset_csv_filename}' (Active CSV / Done CSV)."
-
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    orders.loc[match, "Status"] = "Done"
-    orders.loc[match, "Done CSV"] = dataset_csv_filename
-    orders.loc[match, "Done Description"] = done_description
-
-    # Optional fields
-    if "T&M Moved" in orders.columns:
-        orders.loc[match, "T&M Moved"] = True
-    if "T&M Moved Timestamp" in orders.columns:
-        orders.loc[match, "T&M Moved Timestamp"] = now_str
-
-    orders.to_csv(ORDERS_FILE, index=False)
-    return True, "Order marked as Done (matched by Active CSV)."
-def _ensure_dataset_dir():
-    os.makedirs(DATASET_DIR, exist_ok=True)
-def _list_dataset_csvs():
-    _ensure_dataset_dir()
-    return sorted([f for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")])
-def _most_recent_csv():
-    _ensure_dataset_dir()
-    files = [os.path.join(DATASET_DIR, f) for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")]
-    if not files:
-        return None
-    latest_path = max(files, key=os.path.getmtime)
-    return os.path.basename(latest_path)
-def _append_rows_to_dataset_csv(selected_csv: str, rows: list[dict]):
-    if not selected_csv:
-        st.error("No CSV selected.")
-        return
-
-    _ensure_dataset_dir()
-    csv_path = os.path.join(DATASET_DIR, selected_csv)
-
-    if not os.path.exists(csv_path):
-        pd.DataFrame(columns=["Parameter Name", "Value", "Units"]).to_csv(csv_path, index=False)
-
-    df = pd.read_csv(csv_path)
-    for col in ["Parameter Name", "Value", "Units"]:
-        if col not in df.columns:
-            df[col] = pd.Series(dtype="object")
-
-    df = df[["Parameter Name", "Value", "Units"]]
-    new_rows = pd.DataFrame(rows)
-
-    df = pd.concat([df, new_rows], ignore_index=True)
-    df.to_csv(csv_path, index=False)
-# ============================================================
-# IRIS (no CSV save inside)
-# ============================================================
-def render_iris_selection_section_collect():
-    import numpy as np
-    import streamlit as st
-
-    st.subheader("🔍 Iris Selection Tool")
-    iris_data = {}
-
-    # ============================
-    # Helpers
-    # ============================
-    def area_circle_from_diameter(d_mm: float) -> float:
-        return np.pi * (d_mm / 2.0) ** 2
-
-    def area_octagon_from_f2f(d_f2f_mm: float) -> float:
-        # A = 2(√2 − 1) d²
-        return 2.0 * (np.sqrt(2.0) - 1.0) * (d_f2f_mm ** 2)
-
-    def apply_tiger_cut(area_mm2: float, cut_pct: float) -> float:
-        return area_mm2 * (1.0 - cut_pct / 100.0)
-
-    def effective_diameter_from_area(area_mm2: float) -> float:
-        # Equal-area round rod
-        return 2.0 * np.sqrt(area_mm2 / np.pi)
-
-    def gap_area(iris_mm: float, eff_mm: float) -> float:
-        return (np.pi / 4.0) * (iris_mm**2 - eff_mm**2)
-
-    # ============================
-    # INPUTS
-    # ============================
-    st.markdown("### 🧾 Inputs")
-
-    preform_value_mm = st.number_input(
-        "Preform Diameter / F2F (mm)",
-        min_value=0.0,
-        step=0.1,
-        format="%.2f",
-        help="Used as circular diameter or octagonal F2F depending on options.",
-        key="iris_preform_value_collect"
-    )
-
-    # ============================
-    # OPTIONS
-    # ============================
-    with st.expander("⚙️ Options", expanded=True):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            is_octagonal = st.toggle(
-                "📐 Octagonal preform (interpret value as F2F)",
-                value=False,
-                key="iris_octagonal_flag_collect"
-            )
-
-            tiger_cut = st.checkbox(
-                "🐯 Tiger cut",
-                value=False,
-                key="iris_tiger_flag_collect"
-            )
-
-            cut_percentage = 0
-            if tiger_cut:
-                cut_percentage = st.number_input(
-                    "Cut percentage (%)",
-                    min_value=0,
-                    max_value=100,
-                    value=20,
-                    step=1,
-                    key="iris_cut_pct_collect"
-                )
-
-        with col2:
-            pm_iris_system = st.checkbox(
-                "🧲 PM iris system (auto iris = 37 mm)",
-                value=False,
-                key="iris_pm_system_collect"
-            )
-
-    if preform_value_mm <= 0:
-        st.info("Enter a preform value to calculate.")
-        return iris_data
-
-    # ============================
-    # GEOMETRY + AREA
-    # ============================
-    base_shape = "Octagonal (F2F)" if is_octagonal else "Circular"
-    shape_label = f"{base_shape} + Tiger cut" if tiger_cut else base_shape
-
-    if is_octagonal:
-        base_area = area_octagon_from_f2f(preform_value_mm)
-        base_label = "Octagonal Area"
-    else:
-        base_area = area_circle_from_diameter(preform_value_mm)
-        base_label = "Circular Area"
-
-    adjusted_area = apply_tiger_cut(base_area, cut_percentage)
-    effective_diameter = effective_diameter_from_area(adjusted_area)
-
-    # ============================
-    # RESULTS
-    # ============================
-    st.markdown("### 📊 Geometry results")
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric(base_label, f"{base_area:.2f} mm²")
-    m2.metric("Adjusted Area", f"{adjusted_area:.2f} mm²")
-    m3.metric("Effective Diameter", f"{effective_diameter:.2f} mm")
-
-    st.caption(
-        f"Shape: **{shape_label}** | "
-        f"Tiger: **{cut_percentage if tiger_cut else 0}%** | "
-        f"PM iris: **{'Yes (37 mm)' if pm_iris_system else 'No'}**"
-    )
-
-    # ============================
-    # IRIS SELECTION
-    # ============================
-    st.markdown("### 🎯 Iris selection")
-
-    if pm_iris_system:
-        selected_iris = 37.0
-        iris_mode = "PM Auto 37"
-        st.success("PM iris enabled → Iris fixed to **37.0 mm**")
-    else:
-        iris_mode = "Manual"
-        iris_diameters = [round(x * 0.5, 1) for x in range(20, 91)]
-        valid_iris = [d for d in iris_diameters if d > effective_diameter]
-
-        if not valid_iris:
-            st.warning("No iris diameter is larger than the effective preform diameter.")
-            return iris_data
-
-        results = [(d, gap_area(d, effective_diameter)) for d in valid_iris]
-        best = min(results, key=lambda x: abs(x[1] - 200.0))
-
-        selected_iris = st.selectbox(
-            "Select iris diameter (mm)",
-            valid_iris,
-            index=valid_iris.index(best[0]),
-            key="iris_selected_diam_collect"
-        )
-
-    gap = max(0.0, gap_area(selected_iris, effective_diameter))
-
-    g1, g2 = st.columns(2)
-    g1.metric("Selected Iris", f"{selected_iris:.1f} mm")
-    g2.metric("Gap Area", f"{gap:.2f} mm²")
-
-    # ============================
-    # RETURN DATA (FOR CSV SAVE)
-    # ============================
-    iris_data = {
-        "Preform Input Value (mm)": float(preform_value_mm),
-        "Preform Shape": shape_label,
-        "Is Octagonal": bool(is_octagonal),
-
-        "Tiger Preform": bool(tiger_cut),
-        "Tiger Cut (%)": int(cut_percentage) if tiger_cut else 0,
-
-        "Octagonal F2F (mm)": float(preform_value_mm) if is_octagonal else None,
-        "Circular Diameter (mm)": float(preform_value_mm) if not is_octagonal else None,
-
-        "PM Iris System": bool(pm_iris_system),
-        "Iris Mode": iris_mode,
-
-        "Base Area (mm^2)": float(base_area),
-        "Adjusted Area (mm^2)": float(adjusted_area),
-        "Effective Preform Diameter (mm)": float(effective_diameter),
-
-        "Selected Iris Diameter (mm)": float(selected_iris),
-        "Gap Area (mm^2)": float(gap),
-    }
-
-    return iris_data
-# ============================================================
-# COATING (no CSV save inside)
-# requires: evaluate_viscosity(), calculate_coating_thickness()
-# ============================================================
-def render_coating_section_collect(config: dict) -> dict:
-    st.subheader("🧴 Coating Calculation")
-
-    dies = config.get("dies")
-    coatings = config.get("coatings")
-    if not dies or not coatings:
-        st.error("Dies and/or Coatings not configured in config.")
-        return {}
-
-    st.markdown("**Entry Fiber Diameter (µm)**")
-
-    # Preset buttons
-    preset_cols = st.columns(3)
-    with preset_cols[0]:
-        if st.button("40 µm", key="preset_fiber_40"):
-            st.session_state.ps_coat_entry_fiber = 40.0
-    with preset_cols[1]:
-        if st.button("125 µm", key="preset_fiber_125"):
-            st.session_state.ps_coat_entry_fiber = 125.0
-    with preset_cols[2]:
-        if st.button("400 µm", key="preset_fiber_400"):
-            st.session_state.ps_coat_entry_fiber = 400.0
-
-    # Ensure default exists
-    if "ps_coat_entry_fiber" not in st.session_state:
-        st.session_state.ps_coat_entry_fiber = 125.0  # sensible default
-
-    entry_fiber_diameter = st.number_input(
-        "",
-        min_value=0.0,
-        step=0.1,
-        format="%.1f",
-        key="ps_coat_entry_fiber"
-    )
-
-    primary_temperature = st.number_input(
-        "Primary Coating Temperature (°C)",
-        value=25.0, step=0.1,
-        key="ps_coat_primary_temp"
-    )
-    secondary_temperature = st.number_input(
-        "Secondary Coating Temperature (°C)",
-        value=25.0, step=0.1,
-        key="ps_coat_secondary_temp"
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        primary_die = st.selectbox("Select Primary Die", list(dies.keys()), key="ps_coat_primary_die")
-        primary_coating = st.selectbox("Select Primary Coating", list(coatings.keys()), key="ps_coat_primary_coating")
-        first_entry_die = st.number_input("First Coating Entry Die (µm)", min_value=0.0, step=0.1, key="ps_coat_first_entry_die")
-    with c2:
-        secondary_die = st.selectbox("Select Secondary Die", list(dies.keys()), key="ps_coat_secondary_die")
-        secondary_coating = st.selectbox("Select Secondary Coating", list(coatings.keys()), key="ps_coat_secondary_coating")
-        second_entry_die = st.number_input("Second Coating Entry Die (µm)", min_value=0.0, step=0.1, key="ps_coat_second_entry_die")
-
-    primary_die_config = dies[primary_die]
-    secondary_die_config = dies[secondary_die]
-    primary_coating_config = coatings[primary_coating]
-    secondary_coating_config = coatings[secondary_coating]
-
-    try:
-        primary_density = primary_coating_config.get("Density", None)
-        secondary_density = secondary_coating_config.get("Density", None)
-
-        primary_neck_length = primary_die_config.get("Neck_Length", 0.002)
-        secondary_neck_length = secondary_die_config.get("Neck_Length", 0.002)
-
-        primary_die_diameter = primary_die_config["Die_Diameter"]
-        secondary_die_diameter = secondary_die_config["Die_Diameter"]
-
-        primary_visc_fn = primary_coating_config.get("viscosity_fit_params", {}).get("function", "T**0.5")
-        secondary_visc_fn = secondary_coating_config.get("viscosity_fit_params", {}).get("function", "T**0.5")
-
-        primary_viscosity = evaluate_viscosity(primary_temperature, primary_visc_fn)
-        secondary_viscosity = evaluate_viscosity(secondary_temperature, secondary_visc_fn)
-
-        if None in [primary_viscosity, primary_density, secondary_viscosity, secondary_density]:
-            st.error("Viscosity/Density missing or not computable. Check config.")
-            return {}
-    except KeyError as e:
-        st.error(f"Missing key in configuration: {e}")
-        return {}
-
-    V = 0.917
-    g = 9.8
-
-    fc_diameter = calculate_coating_thickness(
-        entry_fiber_diameter, primary_die_diameter, primary_viscosity,
-        primary_density, primary_neck_length, V, g
-    )
-    sc_diameter = calculate_coating_thickness(
-        fc_diameter, secondary_die_diameter, secondary_viscosity,
-        secondary_density, secondary_neck_length, V, g
-    )
-
-    st.write("### Coating Dimensions")
-    st.write(f"First Coating Diameter: **{fc_diameter:.1f} µm**")
-    st.write(f"Second Coating Diameter: **{sc_diameter:.1f} µm**")
-
-    return {
-        "entry_fiber_diameter": float(entry_fiber_diameter),
-        "primary_temperature": float(primary_temperature),
-        "secondary_temperature": float(secondary_temperature),
-        "primary_die": primary_die,
-        "secondary_die": secondary_die,
-        "primary_die_diameter": float(primary_die_diameter),
-        "secondary_die_diameter": float(secondary_die_diameter),
-        "primary_coating": primary_coating,
-        "secondary_coating": secondary_coating,
-        "first_entry_die": float(first_entry_die),
-        "second_entry_die": float(second_entry_die),
-        "fc_diameter": float(fc_diameter),
-        "sc_diameter": float(sc_diameter),
-    }
-# ============================================================
-# PID/TF (no CSV save inside)
-# ============================================================
-def render_pid_tf_section_collect() -> dict:
-    st.subheader("🎛 PID & TF Configuration")
-
-    # Load json defaults
-    pid_config = {}
-    if os.path.exists(PID_CONFIG_PATH):
-        try:
-            with open(PID_CONFIG_PATH, "r") as f:
-                pid_config = json.load(f)
-        except Exception:
-            pid_config = {}
-
-    p_gain = st.number_input(
-        "P Gain (Diameter Control)",
-        min_value=0.0, step=0.1,
-        value=float(pid_config.get("p_gain", 1.0)),
-        key="ps_pid_p_gain"
-    )
-    i_gain = st.number_input(
-        "I Gain (Diameter Control)",
-        min_value=0.0, step=0.1,
-        value=float(pid_config.get("i_gain", 1.0)),
-        key="ps_pid_i_gain"
-    )
-    winder_mode = st.selectbox(
-        "TF Mode",
-        ["Winder", "Straight Mode"],
-        index=["Winder", "Straight Mode"].index(pid_config.get("winder_mode", "Winder")),
-        key="ps_pid_tf_mode"
-    )
-    increment_value = st.number_input(
-        "Increment Value [mm]",
-        min_value=0.0, step=0.1,
-        value=float(pid_config.get("increment_value", 0.5)),
-        key="ps_pid_increment_value"
-    )
-
-    # Persist json immediately (optional but nice)
-    if st.checkbox("Save PID defaults to pid_config.json", value=True, key="ps_pid_save_defaults"):
-        new_pid = {
-            "p_gain": float(p_gain),
-            "i_gain": float(i_gain),
-            "winder_mode": winder_mode,
-            "increment_value": float(increment_value),
-        }
-        try:
-            with open(PID_CONFIG_PATH, "w") as f:
-                json.dump(new_pid, f, indent=4)
-        except Exception:
-            st.warning("Could not write pid_config.json (permission/path issue).")
-
-    return {
-        "p_gain": float(p_gain),
-        "i_gain": float(i_gain),
-        "winder_mode": winder_mode,
-        "increment_value": float(increment_value),
-    }
-# ============================================================
-# FINAL SAVE (one click)
-# ============================================================
-def render_drum_selection_section_collect():
-    import streamlit as st
-
-    st.subheader("🧵 Drum Selection")
-
-    drum_options = [f"BN{i}" for i in range(1, 7)]
-
-    selected_drum = st.selectbox(
-        "Select Drum for this draw",
-        options=drum_options,
-        key="process_setup_selected_drum"
-    )
-
-    drum_data = {
-        "Selected Drum": selected_drum
-    }
-
-    return drum_data
-def render_save_all_block(iris_data: dict, coating_data: dict, pid_data: dict, drum_data: dict):
-    import pandas as pd
-    import streamlit as st
-    from datetime import datetime
-
-    st.subheader("💾 Save Everything (one click)")
-
-    _ensure_dataset_dir()
-    csv_files = _list_dataset_csvs()
-    latest = _most_recent_csv()
-
-    # Build rows (start with timestamp)
-    rows = [{
-        "Parameter Name": "Process Setup Timestamp",
-        "Value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Units": ""
-    }]
-
-    # ✅ Keep the same UI button, but DON'T save yet (Streamlit rerun issue)
-    save_to_latest_clicked = st.button("⚡ Save ALL to MOST RECENT CSV", key="ps_saveall_to_latest")
-
-    # =========================
-    # IRIS rows (UPDATED KEYS)
-    # =========================
-    if iris_data:
-        preform_val = iris_data.get("Preform Input Value (mm)")
-        tiger_pct   = iris_data.get("Tiger Cut (%)", 0)
-        eff_d       = iris_data.get("Effective Preform Diameter (mm)")
-        sel_iris    = iris_data.get("Selected Iris Diameter (mm)")
-        gap_area    = iris_data.get("Gap Area (mm^2)")
-
-        is_oct      = iris_data.get("Is Octagonal", False)
-        shape_lbl   = iris_data.get("Preform Shape", "")
-        oct_f2f     = iris_data.get("Octagonal F2F (mm)")
-        pm_sys      = iris_data.get("PM Iris System", False)
-        iris_mode   = iris_data.get("Iris Mode", "")
-        base_area   = iris_data.get("Base Area (mm^2)")
-        adj_area    = iris_data.get("Adjusted Area (mm^2)")
-        tiger_flag  = iris_data.get("Tiger Preform", False)
-        circ_d      = iris_data.get("Circular Diameter (mm)")
-
-        rows += [
-            {"Parameter Name": "Preform Diameter", "Value": circ_d if circ_d is not None else "", "Units": "mm"},
-            {"Parameter Name": "Preform Shape", "Value": shape_lbl, "Units": ""},
-
-            {"Parameter Name": "Octagonal Preform", "Value": 1 if is_oct else 0, "Units": "bool"},
-            {"Parameter Name": "Octagonal F2F", "Value": oct_f2f if oct_f2f is not None else "", "Units": "mm"},
-
-            {"Parameter Name": "Tiger Preform", "Value": 1 if tiger_flag else 0, "Units": "bool"},
-            {"Parameter Name": "Tiger Cut", "Value": tiger_pct, "Units": "%"},
-
-            {"Parameter Name": "PM Iris System", "Value": 1 if pm_sys else 0, "Units": "bool"},
-            {"Parameter Name": "Iris Mode", "Value": iris_mode, "Units": ""},
-
-            {"Parameter Name": "Base Area", "Value": base_area, "Units": "mm^2"},
-            {"Parameter Name": "Adjusted Area", "Value": adj_area, "Units": "mm^2"},
-            {"Parameter Name": "Effective Preform Diameter", "Value": eff_d, "Units": "mm"},
-
-            {"Parameter Name": "Selected Iris Diameter", "Value": sel_iris, "Units": "mm"},
-            {"Parameter Name": "Iris Gap Area", "Value": gap_area, "Units": "mm^2"},
-        ]
-
-    # =========================
-    # Coating rows (unchanged)
-    # =========================
-    if coating_data:
-        rows += [
-            {"Parameter Name": "Entry Fiber Diameter", "Value": coating_data.get("entry_fiber_diameter"), "Units": "µm"},
-            {"Parameter Name": "First Coating Diameter (Theoretical)", "Value": coating_data.get("fc_diameter"), "Units": "µm"},
-            {"Parameter Name": "Second Coating Diameter (Theoretical)", "Value": coating_data.get("sc_diameter"), "Units": "µm"},
-            {"Parameter Name": "Primary Coating", "Value": coating_data.get("primary_coating"), "Units": ""},
-            {"Parameter Name": "Secondary Coating", "Value": coating_data.get("secondary_coating"), "Units": ""},
-            {"Parameter Name": "First Coating Entry Die", "Value": coating_data.get("first_entry_die"), "Units": "µm"},
-            {"Parameter Name": "Second Coating Entry Die", "Value": coating_data.get("second_entry_die"), "Units": "µm"},
-            {"Parameter Name": "Primary Coating Temperature", "Value": coating_data.get("primary_temperature"), "Units": "°C"},
-            {"Parameter Name": "Secondary Coating Temperature", "Value": coating_data.get("secondary_temperature"), "Units": "°C"},
-            {"Parameter Name": "Primary Die Diameter", "Value": coating_data.get("primary_die_diameter"), "Units": "µm"},
-            {"Parameter Name": "Secondary Die Diameter", "Value": coating_data.get("secondary_die_diameter"), "Units": "µm"},
-        ]
-
-    # =========================
-    # PID rows (unchanged)
-    # =========================
-    if pid_data:
-        rows += [
-            {"Parameter Name": "P Gain (Diameter Control)", "Value": pid_data.get("p_gain"), "Units": ""},
-            {"Parameter Name": "I Gain (Diameter Control)", "Value": pid_data.get("i_gain"), "Units": ""},
-            {"Parameter Name": "TF Mode", "Value": pid_data.get("winder_mode"), "Units": ""},
-            {"Parameter Name": "Increment TF Value", "Value": pid_data.get("increment_value"), "Units": "mm"},
-        ]
-
-    # =========================
-    # DRUM rows (new)
-    # =========================
-    if drum_data:
-        rows += [
-            {"Parameter Name": "Selected Drum", "Value": drum_data.get("Selected Drum"), "Units": ""}
-        ]
-
-    # Filter out None only (keep "" if you intentionally set blank)
-    rows = [r for r in rows if r.get("Value") is not None]
-
-    # UI (unchanged)
-    colA, colB = st.columns([2, 1])
-    with colA:
-        selected_csv = st.selectbox(
-            "Or choose a CSV from the list",
-            options=[""] + csv_files,
-            index=0,
-            key="ps_saveall_selected_csv"
-        )
-    with colB:
-        st.write("")
-        st.caption(f"Most recent: **{latest if latest else 'None'}**")
-
-    with st.expander("Preview what will be written", expanded=False):
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    # ✅ Now saving happens AFTER rows are fully built
-    if save_to_latest_clicked:
-        if not latest:
-            st.error("No CSV files found in data_set_csv/")
-        else:
-            _append_rows_to_dataset_csv(latest, rows)
-            st.success(f"Saved ALL to most recent: {latest}")
-
-    if st.button("💾 Save ALL to SELECTED CSV", key="ps_saveall_to_selected"):
-        if not selected_csv:
-            st.error("Pick a CSV first.")
-        else:
-            _append_rows_to_dataset_csv(selected_csv, rows)
-            st.success(f"Saved ALL to: {selected_csv}")
-# ============================================================
-# TAB RENDER (matches your structure)
-# ============================================================
-def render_scheduled_quick_start(
-    orders_df: pd.DataFrame,
-    orders_file: str,
-    data_set_dir: str = "data_set_csv",
-    scheduled_status: str = "Scheduled",
-    in_progress_status: str = "In Progress",
-    key_prefix: str = "sched_qs",
-):
-    st.markdown("#### 🗓️ Scheduled quick start (Create CSV + set In Progress)")
-
-    os.makedirs(data_set_dir, exist_ok=True)
-
-    if orders_df is None or orders_df.empty:
-        st.caption("No orders found.")
-        return
-
-    df = orders_df.copy()
-    df.columns = df.columns.astype(str).str.strip()
-
-    # Ensure required columns exist
-    required = ["Status", "Preform Number", "Fiber Project", "Desired Date", "Priority", "Active CSV"]
-    for c in required:
-        if c not in df.columns:
-            df[c] = ""
-
-    # Filter scheduled
-    df["Status"] = df["Status"].astype(str).str.strip()
-    df_sched = df[df["Status"].str.lower() == str(scheduled_status).lower()].copy()
-
-    if df_sched.empty:
-        st.caption("No Scheduled orders right now.")
-        return
-
-    def _next_run_index(preform_num: str) -> int:
-        preform_num = str(preform_num).strip()
-        prefix = f"F{preform_num}_"
-        existing_files = [
-            f for f in os.listdir(data_set_dir)
-            if f.startswith(prefix) and f.lower().endswith(".csv")
-        ]
-        runs = []
-        for f in existing_files:
-            try:
-                tail = f[len(prefix):]
-                n_str = tail.replace(".csv", "")
-                runs.append(int(n_str))
-            except Exception:
-                pass
-        return (max(runs) + 1) if runs else 1
-
-    # Render each scheduled row (using original index)
-    for idx in df_sched.index:
-        fiber = str(df.at[idx, "Fiber Project"]).strip()
-        preform = str(df.at[idx, "Preform Number"]).strip()
-        dd = str(df.at[idx, "Desired Date"]).strip()
-        prio = str(df.at[idx, "Priority"]).strip()
-
-        header = f"#{idx} | {fiber} | Priority: {prio} | Preform: {preform} | {dd}".strip()
-        with st.expander(header, expanded=False):
-
-            if not preform:
-                st.warning("This order has no Preform Number. Please fill it first.")
-                continue
-
-            first_work = st.checkbox(
-                "First work on this preform? (try _1)",
-                value=True,
-                key=f"{key_prefix}_first_work_{idx}",
-            )
-
-            if first_work:
-                run_idx = 1
-                cand = os.path.join(data_set_dir, f"F{preform}_1.csv")
-                if os.path.exists(cand):
-                    run_idx = _next_run_index(preform)
-                    st.warning(f"_1 already exists. I will create _{run_idx} instead.")
-            else:
-                run_idx = _next_run_index(preform)
-
-            new_csv_name = f"F{preform}_{run_idx}.csv"
-            csv_path = os.path.join(data_set_dir, new_csv_name)
-
-            st.caption(f"CSV to be created: **{new_csv_name}**")
-
-            if st.button("▶ Start (Create CSV + set In Progress)", key=f"{key_prefix}_start_{idx}"):
-                if os.path.exists(csv_path):
-                    st.error(f"CSV already exists: {new_csv_name}")
-                    st.stop()
-
-                # Create dataset CSV
-                base_cols = ["Parameter Name", "Value", "Units"]
-                df_new = pd.DataFrame(columns=base_cols)
-
-                new_rows = [
-                    {"Parameter Name": "Draw Name", "Value": new_csv_name.replace(".csv", ""), "Units": ""},
-                    {"Parameter Name": "Draw Date", "Value": pd.Timestamp.now(), "Units": ""},
-                    {"Parameter Name": "Order Index", "Value": idx, "Units": ""},
-                    {"Parameter Name": "Preform Number", "Value": preform, "Units": ""},
-                    {"Parameter Name": "Fiber Project", "Value": fiber, "Units": ""},
-                ]
-
-                df_new = pd.concat([df_new, pd.DataFrame(new_rows)], ignore_index=True)
-                df_new.to_csv(csv_path, index=False)
-
-                # Update order row
-                df.at[idx, "Status"] = in_progress_status
-                df.at[idx, "Active CSV"] = new_csv_name
-
-                df.to_csv(orders_file, index=False)
-
-                st.success(f"✅ Created {new_csv_name} and moved order #{idx} to {in_progress_status}.")
-                st.rerun()
-
-    st.markdown("---")
-def render_process_setup_tab(config: dict):
-    st.title("⚙️ Process Setup")
-    st.caption("One-page setup for every draw: Create CSV + coating + iris + PID/TF — then save everything together")
-    orders_file = "draw_orders.csv"
-    if os.path.exists(orders_file):
-        df_orders = pd.read_csv(orders_file, keep_default_na=False)
-    else:
-        df_orders = pd.DataFrame()
-
-    render_scheduled_quick_start(
-        orders_df=df_orders,
-        orders_file=orders_file,
-        data_set_dir="data_set_csv",
-        key_prefix="process_setup_schedqs",
-    )
-    # Your existing creator
-    render_create_draw_dataset_csv()
-
-    st.markdown("---")
-    view = _process_setup_buttons()  # expects "all", "coating", "iris", "pid"
-
-    iris_data, coating_data, pid_data, drum_data = {}, {}, {}, {}
-
-    if view in ("all", "coating"):
-        st.markdown("---")
-        coating_data = render_coating_section_collect(config)
-
-    if view in ("all", "iris"):
-        st.markdown("---")
-        iris_data = render_iris_selection_section_collect()
-
-    if view in ("all", "pid"):
-        st.markdown("---")
-        pid_data = render_pid_tf_section_collect()
-    st.markdown("---")
-    drum_data = render_drum_selection_section_collect()
-    # Always show final save block
-    st.markdown("---")
-    render_save_all_block(iris_data, coating_data, pid_data, drum_data)
-def _most_recent_dataset_csv(dataset_dir="data_set_csv"):
-    if not os.path.exists(dataset_dir):
-        return None
-    files = [f for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")]
-    if not files:
-        return None
-    full = [os.path.join(dataset_dir, f) for f in files]
-    return os.path.basename(max(full, key=os.path.getmtime))
-def _read_dataset_csv(dataset_dir="data_set_csv", filename=None):
-    if filename is None:
-        filename = _most_recent_dataset_csv(dataset_dir)
-    if not filename:
-        return None, None
-    path = os.path.join(dataset_dir, filename)
-    if not os.path.exists(path):
-        return None, None
-    df = pd.read_csv(path, keep_default_na=False)
-    df.columns = [str(c).strip() for c in df.columns]
-    for c in ["Parameter Name", "Value", "Units"]:
-        if c not in df.columns:
-            df[c] = ""
-    return df, filename
-def _param_map(df_params: pd.DataFrame) -> dict:
-    d = {}
-    for _, r in df_params.iterrows():
-        k = str(r.get("Parameter Name", "")).strip()
-        if not k:
-            continue
-        d[k] = r.get("Value", "")
-    return d
-def _parse_steps(df_params: pd.DataFrame):
-    d = _param_map(df_params)
-    steps = []
-    i = 1
-    while True:
-        ak = f"STEP {i} Action"
-        lk = f"STEP {i} Length"
-        if ak not in d or lk not in d:
-            break
-        action = str(d.get(ak, "")).strip().upper()
-        try:
-            length = float(d.get(lk))
-        except Exception:
-            length = None
-        if action in ("SAVE", "CUT") and length is not None and length > 0:
-            steps.append((action, float(length)))
-        i += 1
-    return steps
-def _parse_zones_from_end(df_params: pd.DataFrame):
-    """
-    Reads:
-      Zone i Start (from end) [km]
-      Zone i End (from end)   [km]
-    Returns list sorted by start:
-      [{"i":1,"a":..,"b":..,"len":..}, ...]
-    """
-    d = _param_map(df_params)
-    zones = []
-    i = 1
-    while True:
-        ks = f"Zone {i} Start (from end)"
-        ke = f"Zone {i} End (from end)"
-        if ks not in d or ke not in d:
-            break
-        try:
-            a = float(d[ks]); b = float(d[ke])
-        except Exception:
-            a = None; b = None
-        if a is not None and b is not None:
-            if b < a:
-                a, b = b, a
-            zones.append({"i": i, "a": a, "b": b, "len": (b - a)})
-        i += 1
-    zones.sort(key=lambda z: z["a"])
-    return zones
-def _parse_marked_zone_lengths(df_params: pd.DataFrame):
-    """
-    Reads:
-      Marked Zone i Length [km]
-    Returns list of lengths in order i=1..N
-    """
-    d = _param_map(df_params)
-    out = []
-    i = 1
-    while True:
-        k = f"Marked Zone {i} Length"
-        if k not in d:
-            break
-        try:
-            L = float(d[k])
-        except Exception:
-            L = None
-        if L is not None and L > 0:
-            out.append(L)
-        i += 1
-    return out
-def _get_float(df_params: pd.DataFrame, name: str, default=0.0) -> float:
-    hit = df_params.loc[df_params["Parameter Name"].astype(str) == name, "Value"]
-    if hit.empty:
-        return float(default)
-    try:
-        return float(hit.iloc[-1])
-    except Exception:
-        return float(default)
 def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: str):
     """
     Draws drum + fiber + zones/segments.
@@ -4109,9 +3287,9 @@ def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: 
       2) Marked Zone i Length         -> shows ALL zones sequentially
       3) STEP i Action/Length         -> fallback merged plan
     """
-    total_km = _get_float(df_params, "Fiber Total Length (Log End)", 0.0)
-    total_save = _get_float(df_params, "Total Saved Length", 0.0)
-    total_cut  = _get_float(df_params, "Total Cut Length", 0.0)
+    total_km = get_float_param(df_params, "Fiber Total Length (Log End)", 0.0)
+    total_save = get_float_param(df_params, "Total Saved Length", 0.0)
+    total_cut = get_float_param(df_params, "Total Cut Length", 0.0)
 
     # Try to get explicit zone positions
     zones = _parse_zones_from_end(df_params)
@@ -4140,7 +3318,8 @@ def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: 
                 a += L
 
     if not zones:
-        st.info("No zone information found in dataset CSV (no Zone-from-end, no Marked Zone Lengths, no STEP SAVE segments).")
+        st.info(
+            "No zone information found in dataset CSV (no Zone-from-end, no Marked Zone Lengths, no STEP SAVE segments).")
         return
 
     # If total length missing, infer from max(b)
@@ -4187,14 +3366,14 @@ def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: 
         if (x1 - x0) > 0.05:
             fig.add_annotation(
                 xref="paper", yref="paper",
-                x=0.5*(x0p+x1p),
+                x=0.5 * (x0p + x1p),
                 y=0.58,
                 text=f"Zone {z['i']}  {z['len']:.3f} km",
                 showarrow=False
             )
 
         fig.add_trace(go.Scatter(
-            x=[0.5*(x0p+x1p)],
+            x=[0.5 * (x0p + x1p)],
             y=[0.50],
             mode="markers",
             marker=dict(size=18, opacity=0),
@@ -4221,12 +3400,13 @@ def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: 
     c1, c2, c3 = st.columns(3)
     c1.metric("Total length (km)", f"{total_km:.6f}")
     c2.metric("Total SAVE (km)", f"{total_save:.6f}" if total_save else "—")
-    c3.metric("Total CUT (km)",  f"{total_cut:.6f}" if total_cut else "—")
+    c3.metric("Total CUT (km)", f"{total_cut:.6f}" if total_cut else "—")
 
     st.plotly_chart(fig, use_container_width=True)
+
 def render_tm_home_section():
     import os
-    import re
+    import json
     import numpy as np
     import pandas as pd
     import streamlit as st
@@ -4236,8 +3416,8 @@ def render_tm_home_section():
     st.subheader("📦 T&M – Pending Transfer")
     st.caption("Draws completed but not yet transferred to T&M")
 
-    ORDERS_FILE = "draw_orders.csv"
-    DATASET_DIR = "data_set_csv"
+    ORDERS_FILE = P.orders_csv
+    DATASET_DIR = P.dataset_dir
 
     if not os.path.exists(ORDERS_FILE):
         st.info("No draw_orders.csv found.")
@@ -4282,6 +3462,35 @@ def render_tm_home_section():
         unsafe_allow_html=True
     )
 
+    # =========================================================
+    # Persistent checklist store (per dataset CSV)
+    # =========================================================
+    def _tm_checklist_path():
+        MAINT_FOLDER = P.maintenance_dir
+        os.makedirs(MAINT_FOLDER, exist_ok=True)
+        return os.path.join(MAINT_FOLDER, "tm_step_checklists.json")
+
+    def _load_tm_checklists() -> dict:
+        p = _tm_checklist_path()
+        if not os.path.exists(p):
+            return {}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _save_tm_checklists(d: dict):
+        p = _tm_checklist_path()
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(d, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    # =========================================================
+    # Dataset CSV readers
+    # =========================================================
     def _read_dataset_kv(csv_path: str) -> dict:
         """Reads dataset CSV (Parameter Name, Value, Units) -> {param_lower: value_str}"""
         try:
@@ -4292,9 +3501,9 @@ def render_tm_home_section():
         if dfx is None or dfx.empty:
             return {}
 
-        cols = {c.strip(): c for c in dfx.columns}
-        pn_col = "Parameter Name" if "Parameter Name" in cols else None
-        v_col = "Value" if "Value" in cols else None
+        dfx.columns = [str(c).strip() for c in dfx.columns]
+        pn_col = "Parameter Name" if "Parameter Name" in dfx.columns else None
+        v_col = "Value" if "Value" in dfx.columns else None
         if not pn_col or not v_col:
             return {}
 
@@ -4330,27 +3539,8 @@ def render_tm_home_section():
                 return str(kv[a2]).strip()
         return ""
 
-    # -----------------------------
-    # Plot helpers (use ONLY dataset CSV content)
-    # -----------------------------
-    def _param_map(df_params: pd.DataFrame) -> dict:
-        d = {}
-        for _, r in df_params.iterrows():
-            k = str(r.get("Parameter Name", "")).strip()
-            if not k:
-                continue
-            d[k] = r.get("Value", "")
-        return d
-
-    def _get_float(d: dict, key: str, default=0.0) -> float:
-        try:
-            v = d.get(key, default)
-            return float(v) if v != "" else float(default)
-        except Exception:
-            return float(default)
-
     def _parse_zones_from_end(df_params: pd.DataFrame):
-        d = _param_map(df_params)
+        d =  param_map(df_params)
         zones = []
         i = 1
         while True:
@@ -4359,7 +3549,8 @@ def render_tm_home_section():
             if ks not in d or ke not in d:
                 break
             try:
-                a = float(d[ks]); b = float(d[ke])
+                a = float(d[ks])
+                b = float(d[ke])
             except Exception:
                 a, b = None, None
             if a is not None and b is not None:
@@ -4371,7 +3562,7 @@ def render_tm_home_section():
         return zones
 
     def _parse_marked_zone_lengths(df_params: pd.DataFrame):
-        d = _param_map(df_params)
+        d =  param_map(df_params)
         out = []
         i = 1
         while True:
@@ -4387,25 +3578,9 @@ def render_tm_home_section():
             i += 1
         return out
 
-    def _parse_steps(df_params: pd.DataFrame):
-        d = _param_map(df_params)
-        steps = []
-        i = 1
-        while True:
-            ak = f"STEP {i} Action"
-            lk = f"STEP {i} Length"
-            if ak not in d or lk not in d:
-                break
-            action = str(d.get(ak, "")).strip().upper()
-            try:
-                length = float(d.get(lk))
-            except Exception:
-                length = None
-            if action in ("SAVE", "CUT") and length is not None and length > 0:
-                steps.append((action, float(length)))
-            i += 1
-        return steps
-
+    # =========================================================
+    # Drum + fiber visual + checklist
+    # =========================================================
     def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, csv_name: str):
         """
         Drum + fiber bar:
@@ -4414,6 +3589,7 @@ def render_tm_home_section():
           - CUT + SAVE segments shown across full fiber
           - NO hover
           - Each segment is labeled with the step number (#) that matches the table
+          - Table is a checklist (checkboxes) persisted per dataset CSV
 
         Uses ONLY dataset CSV.
 
@@ -4422,16 +3598,11 @@ def render_tm_home_section():
           2) Marked Zone i Length (sequential from 0)
           3) STEP SAVE segments (fallback)
         """
-        import numpy as np
-        import pandas as pd
-        import plotly.graph_objects as go
-        import streamlit as st
+        d =  param_map(df_params)
 
-        d = _param_map(df_params)
-
-        total_km = _get_float(d, "Fiber Total Length (Log End)", 0.0)
-        total_save = _get_float(d, "Total Saved Length", 0.0)
-        total_cut = _get_float(d, "Total Cut Length", 0.0)
+        total_km = get_float_param(d, "Fiber Length Max (log)", 0.0)
+        total_save = get_float_param(d, "Total Saved Length", 0.0)
+        total_cut = get_float_param(d, "Total Cut Length", 0.0)
 
         # ---------- Get SAVE intervals (a,b,zone_index)
         zones = _parse_zones_from_end(df_params)
@@ -4504,8 +3675,9 @@ def render_tm_home_section():
         # ---------- Optional stats reader (for the table only)
         def find_zone_avg(zone_i: int, contains_name: str):
             p = df_params["Parameter Name"].astype(str)
-            mask = p.str.contains(fr"^Good Zone {zone_i} Avg - ", regex=True, na=False) & p.str.contains(contains_name,
-                                                                                                         na=False)
+            mask = p.str.contains(fr"^Good Zone {zone_i} Avg - ", regex=True, na=False) & p.str.contains(
+                contains_name, na=False
+            )
             v = pd.to_numeric(df_params.loc[mask, "Value"], errors="coerce").dropna()
             return float(v.iloc[0]) if not v.empty else None
 
@@ -4644,10 +3816,10 @@ def render_tm_home_section():
         )
 
         # =========================
-        # UI: plot + table
+        # UI: plot + checklist table
         # =========================
-        st.markdown("**🧵 Fiber Map + Cut Plan (# matches the table)**")
-        st.caption(f"Dataset: `{csv_name}`  |  0 km = fiber end (right)")
+        st.markdown("**🧵 Fiber Map + Cut Plan **")
+        #st.caption(f"Dataset: `{csv_name}`  |  0 km = fiber end (right)")
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Total (km)", f"{total_km:.4f}")
@@ -4660,42 +3832,122 @@ def render_tm_home_section():
             st.plotly_chart(fig, use_container_width=True)
 
         with right:
-            st.markdown("#### 📋 Cut / Save Steps")
-            show_cols = [c for c in ["#", "Action",  "Length (km)", "Start (km from end)", "End (km from end)",
-                                     "Furnace Temp avg", "Tension avg", "Fiber Ø avg","Fiber inner coat Ø avg","Fiber Outer coat Ø avg"] if c in df_plan.columns]
-            df_show = df_plan[show_cols].copy()
+            st.markdown("#### ✅ Cut / Save Checklist")
 
-            st.dataframe(
-                df_show,
+            # ----------------------------
+            # Persistent checklist per CSV
+            # ----------------------------
+            all_lists = _load_tm_checklists()
+            csv_key = str(csv_name)
+
+            if csv_key not in all_lists:
+                all_lists[csv_key] = {}
+
+            # Ensure every step exists in store
+            for n in df_plan["#"].astype(int).tolist():
+                sn = str(int(n))
+                if sn not in all_lists[csv_key]:
+                    all_lists[csv_key][sn] = False
+
+            # Build editable view
+            df_chk = df_plan.copy()
+            df_chk["Done"] = df_chk["#"].astype(int).astype(str).map(all_lists[csv_key]).fillna(False)
+
+            # Put Done first
+            front_cols = ["Done", "#", "Action", "Length (km)"]
+            rest_cols = [c for c in df_chk.columns if c not in front_cols]
+            show_cols = [c for c in front_cols if c in df_chk.columns] + rest_cols
+            df_chk = df_chk[show_cols].copy()
+
+            # Progress
+            # Placeholders so progress can reflect the edited table in the same run
+            prog_ph = st.empty()
+            cap_ph = st.empty()
+
+            edited = st.data_editor(
+                df_chk,
                 use_container_width=True,
                 hide_index=True,
-                height=260
+                height=260,
+                key=f"tm_steps_editor__{csv_key}",
+                column_config={
+                    "Done": st.column_config.CheckboxColumn(
+                        "Done",
+                        help="Mark each Cut/Save step as completed",
+                        default=False,
+                        width="small",
+                    ),
+                    "#": st.column_config.NumberColumn("#", width="small"),
+                    "Length (km)": st.column_config.NumberColumn("Length (km)", format="%.6f"),
+                    "Start (km from end)": st.column_config.NumberColumn("Start", format="%.6f"),
+                    "End (km from end)": st.column_config.NumberColumn("End", format="%.6f"),
+                },
+                disabled=[c for c in df_chk.columns if c != "Done"],  # only checkbox editable
             )
-            st.caption("Numbers on the bar correspond to the # column here.")
 
-    # -----------------------------
-    # Cards
-    # -----------------------------
+            # Compute progress from the edited values (THIS is the key)
+            try:
+                done_count = int(pd.Series(edited["Done"]).astype(bool).sum())
+                total_count = int(len(edited))
+            except Exception:
+                done_count = int(df_chk["Done"].astype(bool).sum())
+                total_count = int(len(df_chk))
+
+            prog_ph.progress(done_count / total_count if total_count else 0.0)
+            cap_ph.caption(f"Progress: **{done_count} / {total_count}** steps done")
+
+            # Persist changes
+            try:
+                for _, r in edited.iterrows():
+                    step_num = str(int(r["#"]))
+                    all_lists[csv_key][step_num] = bool(r["Done"])
+                _save_tm_checklists(all_lists)
+            except Exception:
+                pass
+
+            a1, a2 = st.columns(2)
+            with a1:
+                if st.button("✅ Mark all done", key=f"tm_steps_all_done__{csv_key}", use_container_width=True):
+                    for k in list(all_lists[csv_key].keys()):
+                        all_lists[csv_key][k] = True
+                    _save_tm_checklists(all_lists)
+                    st.rerun()
+
+            with a2:
+                if st.button("↩️ Reset", key=f"tm_steps_reset__{csv_key}", use_container_width=True):
+                    for k in list(all_lists[csv_key].keys()):
+                        all_lists[csv_key][k] = False
+                    _save_tm_checklists(all_lists)
+                    st.rerun()
+
+            st.caption("Checklist is saved per dataset CSV (persists after refresh).")
+
+    # =========================================================
+    # Cards render
+    # =========================================================
     for idx, row in pending_tm.iterrows():
         draw_id = row.get("Preform Name") or row.get("Preform Number") or f"Row {idx}"
         done_csv = str(row.get("Done CSV") or "").strip()
         active_csv = str(row.get("Active CSV") or "").strip()
 
         csv_name = done_csv if done_csv else active_csv
-        csv_path = os.path.join(DATASET_DIR, csv_name) if csv_name else ""
+        csv_path = dataset_csv_path(csv_name) if csv_name else ""
 
         done_desc = str(row.get("Done Description") or "").strip()
 
         kv = _read_dataset_kv(csv_path) if (csv_path and os.path.exists(csv_path)) else {}
 
-        project = _pick(kv, ["Project", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]) \
-                  or str(row.get("Project Name") or "").strip()
+        project = _pick(
+            kv,
+            ["Project", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]
+        ) or str(row.get("Project Name") or "").strip()
 
-        preform = _pick(kv, ["Preform Number", "Preform Name", "Preform", "Draw Name"]) \
-                  or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
+        preform = _pick(
+            kv,
+            ["Preform Number", "Preform Name", "Preform", "Draw Name"]
+        ) or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
 
         fiber = _pick(kv, ["Draw Name"]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
-
         drum = _pick(kv, ["Drum", "Selected Drum"])
 
         project_disp = project if project else "—"
@@ -4705,14 +3957,14 @@ def render_tm_home_section():
         csv_disp = csv_name if csv_name else "—"
 
         st.markdown("<div class='tm-card'>", unsafe_allow_html=True)
-        st.markdown(f"**🧾 Draw:** {draw_id}", unsafe_allow_html=True)
+        #st.markdown(f"**🧾 Draw:** {draw_id}", unsafe_allow_html=True)
 
         st.markdown(
             f"""
             <div class='tm-meta'>
                 Project: <b>{project_disp}</b>
                 &nbsp; | &nbsp; Preform: <b>{preform_disp}</b>
-                &nbsp; | &nbsp; Fiber: <b>{fiber_disp}</b>
+                &nbsp; | &nbsp; Fiber type: <b>{fiber_disp}</b>
                 &nbsp; | &nbsp; Drum: <b>{drum_disp}</b>
                 <br/>
                 CSV: <code>{csv_disp}</code>
@@ -4721,10 +3973,19 @@ def render_tm_home_section():
             unsafe_allow_html=True
         )
 
+        # Mini checklist status in header (if exists)
+        if csv_name:
+            all_lists = _load_tm_checklists()
+            ck = all_lists.get(str(csv_name), {})
+            if ck:
+                done_n = sum(1 for v in ck.values() if v)
+                tot_n = len(ck)
+                st.caption(f"Checklist: **{done_n}/{tot_n}** steps done")
+
         if done_desc:
             st.caption(f"Done notes: {done_desc}")
 
-        # ✅ PUT THE VISUAL RIGHT HERE (inside each card)
+        # Visual + checklist (inside each card)
         if csv_name and os.path.exists(csv_path):
             df_params = _read_dataset_df(csv_path)
             if df_params is not None:
@@ -4760,77 +4021,7 @@ def render_tm_home_section():
                 st.caption(f"Path: `{csv_path}`")
 
         st.markdown("</div>", unsafe_allow_html=True)
-def _most_recent_dataset_csv(dataset_dir="data_set_csv"):
-    if not os.path.exists(dataset_dir):
-        return None
-    files = [f for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")]
-    if not files:
-        return None
-    full = [os.path.join(dataset_dir, f) for f in files]
-    return os.path.basename(max(full, key=os.path.getmtime))
-def _read_dataset_csv(dataset_dir="data_set_csv", filename=None):
-    if filename is None:
-        filename = _most_recent_dataset_csv(dataset_dir)
-    if not filename:
-        return None, None
-    path = os.path.join(dataset_dir, filename)
-    if not os.path.exists(path):
-        return None, None
-    df = pd.read_csv(path, keep_default_na=False)
-    # normalize columns
-    df.columns = [str(c).strip() for c in df.columns]
-    for c in ["Parameter Name", "Value", "Units"]:
-        if c not in df.columns:
-            df[c] = ""
-    return df, filename
-def _param_map(df_params: pd.DataFrame) -> dict:
-    # If duplicates exist, keep the last occurrence
-    d = {}
-    for _, r in df_params.iterrows():
-        k = str(r.get("Parameter Name", "")).strip()
-        if not k:
-            continue
-        d[k] = r.get("Value", "")
-    return d
-def _parse_steps(df_params: pd.DataFrame):
-    d = _param_map(df_params)
-    steps = []
-    i = 1
-    while True:
-        ak = f"STEP {i} Action"
-        lk = f"STEP {i} Length"
-        if ak not in d or lk not in d:
-            break
-        action = str(d.get(ak, "")).strip().upper()
-        try:
-            length = float(d.get(lk))
-        except Exception:
-            length = None
-        if action in ("SAVE", "CUT") and length is not None and length > 0:
-            steps.append((action, float(length)))
-        i += 1
-    return steps
-def _get_value(df_params: pd.DataFrame, name: str, default=None):
-    hit = df_params.loc[df_params["Parameter Name"].astype(str) == name, "Value"]
-    if hit.empty:
-        return default
-    return hit.iloc[-1]
-def _find_zone_avg_values(df_params: pd.DataFrame, wanted_cols: list):
-    """
-    Returns dict: {col_name: avg_across_zones}
-    Looks for rows like: 'Good Zone {i} Avg - {col}'
-    and averages across all found zones.
-    """
-    out = {}
-    pnames = df_params["Parameter Name"].astype(str)
 
-    for col in wanted_cols:
-        # match: Good Zone 1 Avg - Tension   (case-insensitive contains)
-        mask = pnames.str.contains(r"^Good Zone \d+ Avg - ", regex=True, na=False) & pnames.str.contains(re.escape(col), na=False)
-        vals = pd.to_numeric(df_params.loc[mask, "Value"], errors="coerce").dropna()
-        if not vals.empty:
-            out[col] = float(vals.mean())
-    return out
 def render_tm_cut_plan_visual(df_params: pd.DataFrame, dataset_name: str):
     """
     Drum + fiber + step segments.
@@ -4843,15 +4034,15 @@ def render_tm_cut_plan_visual(df_params: pd.DataFrame, dataset_name: str):
 
     # totals (already in km in your CSV)
     try:
-        total_len = float(_get_value(df_params, "Fiber Total Length (Log End)", 0.0) or 0.0)
+        total_len = float( get_value(df_params, "Fiber Length Max (log)", 0.0) or 0.0)
     except Exception:
         total_len = 0.0
     try:
-        total_save = float(_get_value(df_params, "Total Saved Length", 0.0) or 0.0)
+        total_save = float( get_value(df_params, "Total Saved Length", 0.0) or 0.0)
     except Exception:
         total_save = 0.0
     try:
-        total_cut = float(_get_value(df_params, "Total Cut Length", 0.0) or 0.0)
+        total_cut = float( get_value(df_params, "Total Cut Length", 0.0) or 0.0)
     except Exception:
         total_cut = 0.0
 
@@ -4962,20 +4153,779 @@ def render_tm_cut_plan_visual(df_params: pd.DataFrame, dataset_name: str):
     with right:
         st.metric("Total length (km)", f"{total_len:.6f}" if total_len else "—")
         st.metric("Total SAVE (km)", f"{total_save:.6f}" if total_save else "—")
-        st.metric("Total CUT (km)",  f"{total_cut:.6f}" if total_cut else "—")
+        st.metric("Total CUT (km)", f"{total_cut:.6f}" if total_cut else "—")
 
         # Show key averages as small list
         if avg_map:
             st.markdown("**Key averages (good zones)**")
             for k, v in avg_map.items():
                 st.write(f"- {k}: `{v:.4g}`")
+
+def _extract_good_zone_summary(df_params: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per-zone summary using your real CSV keys.
+
+    Includes:
+      - PF Start/End:   Good Zone i Min/Max - Pf Process Position
+      - Zone Length:   (Good Zone i Max - Fibre Length) - (Good Zone i Min - Fibre Length)
+      - Furnace:       Good Zone i Avg - Furnace DegC Actual
+      - Tension:       Good Zone i Avg - Tension N
+      - Bare Ø:        Good Zone i Avg - Bare Fibre Diameter
+      - Coat 1 Ø:      Good Zone i Avg - Coated Inner Diameter
+      - Coat 2 Ø:      Good Zone i Avg - Coated Outer Diameter
+
+    Reads ONLY: Parameter Name, Value, Units
+    """
+    import pandas as pd
+    import re
+
+    if df_params is None or df_params.empty:
+        return pd.DataFrame()
+
+    dfp = df_params.copy()
+    for c in ["Parameter Name", "Value", "Units"]:
+        if c not in dfp.columns:
+            dfp[c] = ""
+
+    dfp["Parameter Name"] = dfp["Parameter Name"].astype(str).str.strip()
+    dfp["Value"] = dfp["Value"].astype(str).str.strip()
+    dfp["Units"] = dfp["Units"].astype(str).str.strip()
+
+    # name -> (value, units)
+    kv = {}
+    for _, r in dfp.iterrows():
+        k = str(r["Parameter Name"]).strip()
+        if k and k not in kv:
+            kv[k] = (str(r["Value"]).strip(), str(r["Units"]).strip())
+
+    def _num(x):
+        try:
+            x = str(x).strip()
+            if not x or x.lower() == "nan":
+                return None
+            return float(x)
+        except Exception:
+            return None
+
+    def _get(key: str):
+        v, u = kv.get(key, ("", ""))
+        v = "" if str(v).lower() == "nan" else str(v).strip()
+        u = "" if str(u).lower() == "nan" else str(u).strip()
+        return v, u
+
+    # detect zone indices by scanning Good Zone i Avg - ...
+    zones = set()
+    rz = re.compile(r"^Good Zone\s+(\d+)\s+Avg\s+-\s+", re.IGNORECASE)
+    for k in kv.keys():
+        m = rz.match(k)
+        if m:
+            try:
+                zones.add(int(m.group(1)))
+            except Exception:
+                pass
+
+    if not zones:
+        return pd.DataFrame()
+
+    rows = []
+    for zi in sorted(zones):
+        # ---- PF min/max (what you asked for)
+        pf_min_v, pf_u1 = _get(f"Good Zone {zi} Min - Pf Process Position")
+        pf_max_v, pf_u2 = _get(f"Good Zone {zi} Max - Pf Process Position")
+        pf_u = pf_u2 or pf_u1
+
+        # ---- zone length from fibre length min/max (km in your files)
+        fmin_v, f_u1 = _get(f"Good Zone {zi} Min - Fibre Length")
+        fmax_v, f_u2 = _get(f"Good Zone {zi} Max - Fibre Length")
+        fmin = _num(fmin_v)
+        fmax = _num(fmax_v)
+        zlen = (fmax - fmin) if (fmin is not None and fmax is not None and fmax >= fmin) else None
+        zlen_u = f_u2 or f_u1
+
+        # ---- avg process values
+        furnace_v, furnace_u = _get(f"Good Zone {zi} Avg - Furnace DegC Actual")
+        tension_v, tension_u = _get(f"Good Zone {zi} Avg - Tension N")
+        bare_v, bare_u       = _get(f"Good Zone {zi} Avg - Bare Fibre Diameter")
+        c1_v, c1_u           = _get(f"Good Zone {zi} Avg - Coated Inner Diameter")
+        c2_v, c2_u           = _get(f"Good Zone {zi} Avg - Coated Outer Diameter")
+
+        rows.append({
+            "Zone": zi,
+            "PF Start": _num(pf_min_v),
+            "PF End": _num(pf_max_v),
+            "PF Unit": pf_u,
+
+            "Zone Length": zlen,
+            "Zone Length Unit": zlen_u,
+
+            "Furnace": _num(furnace_v),
+            "Furnace Unit": furnace_u,
+
+            "Tension": _num(tension_v),
+            "Tension Unit": tension_u,
+
+            "Bare Ø": _num(bare_v),
+            "Bare Unit": bare_u,
+
+            "Coat 1 Ø": _num(c1_v),
+            "Coat 1 Unit": c1_u,
+
+            "Coat 2 Ø": _num(c2_v),
+            "Coat 2 Unit": c2_u,
+        })
+
+    dfz = pd.DataFrame(rows)
+
+    # put units into headers if available (and drop unit columns)
+    def _first_unit(col):
+        vals = [x for x in dfz[col].astype(str).tolist() if x and x.lower() != "nan"]
+        return vals[0] if vals else ""
+
+    pf_u  = _first_unit("PF Unit")
+    len_u = _first_unit("Zone Length Unit")
+    fur_u = _first_unit("Furnace Unit")
+    ten_u = _first_unit("Tension Unit")
+    bare_u = _first_unit("Bare Unit")
+    c1_u = _first_unit("Coat 1 Unit")
+    c2_u = _first_unit("Coat 2 Unit")
+
+    ren = {}
+    if pf_u:
+        ren["PF Start"] = f"PF Start ({pf_u})"
+        ren["PF End"]   = f"PF End ({pf_u})"
+    if len_u:
+        ren["Zone Length"] = f"Zone Length ({len_u})"
+    if fur_u:
+        ren["Furnace"] = f"Furnace ({fur_u})"
+    if ten_u:
+        ren["Tension"] = f"Tension ({ten_u})"
+    if bare_u:
+        ren["Bare Ø"] = f"Bare Ø ({bare_u})"
+    if c1_u:
+        ren["Coat 1 Ø"] = f"Coat 1 Ø ({c1_u})"
+    if c2_u:
+        ren["Coat 2 Ø"] = f"Coat 2 Ø ({c2_u})"
+
+    dfz = dfz.rename(columns=ren)
+
+    drop_cols = [
+        "PF Unit", "Zone Length Unit", "Furnace Unit", "Tension Unit",
+        "Bare Unit", "Coat 1 Unit", "Coat 2 Unit"
+    ]
+    dfz = dfz.drop(columns=[c for c in drop_cols if c in dfz.columns], errors="ignore")
+
+    # rounding
+    for c in dfz.columns:
+        if c.startswith("Zone Length"):
+            dfz[c] = pd.to_numeric(dfz[c], errors="coerce").round(6)
+        elif c.startswith("PF "):
+            dfz[c] = pd.to_numeric(dfz[c], errors="coerce").round(3)
+        elif "Ø" in c:
+            dfz[c] = pd.to_numeric(dfz[c], errors="coerce").round(3)
+        elif c.startswith("Furnace") or c.startswith("Tension"):
+            dfz[c] = pd.to_numeric(dfz[c], errors="coerce").round(2)
+
+    return dfz
+
+def render_done_home_section():
+    import os
+    import pandas as pd
+    import streamlit as st
+    import datetime as dt
+
+    st.subheader("✅ DONE – Recent Draws (last 4 days)")
+    st.caption("Summarizes finished draws from the dataset CSV. After 4 days, they auto-move to T&M.")
+
+    ORDERS_FILE = P.orders_csv
+    DATASET_DIR = P.dataset_dir
+    AUTO_MOVE_DAYS = 4
+
+    if not os.path.exists(ORDERS_FILE):
+        st.info("No draw_orders.csv found.")
+        return
+
+    df = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+    df.columns = [c.strip() for c in df.columns]
+
+    # Ensure columns exist
+    needed_cols = [
+        "Status", "Active CSV", "Done CSV", "Done Description",
+        "T&M Moved", "T&M Moved Timestamp",
+        "Done Timestamp"
+    ]
+    for c in needed_cols:
+        if c not in df.columns:
+            df[c] = ""
+
+    # Normalize boolean
+    df["T&M Moved"] = df["T&M Moved"].astype(str).str.lower().isin(["true", "1", "yes"])
+
+    # -----------------------------
+    # Helpers
+    # -----------------------------
+    def _read_dataset_df(csv_path: str):
+        try:
+            dfx = pd.read_csv(csv_path, keep_default_na=False)
+        except Exception:
+            return None
+        if dfx is None or dfx.empty:
+            return None
+        dfx.columns = [str(c).strip() for c in dfx.columns]
+        for c in ["Parameter Name", "Value", "Units"]:
+            if c not in dfx.columns:
+                dfx[c] = ""
+        return dfx
+
+    def _read_dataset_kv(csv_path: str) -> dict:
+        dfx = _read_dataset_df(csv_path)
+        if dfx is None:
+            return {}
+        dfx["Parameter Name"] = dfx["Parameter Name"].astype(str).str.strip()
+        dfx["Value"] = dfx["Value"].astype(str).str.strip()
+
+        out = {}
+        for _, r in dfx.iterrows():
+            k = str(r.get("Parameter Name", "")).strip().lower()
+            v = str(r.get("Value", "")).strip()
+            if k and k not in out and v.lower() != "nan":
+                out[k] = v
+        return out
+
+    def _pick(kv: dict, aliases: list) -> str:
+        for a in aliases:
+            k = str(a).strip().lower()
+            if k in kv and str(kv[k]).strip() and str(kv[k]).strip().lower() != "nan":
+                return str(kv[k]).strip()
+        return ""
+
+    def _to_dt(s: str):
+        s = str(s or "").strip()
+        if not s:
+            return None
+        try:
+            x = pd.to_datetime(s, errors="coerce")
+            if pd.isna(x):
+                return None
+            # convert to python datetime (naive)
+            return x.to_pydatetime().replace(tzinfo=None)
+        except Exception:
+            return None
+
+    def _infer_done_dt(row, kv: dict):
+        """
+        Priority:
+          1) draw_orders.csv "Done Timestamp" (if exists)
+          2) dataset CSV "Draw Date"
+          3) dataset CSV "Process Setup Timestamp"
+          4) None
+        """
+        dt1 = _to_dt(row.get("Done Timestamp", ""))
+        if dt1:
+            return dt1
+
+        dt2 = _to_dt(_pick(kv, ["Draw Date"]))
+        if dt2:
+            return dt2
+
+        dt3 = _to_dt(_pick(kv, ["Process Setup Timestamp"]))
+        if dt3:
+            return dt3
+
+        return None
+
+
+    def _zone_count_from_kv(kv: dict) -> int:
+        # counts "Zone i Start (from end)" present
+        i = 1
+        n = 0
+        while True:
+            k = f"zone {i} start (from end)"
+            if k in kv:
+                n += 1
+                i += 1
+            else:
+                break
+        return n
+
+    # -----------------------------
+    # Filter "Done and not moved"
+    # -----------------------------
+    done_not_moved = df[
+        (df["Status"].astype(str).str.strip().str.lower() == "done")
+        & (~df["T&M Moved"])
+    ].copy()
+
+    if done_not_moved.empty:
+        st.success("✅ No recent DONE draws waiting here (everything is already moved to T&M).")
+        return
+
+    # -----------------------------
+    # Auto-move after 4 days
+    # -----------------------------
+    now = dt.datetime.now()
+    changed = False
+
+    # We also build a list of "recent done" (under 4 days)
+    recent_rows = []
+
+    for idx, row in done_not_moved.iterrows():
+        done_csv = str(row.get("Done CSV") or "").strip()
+        active_csv = str(row.get("Active CSV") or "").strip()
+        csv_name = done_csv if done_csv else active_csv
+
+        csv_path = dataset_csv_path(csv_name) if csv_name else ""
+        kv = _read_dataset_kv(csv_path) if (csv_name and os.path.exists(csv_path)) else {}
+
+        done_dt = _infer_done_dt(row, kv)
+
+        # If we inferred a done_dt and it's missing in file, write it once (nice for future)
+        if done_dt and not str(row.get("Done Timestamp", "")).strip():
+            df.loc[idx, "Done Timestamp"] = done_dt.strftime("%Y-%m-%d %H:%M:%S")
+            changed = True
+
+        if done_dt:
+            age_days = (now - done_dt).total_seconds() / 86400.0
+        else:
+            # If unknown time -> treat as "recent" so it doesn't auto-move unexpectedly
+            age_days = 0.0
+
+        if age_days >= AUTO_MOVE_DAYS:
+            df.loc[idx, "T&M Moved"] = True
+            if not str(df.loc[idx, "T&M Moved Timestamp"]).strip():
+                df.loc[idx, "T&M Moved Timestamp"] = now.strftime("%Y-%m-%d %H:%M:%S")
+            changed = True
+        else:
+            # keep for display
+            recent_rows.append((idx, row, kv, csv_name, csv_path, done_dt, age_days))
+
+    if changed:
+        # Save once
+        df.to_csv(ORDERS_FILE, index=False)
+
+    if not recent_rows:
+        st.success("✅ No recent DONE draws (older than 4 days were auto-moved to T&M).")
+        return
+
+    # -----------------------------
+    # UI styling (cards)
+    # -----------------------------
+    st.markdown(
+        """
+        <style>
+        .done-card {
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(10,10,10,0.45);
+            border-radius: 14px;
+            padding: 14px 14px 10px 14px;
+            margin-bottom: 12px;
+        }
+        .done-meta {
+            color: rgba(255,255,255,0.82);
+            font-size: 0.92rem;
+            margin-top: -6px;
+            margin-bottom: 10px;
+        }
+        .done-pill {
+            display:inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            margin-left: 8px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # -----------------------------
+    # AREA FOR PLOT IN HOME THIS ONE GOOD
+    # -----------------------------
+    for (idx, row, kv, csv_name, csv_path, done_dt, age_days) in recent_rows:
+        done_desc = str(row.get("Done Description") or "").strip()
+
+        project = _pick(kv, ["Project", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]) \
+                  or str(row.get("Project Name") or "").strip()
+
+        preform = _pick(kv, ["Preform Number", "Preform Name", "Preform", "Draw Name"]) \
+                  or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
+
+        fiber = _pick(kv, ["Fiber Geometry Type"]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
+        drum = _pick(kv, ["Drum", "Selected Drum"])
+
+        total_km = (_pick(kv, ["Fiber Length End (log end)"]))
+        save_km  = (_pick(kv, ["Total Saved Length"]))
+        cut_km   = (_pick(kv, ["Total Cut Length"]))
+
+        zones_n = (_pick(kv, ["Good Zones Count"]))
+
+
+        done_str = done_dt.strftime("%Y-%m-%d %H:%M:%S") if done_dt else "—"
+        age_str = f"{age_days:.1f} days" if done_dt else "—"
+
+        st.markdown("<div class='done-card'>", unsafe_allow_html=True)
+
+        st.markdown(
+            f"""
+            <div class='done-meta'>
+                Project: <b>{project or "—"}</b>
+                &nbsp; | &nbsp; Preform: <b>{preform or "—"}</b>
+                &nbsp; | &nbsp; Fiber type: <b>{fiber or "—"}</b>
+                &nbsp; | &nbsp; Drum: <b>{drum or "—"}</b>
+                <span class="done-pill">Done: {done_str}</span>
+                <span class="done-pill">Age: {age_str}</span>
+                <br/>
+                CSV: <code>{csv_name or "—"}</code>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total (km)", fmt_float(total_km, 2))
+        c2.metric("SAVE (km)", fmt_float(save_km, 2))
+        c3.metric("CUT (km)", fmt_float(cut_km, 2))
+        c4.metric("Zones", fmt_int(zones_n))
+
+
+        if done_desc:
+            st.caption(f"Done notes: {done_desc}")
+
+
+        b1, b2 = st.columns([1.1, 2.9])
+
+        with b1:
+            if csv_name and os.path.exists(csv_path):
+                with open(csv_path, "rb") as f:
+                    st.download_button(
+                        "📄 Download CSV",
+                        data=f,
+                        file_name=csv_name,
+                        mime="text/csv",
+                        key=f"done_dl_{idx}",
+                        use_container_width=True
+                    )
+            else:
+                st.button("📄 Download CSV", disabled=True, use_container_width=True, key=f"done_missing_{idx}")
+
+        with b2:
+            st.caption(f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (this one moves in ~{max(0.0, AUTO_MOVE_DAYS - age_days):.1f} days)."
+                       if done_dt else f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (done time unknown).")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+def is_pm_draw_from_dataset_csv(df_params: pd.DataFrame) -> bool:
+    """
+    PM detection is based ONLY on the explicit boolean flag:
+      Parameter Name = 'PM Iris System'
+      Value = 1 / True / 'true'
+
+    This is the authoritative source.
+    """
+
+    try:
+        row = df_params.loc[
+            df_params["Parameter Name"].astype(str).str.strip().str.lower()
+            == "pm iris system".lower()
+        ]
+
+        if row.empty:
+            return False
+
+        val = row["Value"].iloc[0]
+
+        # Accept numeric or string truthy values
+        if isinstance(val, (int, float)):
+            return int(val) == 1
+
+        val_str = str(val).strip().lower()
+        return val_str in {"1", "true", "yes", "y"}
+
+    except Exception:
+        return False
+
+def show_sap_status_banner(is_pm: bool, status: str, details: str = ""):
+    """
+    status: "updated" | "not_pm" | "skipped" | "failed"
+    """
+    if status == "updated":
+        st.success(f"🧪 SAP rods inventory updated (PM detected).")
+        if details:
+            st.caption(details)
+
+    elif status == "not_pm":
+        st.info("ℹ️ SAP rods inventory not updated (not a PM draw).")
+        if details:
+            st.caption(details)
+
+    elif status == "skipped":
+        st.warning("⚠️ SAP rods inventory update skipped.")
+        if details:
+            st.caption(details)
+
+    else:  # "failed"
+        st.warning("⚠️ SAP rods inventory update failed.")
+        if details:
+            st.caption(details)
+
+def ensure_sap_inventory_file():
+    if os.path.exists(SAP_INVENTORY_FILE):
+        return
+
+    df = pd.DataFrame([{
+        "Item": "SAP Rods Set",
+        "Count": 0,
+        "Units": "sets",
+        "Last Updated": "",
+        "Notes": ""
+    }])
+    df.to_csv(SAP_INVENTORY_FILE, index=False)
+
+def decrement_sap_rods_set_by_one(source_draw: str, when_str: str = None):
+    """
+    Returns: (ok: bool, msg: str)
+    """
+    ensure_sap_inventory_file()
+    when_str = when_str or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        inv = pd.read_csv(SAP_INVENTORY_FILE)
+    except Exception as e:
+        return False, f"Failed reading {SAP_INVENTORY_FILE}: {e}"
+
+    if inv.empty or "Item" not in inv.columns:
+        return False, f"{SAP_INVENTORY_FILE} format is invalid."
+
+    # Find (or create) the row for SAP Rods Set
+    m = inv["Item"].astype(str).str.strip().str.lower() == "sap rods set"
+    if not m.any():
+        inv = pd.concat([inv, pd.DataFrame([{
+            "Item": "SAP Rods Set",
+            "Count": 0,
+            "Units": "sets",
+            "Last Updated": "",
+            "Notes": ""
+        }])], ignore_index=True)
+        m = inv["Item"].astype(str).str.strip().str.lower() == "sap rods set"
+
+    idx = inv.index[m][0]
+
+    # Parse count safely
+    try:
+        current = int(float(inv.loc[idx, "Count"]))
+    except Exception:
+        current = 0
+
+    if current <= 0:
+        # Don’t go negative; still log the attempt in Notes
+        inv.loc[idx, "Last Updated"] = when_str
+        prev_notes = safe_str(inv.loc[idx, "Notes"])
+        add = f"[{when_str}] Tried decrement (PM draw {source_draw}) but Count was {current}."
+        inv.loc[idx, "Notes"] = (prev_notes + "\n" + add).strip() if prev_notes else add
+        inv.to_csv(SAP_INVENTORY_FILE, index=False)
+        return False, f"SAP inventory NOT decremented (Count={current}). Please refill/update inventory."
+
+    # Decrement
+    inv.loc[idx, "Count"] = current - 1
+    inv.loc[idx, "Last Updated"] = when_str
+
+    prev_notes = safe_str(inv.loc[idx, "Notes"])
+    add = f"[{when_str}] -1 set (PM draw {source_draw}). New Count={current-1}."
+    inv.loc[idx, "Notes"] = (prev_notes + "\n" + add).strip() if prev_notes else add
+
+    inv.to_csv(SAP_INVENTORY_FILE, index=False)
+    return True, f"SAP Rods Set inventory updated: {current} → {current-1}"
+
+def mark_draw_order_failed_by_dataset_csv(dataset_csv_filename: str, failed_desc: str, preform_len_after_cm: float):
+    """
+    Sets Status=Failed, writes failure description + preform left, timestamp.
+    Matches rows by Active CSV / Done CSV (same logic as Done).
+    """
+    if not os.path.exists(ORDERS_FILE):
+        return False, f"{ORDERS_FILE} not found (couldn't mark order failed)."
+
+    try:
+        orders = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+    except Exception as e:
+        return False, f"Failed reading {ORDERS_FILE}: {e}"
+
+    orders.columns = [str(c).replace("\ufeff", "").strip() for c in orders.columns]
+
+    # Ensure columns exist
+    for col, default in {
+        "Status": "Pending",
+        "Active CSV": "",
+        "Done CSV": "",
+        "Done Description": "",
+        "Done Timestamp": "",
+        "Failed CSV": "",
+        "Failed Description": "",
+        "Failed Timestamp": "",
+        "Preform Length After Draw (cm)": "",
+        "Next Planned Draw Date": "",
+        "T&M Moved": False,
+        "T&M Moved Timestamp": "",
+    }.items():
+        if col not in orders.columns:
+            orders[col] = default
+
+    def norm_col(series):
+        return (
+            series.astype(str).fillna("")
+            .str.replace("\ufeff", "", regex=False)
+            .str.replace('"', "", regex=False)
+            .str.replace("'", "", regex=False)
+            .str.strip()
+            .str.lower()
+        )
+
+    target = _norm_str(dataset_csv_filename)
+    target_alts = _alt_names(target)
+
+    active_norm = norm_col(orders["Active CSV"])
+    done_norm = norm_col(orders["Done CSV"])
+
+    match = pd.Series([False] * len(orders))
+    for t in target_alts:
+        match = match | (active_norm == t) | (done_norm == t)
+
+    if not match.any():
+        for t in target_alts:
+            match = match | active_norm.str.endswith(t, na=False) | done_norm.str.endswith(t, na=False)
+
+    if not match.any():
+        for t in target_alts:
+            contains = active_norm.str.contains(re.escape(t), na=False) | done_norm.str.contains(re.escape(t), na=False)
+            if contains.sum() == 1:
+                match = contains
+                break
+
+    if not match.any():
+        sample_active = active_norm.dropna().unique()[:12].tolist()
+        return False, (
+            f"No matching row found in draw_orders.csv for '{dataset_csv_filename}' "
+            f"(matched against Active CSV / Done CSV).\n"
+            f"Sample Active CSV values: {sample_active}"
+        )
+
+    if match.sum() > 1:
+        return False, f"Multiple matching rows found for '{dataset_csv_filename}'. Please fix duplicates in draw_orders.csv."
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    orders.loc[match, "Status"] = "Failed"
+    orders.loc[match, "Failed CSV"] = os.path.basename(dataset_csv_filename)
+    orders.loc[match, "Failed Description"] = str(failed_desc).strip()
+    orders.loc[match, "Failed Timestamp"] = now_str
+    orders.loc[match, "Preform Length After Draw (cm)"] = float(preform_len_after_cm)
+
+    orders.to_csv(ORDERS_FILE, index=False)
+    return True, "Order marked as FAILED."
+
+def reset_failed_order_to_beginning_and_schedule(dataset_csv_filename: str):
+    """
+    'Start from beginning of the draw':
+    - Status -> Pending
+    - Clear Active/Done pointers and Done fields
+    - Clear failure fields (optional, but cleaner for a new attempt)
+    - Write Next Planned Draw Date (tomorrow or Sunday after Thu)
+    """
+    if not os.path.exists(ORDERS_FILE):
+        return False, f"{ORDERS_FILE} not found."
+
+    try:
+        orders = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+    except Exception as e:
+        return False, f"Failed reading {ORDERS_FILE}: {e}"
+
+    orders.columns = [str(c).replace("\ufeff", "").strip() for c in orders.columns]
+
+    for col, default in {
+        "Status": "Pending",
+        "Active CSV": "",
+        "Done CSV": "",
+        "Done Description": "",
+        "Done Timestamp": "",
+        "Failed CSV": "",
+        "Failed Description": "",
+        "Failed Timestamp": "",
+        "Next Planned Draw Date": "",
+        "T&M Moved": False,
+        "T&M Moved Timestamp": "",
+    }.items():
+        if col not in orders.columns:
+            orders[col] = default
+
+    def norm_col(series):
+        return (
+            series.astype(str).fillna("")
+            .str.replace("\ufeff", "", regex=False)
+            .str.replace('"', "", regex=False)
+            .str.replace("'", "", regex=False)
+            .str.strip()
+            .str.lower()
+        )
+
+    target = _norm_str(dataset_csv_filename)
+    target_alts = _alt_names(target)
+
+    active_norm = norm_col(orders["Active CSV"])
+    done_norm   = norm_col(orders["Done CSV"])
+    fail_norm   = norm_col(orders["Failed CSV"]) if "Failed CSV" in orders.columns else pd.Series([""] * len(orders))
+
+    match = pd.Series([False] * len(orders))
+    for t in target_alts:
+        match = match | (active_norm == t) | (done_norm == t) | (fail_norm == t)
+
+    if not match.any():
+        for t in target_alts:
+            match = match | active_norm.str.endswith(t, na=False) | done_norm.str.endswith(t, na=False) | fail_norm.str.endswith(t, na=False)
+
+    if not match.any():
+        return False, f"No matching row found for '{dataset_csv_filename}'."
+
+    if match.sum() > 1:
+        return False, f"Multiple matching rows found for '{dataset_csv_filename}'. Please fix duplicates in draw_orders.csv."
+
+    next_date = compute_next_planned_draw_date(datetime.now())
+
+    # ✅ Reset to "start from beginning"
+    if str(schedule_date).strip():
+        orders.loc[match, "Status"] = "Scheduled"
+    else:
+        orders.loc[match, "Status"] = "Pending"
+    orders.loc[match, "Next Planned Draw Date"] = next_date
+
+    orders.loc[match, "Active CSV"] = ""
+    orders.loc[match, "Done CSV"] = ""
+    orders.loc[match, "Done Description"] = ""
+    orders.loc[match, "Done Timestamp"] = ""
+
+    orders.loc[match, "Failed CSV"] = ""
+    orders.loc[match, "Failed Description"] = ""
+    orders.loc[match, "Failed Timestamp"] = ""
+
+    # Optional: reset T&M moved flags for a fresh attempt
+    orders.loc[match, "T&M Moved"] = False
+    orders.loc[match, "T&M Moved Timestamp"] = ""
+
+    orders.to_csv(ORDERS_FILE, index=False)
+    return True, f"Reset to Pending and scheduled Next Planned Draw Date = {next_date}."
+
+# ------------------ Home Tab ------------------
 # ------------------ Home Tab ------------------
 if tab_selection == "🏠 Home":
+    import os
+    import datetime as dt
+    import pandas as pd
+    import streamlit as st
+
     st.title("️ Tower Management Software")
 
-    st.subheader("Isorad Tower Management Software")
-
-    # ---------- CSS FIRST (so it affects everything below) ----------
+    # =========================================================
+    # 🎨 CSS (yours + small dialog polish)
+    # =========================================================
     st.markdown(
         f"""
         <style>
@@ -4984,260 +4934,1384 @@ if tab_selection == "🏠 Home":
             background-size: cover;
         }}
         .css-1aumxhk {{ background-color: rgba(20, 20, 20, 0.90) !important; }}
-        .css-1l02zno {{
-            color: #FFFFFF !important;
-            font-size: 20px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }}
-        .css-1d391kg, .css-qrbaxs, .css-1y4p8pa {{
-            color: #FFFFFF !important;
-            font-size: 18px;
-            font-weight: 700;
-        }}
-        .css-1y4p8pa[aria-selected="true"] {{
-            color: #FFD700 !important;
-            font-weight: bold;
-        }}
-        .css-1y4p8pa:hover {{ color: #B0C4DE !important; }}
-        h1 {{
-            color: #FFFFFF !important;
-            font-size: 38px !important;
-            font-weight: bold !important;
-            text-align: center;
-            margin-top: 20px;
-        }}
-        h2 {{
-            color: #DDDDDD !important;
-            font-size: 24px !important;
-            font-style: italic;
-            text-align: center;
-            margin-top: -10px;
-        }}
-        @media (prefers-color-scheme: light) {{
-            h1 {{ color: #000000 !important; }}
-            h2 {{ color: #333333 !important; }}
-            .css-1l02zno {{ color: #000000 !important; }}
-            .css-1d391kg, .css-qrbaxs, .css-1y4p8pa {{ color: #000000 !important; }}
+        div[data-testid="stDialog"] {{
+            border-radius: 14px;
         }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    # ---------- 1) SCHEDULE FIRST ----------
-    render_schedule_home_minimal()
+    # =========================================================
+    # ❌ FAILED → AUTO BACK TO PENDING AFTER 4 DAYS
+    # =========================================================
+    ORDERS_FILE = P.orders_csv
 
-    st.markdown("---")
+    def _ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
+        if STATUS_COL not in df.columns:
+            df[STATUS_COL] = "Pending"
+        if STATUS_UPDATED_COL not in df.columns:
+            df[STATUS_UPDATED_COL] = ""
+        if FAILED_REASON_COL not in df.columns:
+            df[FAILED_REASON_COL] = ""
+        return df
+
+    def auto_move_failed_to_pending(days: int = 4):
+        if not os.path.exists(ORDERS_FILE):
+            return
+
+        try:
+            df = pd.read_csv(ORDERS_FILE)
+        except Exception:
+            return
+
+        df = _ensure_cols(df)
+        if df.empty:
+            return
+
+        now = pd.Timestamp.now()
+        cutoff = now - pd.Timedelta(days=days)
+        changed = False
+
+        for i in range(len(df)):
+            if str(df.at[i, STATUS_COL]).strip().lower() != "failed":
+                continue
+
+            t = parse_dt_safe(df.at[i, STATUS_UPDATED_COL])
+
+            # stamp missing timestamps so the 4-day timer works
+            if t is None:
+                df.at[i, STATUS_UPDATED_COL] = now_str()
+                changed = True
+                continue
+
+            if t < cutoff:
+                df.at[i, STATUS_COL] = "Pending"
+                df.at[i, STATUS_UPDATED_COL] = now_str()
+                changed = True
+
+        if changed:
+            df.to_csv(ORDERS_FILE, index=False)
+
+
+    # =========================================================
+    # 🚨 CRITICAL OPEN FAULTS (Home indicator)
+    # - Reads maintenance/faults_log.csv
+    # - Counts severity == "critical" AND not closed
+    # =========================================================
+    FAULTS_CSV = os.path.join(P.maintenance_dir, "faults_log.csv")
+
+
+    def compute_open_critical_faults(faults_csv: str) -> int:
+        if not os.path.isfile(faults_csv):
+            return 0
+        try:
+            df = pd.read_csv(faults_csv)
+        except Exception:
+            return 0
+        if df.empty:
+            return 0
+
+        # normalize columns
+        cols = {c.lower().strip(): c for c in df.columns}
+        sev_col = cols.get("fault_severity", None)
+        if not sev_col:
+            return 0
+
+        # Optional "Status" / "Closed" support (if you add it later)
+        status_col = cols.get("fault_status", None)
+        closed_col = cols.get("fault_closed", None)
+
+        sev = df[sev_col].astype(str).str.strip().str.lower()
+
+        # If no status info exists → treat everything as open
+        is_open = pd.Series(True, index=df.index)
+
+        if status_col:
+            stt = df[status_col].astype(str).str.strip().str.lower()
+            is_open = ~stt.isin(["closed", "done", "resolved", "fixed"])
+        elif closed_col:
+            # supports True/False or yes/no
+            cl = df[closed_col].astype(str).str.strip().str.lower()
+            is_open = ~cl.isin(["true", "1", "yes", "y", "closed"])
+
+        return int((sev == "critical")[is_open].sum())
+
+    # =========================================================
+    # ❌ FAILED (last 4 days) — compact list + POPUP reason
+    # =========================================================
+    def render_failed_home_popup(days_visible: int = 4):
+        st.subheader("❌ Failed (last 4 days)")
+
+        if not os.path.exists(ORDERS_FILE):
+            st.info("No orders file found.")
+            return
+
+        try:
+            df = pd.read_csv(ORDERS_FILE)
+        except Exception as e:
+            st.error(f"Failed to read {ORDERS_FILE}: {e}")
+            return
+
+        df = _ensure_cols(df)
+
+        if df.empty:
+            st.info("No orders.")
+            return
+
+        failed = df[df[STATUS_COL].astype(str).str.strip().str.lower().eq("failed")].copy()
+        if failed.empty:
+            st.success("No Failed orders 👍")
+            return
+
+        now = pd.Timestamp.now()
+        cutoff = now - pd.Timedelta(days=days_visible)
+
+        failed["_dt"] = failed[STATUS_UPDATED_COL].apply(parse_dt_safe)
+        failed["_dt"] = failed["_dt"].fillna(now)
+        failed = failed[failed["_dt"] >= cutoff].copy().sort_values("_dt", ascending=False)
+
+        if failed.empty:
+            st.info("No recent Failed orders.")
+            return
+
+        def _open_failed_dialog(title: str, reason: str, updated: str, extra_lines: list):
+            @st.dialog(title)
+            def _dlg():
+                if reason:
+                    st.error(reason)
+                else:
+                    st.info("No failed description recorded.")
+
+                if updated:
+                    st.caption(f"Updated: {updated}")
+
+                if extra_lines:
+                    st.markdown("**Info**")
+                    for line in extra_lines:
+                        if line:
+                            st.write(f"• {line}")
+
+            _dlg()
+
+        for i, (_, row) in enumerate(failed.iterrows()):
+            oid = safe_str(row.get("Order ID"))
+            pf = safe_str(row.get("Preform Number"))
+            ftype = safe_str(row.get("Fiber Type"))
+            proj = safe_str(row.get("Fiber Project"))
+            updated = safe_str(row.get(STATUS_UPDATED_COL))
+            reason = safe_str(row.get(FAILED_REASON_COL))
+
+            left = " | ".join([p for p in [
+                f"#{oid}" if oid else "",
+                f"PF {pf}" if pf else "",
+                ftype if ftype else "",
+                proj if proj else ""
+            ] if p])
+
+            extra = []
+            if "Required Length (m) (for T&M+costumer)" in failed.columns:
+                val = safe_str(row.get("Required Length (m) (for T&M+costumer)"))
+                if val:
+                    extra.append(f"Required Length: {val} m")
+            elif "Required Length (m)" in failed.columns:
+                val = safe_str(row.get("Required Length (m)"))
+                if val:
+                    extra.append(f"Required Length: {val} m")
+
+            if "Priority" in failed.columns:
+                val = safe_str(row.get("Priority"))
+                if val:
+                    extra.append(f"Priority: {val}")
+
+            if "Notes" in failed.columns:
+                val = safe_str(row.get("Notes"))
+                if val:
+                    extra.append(f"Notes: {val}")
+
+            c1, c2 = st.columns([3.2, 1.2])
+            with c1:
+                st.markdown(f"**{left if left else 'Failed Order'}**")
+                if updated:
+                    st.caption(f"Updated: {updated}")
+            with c2:
+                btn_key = f"failed_reason_btn_{i}_{oid}_{pf}"
+                if st.button("View reason", key=btn_key, use_container_width=True):
+                    dlg_title = left if left else "Failed Order"
+                    _open_failed_dialog(
+                        title=f"❌ Failed: {dlg_title}",
+                        reason=reason,
+                        updated=updated,
+                        extra_lines=extra
+                    )
+
+            st.markdown("---")
+
+    # =========================================================
+    # 🔁 AUTO CLEANUP FIRST
+    # =========================================================
+    auto_move_failed_to_pending(days=4)
+
+    # =========================================================
+    # ✅ 1) DRAW ORDERS (keep as-is)
+    # =========================================================
     render_home_draw_orders_overview()
-    render_tm_home_section()  # <-- use the correct function name you have
-
     st.markdown("---")
-    # ---------- 2) MAINTENANCE OVERVIEW ----------
+
+    # =========================================================
+    # ✅ 2) DONE
+    # =========================================================
+    render_done_home_section()
+    st.markdown("---")
+
+    # =========================================================
+    # ✅ 3) FAILED
+    # =========================================================
+    render_failed_home_popup(days_visible=4)
+    st.markdown("---")
+
+    # =========================================================
+    # ✅ 4) CALENDAR / SCHEDULE (MOVED HERE ✅)
+    # =========================================================
+    render_schedule_home_minimal()
+    st.markdown("---")
+
+    # =========================================================
+    # 5) MAINTENANCE OVERVIEW (unchanged below)
+    # =========================================================
+    def compute_maintenance_counts_for_home(
+            maint_folder: str,
+            dataset_dir: str,
+            base_dir: str = None,
+    ):
+        # (your existing function unchanged)
+        import os
+        import json
+        import datetime as dt
+        import pandas as pd
+        import numpy as np
+
+        base_dir = base_dir or os.getcwd()
+
+        def get_draw_csv_count(folder: str) -> int:
+            if not os.path.isdir(folder):
+                return 0
+            return sum(1 for f in os.listdir(folder) if f.lower().endswith(".csv") and not f.startswith("~$"))
+
+        def parse_date(x):
+            if pd.isna(x) or x == "":
+                return None
+            d = pd.to_datetime(x, errors="coerce")
+            if pd.isna(d):
+                return None
+            return d.date()
+
+        def parse_float(x):
+            if pd.isna(x) or x == "":
+                return None
+            try:
+                return float(x)
+            except Exception:
+                return None
+
+        def parse_int(x):
+            if pd.isna(x) or x == "":
+                return None
+            try:
+                return int(float(x))
+            except Exception:
+                return None
+
+        def norm_source(s) -> str:
+            s = "" if s is None or pd.isna(s) else str(s)
+            return s.strip().lower()
+
+        def mode_norm(x: str) -> str:
+            s = "" if x is None or pd.isna(x) else str(x).strip().lower()
+            if s in ("draw", "draws", "draws_count", "draw_count"):
+                return "draws"
+            return s
+
+        def load_state(path: str) -> dict:
+            try:
+                if os.path.isfile(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+            except Exception:
+                pass
+            return {}
+
+        state_path = os.path.join(maint_folder, "_app_state.json")
+        state = load_state(state_path)
+
+        current_date = dt.date.today()
+        furnace_hours = float(state.get("furnace_hours", 0.0) or 0.0)
+        uv1_hours = float(state.get("uv1_hours", 0.0) or 0.0)
+        uv2_hours = float(state.get("uv2_hours", 0.0) or 0.0)
+        warn_days = int(state.get("warn_days", 14) or 14)
+        warn_hours = float(state.get("warn_hours", 50.0) or 50.0)
+
+        current_draw_count = get_draw_csv_count(dataset_dir)
+
+        if not os.path.isdir(maint_folder):
+            return 0, 0
+
+        files = [f for f in os.listdir(maint_folder) if f.lower().endswith((".xlsx", ".xls", ".csv"))]
+        if not files:
+            return 0, 0
+
+        normalize_map = {
+            "equipment": "Component",
+            "task name": "Task",
+            "task id": "Task_ID",
+            "interval type": "Interval_Type",
+            "interval value": "Interval_Value",
+            "interval unit": "Interval_Unit",
+            "tracking mode": "Tracking_Mode",
+            "hours source": "Hours_Source",
+            "calendar rule": "Calendar_Rule",
+            "due threshold (days)": "Due_Threshold_Days",
+            "document name": "Manual_Name",
+            "document file/link": "Document",
+            "manual page": "Page",
+            "procedure summary": "Procedure_Summary",
+            "safety/notes": "Notes",
+            "owner": "Owner",
+            "last done date": "Last_Done_Date",
+            "last done hours": "Last_Done_Hours",
+            "last done draw": "Last_Done_Draw",
+        }
+
+        REQUIRED = ["Component", "Task", "Tracking_Mode"]
+        OPTIONAL = [
+            "Task_ID",
+            "Interval_Type", "Interval_Value", "Interval_Unit",
+            "Due_Threshold_Days",
+            "Last_Done_Date", "Last_Done_Hours", "Last_Done_Draw",
+            "Manual_Name", "Page", "Document",
+            "Procedure_Summary", "Notes", "Owner",
+            "Hours_Source", "Calendar_Rule",
+        ]
+
+        def read_file(path: str) -> pd.DataFrame:
+            if path.lower().endswith(".csv"):
+                return pd.read_csv(path)
+            return pd.read_excel(path)
+
+        def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+            df = df.copy()
+            df.rename(columns={c: normalize_map.get(str(c).strip().lower(), c) for c in df.columns}, inplace=True)
+            for r in REQUIRED:
+                if r not in df.columns:
+                    df[r] = np.nan
+            for c in OPTIONAL:
+                if c not in df.columns:
+                    df[c] = np.nan
+            return df
+
+        frames = []
+        for fname in sorted(files):
+            fpath = os.path.join(maint_folder, fname)
+            try:
+                raw = read_file(fpath)
+                if raw is None or raw.empty:
+                    continue
+                dfm = normalize_df(raw)
+                dfm["Source_File"] = fname
+                frames.append(dfm)
+            except Exception:
+                continue
+
+        if not frames:
+            return 0, 0
+
+        dfm = pd.concat(frames, ignore_index=True)
+
+        def pick_current_hours(hours_source: str) -> float:
+            hs = norm_source(hours_source)
+            if hs in ("uv2", "uv 2", "uv_system_2", "uv system 2", "uv-system-2", "system2", "system 2"):
+                return float(uv2_hours)
+            if hs in ("uv1", "uv 1", "uv_system_1", "uv system 1", "uv-system-1", "system1", "system 1"):
+                return float(uv1_hours)
+            return float(furnace_hours)
+
+        dfm["Last_Done_Date_parsed"] = dfm["Last_Done_Date"].apply(parse_date)
+        dfm["Last_Done_Hours_parsed"] = dfm["Last_Done_Hours"].apply(parse_float)
+        dfm["Last_Done_Draw_parsed"] = dfm["Last_Done_Draw"].apply(parse_int)
+        dfm["Current_Hours_For_Task"] = dfm["Hours_Source"].apply(pick_current_hours)
+        dfm["Tracking_Mode_norm"] = dfm["Tracking_Mode"].apply(mode_norm)
+
+        def next_due_date(row):
+            if row.get("Tracking_Mode_norm") != "calendar":
+                return None
+            last = row.get("Last_Done_Date_parsed", None)
+            if last is None:
+                return None
+            try:
+                v = int(float(row.get("Interval_Value", np.nan)))
+            except Exception:
+                return None
+            unit = str(row.get("Interval_Unit", "")).strip().lower()
+            base = pd.Timestamp(last)
+            if pd.isna(base) or base is pd.NaT:
+                return None
+            if "day" in unit:
+                out = base + pd.DateOffset(days=v)
+            elif "week" in unit:
+                out = base + pd.DateOffset(weeks=v)
+            elif "month" in unit:
+                out = base + pd.DateOffset(months=v)
+            elif "year" in unit:
+                out = base + pd.DateOffset(years=v)
+            else:
+                out = base + pd.DateOffset(days=v)
+            if pd.isna(out) or out is pd.NaT:
+                return None
+            return out.date()
+
+        def next_due_hours(row):
+            if row.get("Tracking_Mode_norm") != "hours":
+                return None
+            last_h = row.get("Last_Done_Hours_parsed", None)
+            if last_h is None:
+                return None
+            try:
+                v = float(row.get("Interval_Value", np.nan))
+            except Exception:
+                return None
+            if pd.isna(v):
+                return None
+            return float(last_h) + float(v)
+
+        def next_due_draw(row):
+            if row.get("Tracking_Mode_norm") != "draws":
+                return None
+            last_d = row.get("Last_Done_Draw_parsed", None)
+            if last_d is None:
+                return None
+            try:
+                v = int(float(row.get("Interval_Value", np.nan)))
+            except Exception:
+                return None
+            return int(last_d) + int(v)
+
+        dfm["Next_Due_Date"] = dfm.apply(next_due_date, axis=1)
+        dfm["Next_Due_Hours"] = dfm.apply(next_due_hours, axis=1)
+        dfm["Next_Due_Draw"] = dfm.apply(next_due_draw, axis=1)
+
+        def status_row(row):
+            mode = row.get("Tracking_Mode_norm", "")
+            if mode == "event":
+                return "ROUTINE"
+
+            overdue = False
+            due_soon = False
+
+            nd = row.get("Next_Due_Date", None)
+            nh = row.get("Next_Due_Hours", None)
+            ndr = row.get("Next_Due_Draw", None)
+
+            if nd is not None and not pd.isna(nd):
+                if nd < current_date:
+                    overdue = True
+                else:
+                    thresh = row.get("Due_Threshold_Days", np.nan)
+                    try:
+                        thresh = int(float(thresh)) if not pd.isna(thresh) else int(warn_days)
+                    except Exception:
+                        thresh = int(warn_days)
+                    if (nd - current_date).days <= thresh:
+                        due_soon = True
+
+            if nh is not None and not pd.isna(nh):
+                nh = float(nh)
+                cur_h = float(row.get("Current_Hours_For_Task", 0.0))
+                if nh < cur_h:
+                    overdue = True
+                elif (nh - cur_h) <= float(warn_hours):
+                    due_soon = True
+
+            if ndr is not None and not pd.isna(ndr):
+                ndr = int(ndr)
+                if ndr < int(current_draw_count):
+                    overdue = True
+                elif (ndr - int(current_draw_count)) <= 5:
+                    due_soon = True
+
+            if overdue:
+                return "OVERDUE"
+            if due_soon:
+                return "DUE SOON"
+            return "OK"
+
+        dfm["Status"] = dfm.apply(status_row, axis=1)
+
+        overdue = int((dfm["Status"] == "OVERDUE").sum())
+        due_soon = int((dfm["Status"] == "DUE SOON").sum())
+        return overdue, due_soon
+
     st.subheader("🧰 Maintenance Overview")
 
-    overdue = st.session_state.get("maint_overdue")
-    due_soon = st.session_state.get("maint_due_soon")
+    MAINT_FOLDER = P.maintenance_dir
+    DATASET_DIR = os.path.join(os.getcwd(), P.dataset_dir)
 
-    if overdue is None or due_soon is None:
-        import datetime as dt
-        base_dir = os.getcwd()
-        overdue, due_soon = maintenance_quick_counts(
-            base_dir=base_dir,
-            current_date=dt.date.today(),
-            furnace_hours=st.session_state.get("furnace_hours", 0.0),
-            uv1_hours=st.session_state.get("uv1_hours", 0.0),
-            uv2_hours=st.session_state.get("uv2_hours", 0.0),
-            warn_days=14,
-            warn_hours=50.0,
-        )
+    overdue, due_soon = compute_maintenance_counts_for_home(
+        maint_folder=MAINT_FOLDER,
+        dataset_dir=DATASET_DIR,
+    )
+
+    st.session_state["maint_overdue"] = overdue
+    st.session_state["maint_due_soon"] = due_soon
 
     c1, c2 = st.columns(2)
-    c1.metric("🔴 Overdue", int(overdue))
-    c2.metric("🟠 Due soon", int(due_soon))
+    c1.metric("🔴 Overdue", overdue)
+    c2.metric("🟠 Due soon", due_soon)
 
+    st.subheader("🚨 Faults Overview")
+
+    open_critical = compute_open_critical_faults(FAULTS_CSV)
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    c1.metric("🟥 Critical open faults", open_critical)
+
+    with c2:
+        if open_critical == 0:
+            st.success("No critical faults ✅")
+        else:
+            st.warning("Check Maintenance → Faults")
+
+    with c3:
+        if open_critical > 0:
+            st.caption("Tip: open 🧰 Maintenance → Faults / Incidents to review.")
     st.markdown("---")
+    # =========================================================
+    # 6) PARTS NEEDED
+    # =========================================================
 
-    # ---------- 2) PARTS NEEDED ----------
     render_parts_orders_home_all()
-    st.markdown("---")
-    # ---------- 3) T&MMANAGEMENT ----------
 # ------------------ Process Tab ------------------
 elif tab_selection == "⚙️ Process Setup":
-    render_process_setup_tab(config)
+    df_orders = pd.read_csv(P.orders_csv, keep_default_na=False) if os.path.exists(P.orders_csv) else pd.DataFrame()
+    try:
+        df_orders = pd.read_csv(ORDERS_FILE, keep_default_na=False) if os.path.exists(ORDERS_FILE) else pd.DataFrame()
+    except Exception:
+        df_orders = pd.DataFrame()
+
+    render_process_setup_tab(
+        orders_df=df_orders,
+        orders_file=ORDERS_FILE,
+    )
 # ------------------ Dashboard Tab ------------------
 elif tab_selection == "📊 Dashboard":
+    # ==========================================================
+    # Imports (local)
+    # ==========================================================
+    import os
+    from datetime import datetime
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+    import plotly.graph_objects as go
+    import plotly.express as px
+
+    from helpers.text_utils import safe_str
+    from helpers.dataset_csv_io import append_rows_to_dataset_csv
+    from helpers.dataset_param_parsers import (
+        _parse_steps,
+        zone_lengths_from_log_km,
+        build_tm_instruction_rows_auto_from_good_zones,
+    )
+
+    # ==========================================================
+    # Constants / paths
+    # ==========================================================
+    DATASET_DIR = P.dataset_dir
+    LOGS_DIR = getattr(P, "logs_dir", None) or getattr(P, "log_dir", None) or "logs"
+
     st.title(f"📊 Draw Tower Logs Dashboard - {selected_file}")
 
+    # ==========================================================
+    # Helpers
+    # ==========================================================
+    def list_dataset_csvs(dataset_dir):
+        if not os.path.exists(dataset_dir):
+            return []
+        return sorted([f for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")])
 
-    # -----------------------------
-    # Helpers (minimal, local)
-    # -----------------------------
-    ORDERS_FILE = "draw_orders.csv"
-
-
-    def _find_length_col(cols):
-        cols_map = {str(c).strip().lower(): c for c in cols}
-
-        exact = [
-            "fiber length", "fibre length",
-            "fiber_length", "fibre_length",
-            "draw length", "line length", "spool length",
-        ]
-        for k in exact:
-            if k in cols_map:
-                return cols_map[k]
-
-        for cl_lower, orig in cols_map.items():
-            if ("length" in cl_lower) and (("fiber" in cl_lower) or ("fibre" in cl_lower)):
-                return orig
-
-        length_like = [orig for cl_lower, orig in cols_map.items() if "length" in cl_lower]
-        if len(length_like) == 1:
-            return length_like[0]
-
-        return None
-
-
-    def build_cut_save_steps_km(df_work, x_axis, good_zones, fiber_len_col):
-        """
-        Returns:
-          total_km: float
-          save_segments_km: [(a,b), ...]  # km from end, merged, sorted
-          cut_segments_km:  [(a,b), ...]  # complement, sorted
-          steps: [("CUT", length_km), ("SAVE", length_km), ...] sorted from end outward
-        """
-        import numpy as np
-        import pandas as pd
-
-        # ---- length unit -> km factor (best effort)
-        name = str(fiber_len_col).lower()
-        if "km" in name:
-            to_km = 1.0
-        elif "cm" in name:
-            to_km = 1e-5
-        else:
-            to_km = 1e-3  # assume meters by default
-
-        tmp = df_work[[x_axis, fiber_len_col]].copy()
-        tmp = tmp.dropna(subset=[x_axis]).sort_values(by=x_axis)
-        tmp[fiber_len_col] = pd.to_numeric(tmp[fiber_len_col], errors="coerce")
-        tmp = tmp.dropna(subset=[fiber_len_col])
-
-        if tmp.empty:
-            return None
-
-        L_end = float(tmp[fiber_len_col].iloc[-1])
-        total_km = L_end * to_km
-
-        # Interpolation x
-        x_series = tmp[x_axis]
-        if pd.api.types.is_datetime64_any_dtype(x_series):
-            x_num = (x_series.view("int64") / 1e9).to_numpy(dtype=float)
-
-            def x_to_num(v):
-                return pd.to_datetime(v).value / 1e9
-        else:
-            x_num = pd.to_numeric(x_series, errors="coerce").to_numpy(dtype=float)
-
-            def x_to_num(v):
-                return float(pd.to_numeric(pd.Series([v]), errors="coerce").iloc[0])
-
-        L_arr = tmp[fiber_len_col].to_numpy(dtype=float)
-
-        ok = np.isfinite(x_num) & np.isfinite(L_arr)
-        x_num = x_num[ok]
-        L_arr = L_arr[ok]
-        if len(x_num) < 2:
-            return None
-
-        # ---- zones -> SAVE segments in km from end
-        save_segments = []
-        for (zs, ze) in good_zones:
-            xs = x_to_num(zs)
-            xe = x_to_num(ze)
-            if not (np.isfinite(xs) and np.isfinite(xe)):
-                continue
-            if xe < xs:
-                xs, xe = xe, xs
-
-            Ls = float(np.interp(xs, x_num, L_arr))
-            Le = float(np.interp(xe, x_num, L_arr))
-            if Le < Ls:
-                Ls, Le = Le, Ls
-
-            a = (L_end - Le) * to_km  # near end
-            b = (L_end - Ls) * to_km  # farther from end
-
-            a = max(0.0, min(total_km, a))
-            b = max(0.0, min(total_km, b))
-            if b - a <= 0:
-                continue
-
-            save_segments.append((a, b))
-
-        # No save zones => all cut
-        if not save_segments:
-            cut_segments = [(0.0, total_km)]
-            steps = [("CUT", total_km)]
-            return total_km, [], cut_segments, steps
-
-        # merge overlaps
-        save_segments.sort(key=lambda t: t[0])
-        merged = []
-        for a, b in save_segments:
-            if not merged or a > merged[-1][1]:
-                merged.append([a, b])
-            else:
-                merged[-1][1] = max(merged[-1][1], b)
-        save_segments = [(a, b) for a, b in merged]
-
-        # complement -> cuts
-        cut_segments = []
-        cur = 0.0
-        for a, b in save_segments:
-            if a > cur:
-                cut_segments.append((cur, a))
-            cur = max(cur, b)
-        if cur < total_km:
-            cut_segments.append((cur, total_km))
-
-        # build ordered steps from end outward by slicing [0,total] into alternating segments
-        # We can just merge both lists into boundaries then label membership
-        steps = []
-        all_bounds = [0.0, total_km]
-        for a, b in save_segments:
-            all_bounds.extend([a, b])
-        all_bounds = sorted(set([float(x) for x in all_bounds]))
-
-        def in_save(mid):
-            for a, b in save_segments:
-                if a <= mid <= b:
-                    return True
-            return False
-
-        for i in range(len(all_bounds) - 1):
-            a = all_bounds[i]
-            b = all_bounds[i + 1]
-            if b <= a:
-                continue
-            mid = 0.5 * (a + b)
-            action = "SAVE" if in_save(mid) else "CUT"
-            length = b - a
-            # merge consecutive same-action steps
-            if steps and steps[-1][0] == action:
-                steps[-1] = (action, steps[-1][1] + length)
-            else:
-                steps.append((action, length))
-
-        return total_km, save_segments, cut_segments, steps
-    def get_most_recent_dataset_csv(dataset_dir="data_set_csv"):
+    def get_most_recent_dataset_csv(dataset_dir):
         if not os.path.exists(dataset_dir):
             return None
         files = [os.path.join(dataset_dir, f) for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")]
         if not files:
             return None
         return os.path.basename(max(files, key=os.path.getmtime))
+
+    def resolve_log_path(selected_name):
+        if not selected_name:
+            return ""
+        if os.path.exists(selected_name):
+            return selected_name
+        cand = os.path.join(LOGS_DIR, selected_name)
+        if os.path.exists(cand):
+            return cand
+        for d in ["logs", "log_csv", "draw_logs", "tower_logs", "data_logs"]:
+            cand2 = os.path.join(d, selected_name)
+            if os.path.exists(cand2):
+                return cand2
+        return selected_name
+
+    def _fmt_x(v):
+        try:
+            if isinstance(v, (pd.Timestamp, datetime)):
+                return pd.to_datetime(v).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+        return str(v)
+
+    def _choose_length_col(df_):
+        if df_ is None or df_.empty:
+            return None
+        cols = list(df_.columns)
+        cmap = {str(c).strip().lower(): c for c in cols}
+        for k in ["fibre length (km)", "fiber length (km)", "fibre length", "fiber length", "fibre_length", "fiber_length"]:
+            if k in cmap:
+                return cmap[k]
+        for c in cols:
+            cl = str(c).lower()
+            if "length" in cl and ("fiber" in cl or "fibre" in cl):
+                return c
+        for c in cols:
+            if "length" in str(c).lower():
+                return c
+        return None
+
+    def reorder_zones_by_spool_end(filtered_df, x_axis, zones, length_col):
+        """
+        Returns zones reordered so index 1 is closest to spool end.
+        Sorting key = smallest km_from_end_start.
+        """
+        if not zones or filtered_df is None or filtered_df.empty or not length_col:
+            return zones
+
+        dfw = filtered_df.sort_values(by=x_axis).copy()
+        L_all = pd.to_numeric(dfw[length_col], errors="coerce").dropna()
+        if L_all.empty:
+            return zones
+        L_end = float(L_all.iloc[-1])
+
+        enriched = []
+        for orig_i, (zs, ze) in enumerate(zones, start=1):
+            try:
+                zdf = dfw[(dfw[x_axis] >= zs) & (dfw[x_axis] <= ze)]
+            except Exception:
+                zdf = pd.DataFrame()
+            if zdf.empty:
+                continue
+            Lz = pd.to_numeric(zdf[length_col], errors="coerce").dropna()
+            if Lz.empty:
+                continue
+            L_max = float(Lz.max())
+            km0 = max(0.0, L_end - L_max)  # zone near-end edge
+            enriched.append((km0, orig_i, (zs, ze)))
+
+        if not enriched:
+            return zones
+
+        enriched.sort(key=lambda t: t[0])  # closest to end first
+        return [t[2] for t in enriched]
+
+    def build_zone_save_rows(
+        log_file_path,
+        x_axis,
+        y_axes_selected,
+        filtered_df,
+        zones,
+        include_all_numeric_cols=True,
+        always_include_cols=None,
+        exclude_cols=None,
+    ):
+        always_include_cols = always_include_cols or []
+        exclude_cols = set([str(c).strip() for c in (exclude_cols or [])])
+
+        rows = []
+        now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        rows.append({"Parameter Name": "Zones Saved Timestamp", "Value": now_s, "Units": ""})
+        rows.append({"Parameter Name": "Dashboard Log File", "Value": os.path.basename(log_file_path), "Units": ""})
+        rows.append({"Parameter Name": "Good Zones Count", "Value": int(len(zones)), "Units": "count"})
+        rows.append({"Parameter Name": "Good Zones X Column", "Value": str(x_axis), "Units": ""})
+
+        if not zones:
+            return rows
+
+        start_end_units = "index/label"
+        if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
+            start_end_units = "datetime"
+        elif pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
+            start_end_units = str(x_axis)
+
+        if include_all_numeric_cols:
+            cols = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
+            cols = [c for c in cols if c != x_axis and c not in exclude_cols]
+        else:
+            cols = [c for c in (y_axes_selected or []) if c not in exclude_cols]
+
+        for c in always_include_cols:
+            if c in filtered_df.columns and c not in cols and c not in exclude_cols:
+                cols.append(c)
+
+        for i, (start, end) in enumerate(zones, start=1):
+            rows.append({"Parameter Name": f"Zone {i} Start", "Value": _fmt_x(start), "Units": start_end_units})
+            rows.append({"Parameter Name": f"Zone {i} End", "Value": _fmt_x(end), "Units": start_end_units})
+
+            try:
+                zdf = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
+            except Exception:
+                zdf = pd.DataFrame()
+
+            if zdf.empty:
+                continue
+
+            for col in cols:
+                vals = pd.to_numeric(zdf[col], errors="coerce").dropna()
+                if vals.empty:
+                    continue
+                rows.append(
+                    {"Parameter Name": f"Marked Zone {i} Avg - {col}", "Value": float(vals.mean()), "Units": ""})
+                rows.append({"Parameter Name": f"Marked Zone {i} Min - {col}", "Value": float(vals.min()), "Units": ""})
+                rows.append({"Parameter Name": f"Marked Zone {i} Max - {col}", "Value": float(vals.max()), "Units": ""})
+        return rows
+
+    def build_tm_rows_from_steps_allocate_only(dataset_csv_name: str, steps: list, zones_info: list, length_col_name: str = ""):
+        """
+        SIMPLE STEP allocation across zones (no spool-end geometry here).
+        This is stable and avoids mixing STEP with AUTO.
+        """
+        rows = []
+        rows.append({"Parameter Name": "—", "Value": "—", "Units": ""})
+        rows.append({"Parameter Name": "CUT/SAVE Plan Source", "Value": str(os.path.basename(dataset_csv_name)), "Units": ""})
+        rows.append({"Parameter Name": "Plan Mode", "Value": "STEP plan from dataset CSV (allocated on good zones)", "Units": ""})
+        if length_col_name:
+            rows.append({"Parameter Name": "Zone Length Column (log)", "Value": str(length_col_name), "Units": ""})
+
+        if not steps:
+            rows.append({"Parameter Name": "T&M Instructions", "Value": "STEP plan empty.", "Units": ""})
+            return rows
+
+        for i, (a, L) in enumerate(steps, start=1):
+            rows.append({"Parameter Name": f"STEP {i} Action", "Value": str(a).upper(), "Units": ""})
+            rows.append({"Parameter Name": f"STEP {i} Length", "Value": float(L), "Units": "km"})
+
+        tm_i = 1
+        step_idx = 0
+        step_act, step_rem = steps[0][0], float(steps[0][1])
+
+        saved = 0.0
+        cut = 0.0
+
+        for z in zones_info:
+            zlen = z.get("len_km")
+            zi = z.get("i", None)
+            if zlen is None or float(zlen) <= 0:
+                continue
+            zone_remaining = float(zlen)
+
+            while zone_remaining > 1e-9 and step_idx < len(steps):
+                take = min(zone_remaining, step_rem)
+
+                rows.append({"Parameter Name": f"T&M Step {tm_i} Action", "Value": str(step_act).upper(), "Units": ""})
+                rows.append({"Parameter Name": f"T&M Step {tm_i} Length", "Value": float(take), "Units": "km"})
+                rows.append({"Parameter Name": f"T&M Step {tm_i} From", "Value": f"Zone {zi}", "Units": ""})
+
+                if str(step_act).upper() == "SAVE":
+                    saved += float(take)
+                else:
+                    cut += float(take)
+
+                zone_remaining -= take
+                step_rem -= take
+                tm_i += 1
+
+                if step_rem <= 1e-9:
+                    step_idx += 1
+                    if step_idx < len(steps):
+                        step_act, step_rem = steps[step_idx][0], float(steps[step_idx][1])
+
+        rows.append({"Parameter Name": "Total Saved Length", "Value": float(saved), "Units": "km"})
+        rows.append({"Parameter Name": "Total Cut Length", "Value": float(cut), "Units": "km"})
+        return rows
+
+    # ==========================================================
+    # Load log CSV
+    # ==========================================================
+    log_path = resolve_log_path(selected_file)
+    if not log_path or not os.path.exists(log_path):
+        st.error(f"Failed to read log CSV: file not found.\n\nSelected: {selected_file}\nTried: {log_path}")
+        st.stop()
+
+    try:
+        df = pd.read_csv(log_path)
+    except Exception as e:
+        st.error(f"Failed to read log CSV: {e}")
+        st.stop()
+
+    if df is None or df.empty:
+        st.warning("Log CSV loaded but is empty.")
+        st.stop()
+
+    # ==========================================================
+    # Dataset CSV context
+    # ==========================================================
+    recent_dataset_csvs = list_dataset_csvs(DATASET_DIR)
+    latest_dataset_csv = get_most_recent_dataset_csv(DATASET_DIR)
+    st.caption(f"Most recent dataset CSV: **{latest_dataset_csv if latest_dataset_csv else 'None'}**")
+
+    # ==========================================================
+    # Session state
+    # ==========================================================
+    if "good_zones" not in st.session_state:
+        st.session_state["good_zones"] = []
+    if "dash_last_log_file" not in st.session_state:
+        st.session_state["dash_last_log_file"] = ""
+    if "dash_zone_msg" not in st.session_state:
+        st.session_state["dash_zone_msg"] = ""
+
+    if st.session_state["dash_last_log_file"] != os.path.basename(log_path):
+        st.session_state["good_zones"] = []
+        st.session_state["dash_last_log_file"] = os.path.basename(log_path)
+        st.session_state["dash_zone_msg"] = ""
+
+    # ==========================================================
+    # Controls
+    # ==========================================================
+    column_options = df.columns.tolist()
+    if not column_options:
+        st.warning("No columns found in log CSV.")
+        st.stop()
+
+    x_axis = st.selectbox("Select X-axis", column_options, key="x_axis_dash")
+
+    y_axes = st.multiselect(
+        "Select Y-axis column(s)",
+        options=column_options,
+        default=[],
+        key="y_axes_dash_multi",
+    )
+
+    if not y_axes:
+        st.info("Select one or more **Y-axis** columns to show the plot + zones.")
+        st.stop()
+
+    # ==========================================================
+    # Stable x typing + filtered df
+    # ==========================================================
+    df_work = df.copy()
+
+    x_raw = df_work[x_axis]
+    x_dt = pd.to_datetime(x_raw, errors="coerce", utc=False)
+    dt_ok_ratio = float(x_dt.notna().mean()) if len(x_dt) else 0.0
+
+    if dt_ok_ratio > 0.80:
+        df_work[x_axis] = x_dt
+    else:
+        x_num = pd.to_numeric(x_raw, errors="coerce")
+        num_ok_ratio = float(x_num.notna().mean()) if len(x_num) else 0.0
+        if num_ok_ratio > 0.80:
+            df_work[x_axis] = x_num
+        else:
+            df_work[x_axis] = x_raw.astype(str)
+
+    filtered_df = df_work.dropna(subset=[x_axis] + y_axes).sort_values(by=x_axis)
+    if filtered_df.empty:
+        st.warning("No data to plot after filtering NA values for selected X/Y columns.")
+        st.stop()
+
+    # ==========================================================
+    # Zone Marker UI
+    # ==========================================================
+    st.subheader("🟩 Zone Marker")
+    st.caption("Use the slider to pick a range, then click **Add Selected Zone**.")
+
+    base_key = f"dash_zone_slider__{safe_str(x_axis)}"
+    time_range = None
+
+    if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
+        tmin = filtered_df[x_axis].min().to_pydatetime()
+        tmax = filtered_df[x_axis].max().to_pydatetime()
+        time_range = st.slider(
+            "Select Time Range for Good Zone",
+            min_value=tmin,
+            max_value=tmax,
+            value=(tmin, tmax),
+            step=pd.Timedelta(seconds=1).to_pytimedelta(),
+            format="HH:mm:ss",
+            key=f"{base_key}_dt",
+        )
+    elif pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
+        xmin = float(filtered_df[x_axis].min())
+        xmax = float(filtered_df[x_axis].max())
+        step = (xmax - xmin) / 1000.0 if xmax > xmin else 1.0
+        if step <= 0:
+            step = 1.0
+        time_range = st.slider(
+            f"Select Range for Good Zone ({x_axis})",
+            min_value=xmin,
+            max_value=xmax,
+            value=(xmin, xmax),
+            step=step,
+            key=f"{base_key}_num",
+        )
+    else:
+        i0, i1 = st.slider(
+            "Select Index Range for Good Zone",
+            min_value=0,
+            max_value=max(0, len(filtered_df) - 1),
+            value=(0, max(0, len(filtered_df) - 1)),
+            step=1,
+            key=f"{base_key}_idx",
+        )
+        xs = filtered_df[x_axis].iloc[int(i0)]
+        xe = filtered_df[x_axis].iloc[int(i1)]
+        time_range = (xs, xe)
+
+    cA, cB, cC = st.columns([1, 1, 2])
+    with cA:
+        if st.button("➕ Add Selected Zone", key=f"dash_add_zone__{safe_str(x_axis)}", use_container_width=True, disabled=not bool(time_range)):
+            st.session_state["good_zones"].append(time_range)
+            st.session_state["dash_zone_msg"] = f"✅ Zone added ({len(st.session_state['good_zones'])} total)"
+            st.rerun()
+
+    with cB:
+        if st.button("🧹 Clear Zones", key=f"dash_clear_zones__{safe_str(x_axis)}", use_container_width=True, disabled=not bool(st.session_state["good_zones"])):
+            st.session_state["good_zones"] = []
+            st.session_state["dash_zone_msg"] = "🧽 Zones cleared"
+            st.rerun()
+
+    with cC:
+        st.info(f"Zones currently: **{len(st.session_state['good_zones'])}**")
+
+    if st.session_state.get("dash_zone_msg"):
+        st.success(st.session_state["dash_zone_msg"])
+
+    # ==========================================================
+    # Plot
+    # ==========================================================
+    # ==========================================================
+    # Plot (multi Y axes with colored axis labels)
+    # ==========================================================
+    # ==========================================================
+    # Plot (multi Y axes with colored axis titles + ticks)
+    # ==========================================================
+    st.subheader("📈 Plot")
+
+    fig = go.Figure()
+
+    # Plotly default-ish palette (don’t change if you don’t want colors)
+    default_colors = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
+    ]
+
+    # ---- add traces (each on its own axis) ----
+    for i, y_col in enumerate(y_axes):
+        axis_ref = "y" if i == 0 else f"y{i + 1}"
+        color = default_colors[i % len(default_colors)]
+
+        fig.add_trace(go.Scatter(
+            x=filtered_df[x_axis],
+            y=pd.to_numeric(filtered_df[y_col], errors="coerce"),
+            mode="lines",
+            name=y_col,
+            yaxis=axis_ref,
+            line=dict(color=color),
+        ))
+
+    # ---- zones shading ----
+    for (start, end) in st.session_state["good_zones"]:
+        fig.add_vrect(x0=start, x1=end, fillcolor="green", opacity=0.25, line_width=0)
+
+    if time_range:
+        fig.add_vrect(
+            x0=time_range[0], x1=time_range[1],
+            fillcolor="blue", opacity=0.15,
+            line_width=1, line_dash="dot"
+        )
+
+    # ---- layout axes ----
+    # ---- layout axes ----
+    layout_updates = {}
+
+    # left axis (no title text – we’ll use labels instead)
+    layout_updates["yaxis"] = dict(
+        title=dict(text=""),  # ✅ remove axis title to avoid overlap
+        tickfont=dict(color=default_colors[0]),
+        showgrid=True,
+    )
+
+    # right axes (no titles – only colored ticks)
+    right_positions = [1.00, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.79]
+
+    for i in range(1, len(y_axes)):
+        axis_key = f"yaxis{i + 1}"
+        color = default_colors[i % len(default_colors)]
+
+        pos_idx = i - 1
+        pos = right_positions[pos_idx] if pos_idx < len(right_positions) else max(0.55, 1.0 - 0.03 * pos_idx)
+
+        layout_updates[axis_key] = dict(
+            title=dict(text=""),  # ✅ remove axis title
+            tickfont=dict(color=color),
+            anchor="x",
+            overlaying="y",
+            side="right",
+            position=float(pos),
+            showgrid=False,
+            zeroline=False,
+        )
+
+    # ---- X axis: reduce tick clutter ----
+    # ---- X axis: reduce tick clutter + vertical labels ----
+    xaxis_cfg = dict(
+        automargin=True,
+        nticks=8,  # keep fewer ticks
+        tickangle=-90,  # ✅ vertical like before
+        showgrid=False,
+    )
+
+    if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
+        xaxis_cfg.update(dict(
+            tickformat="%d/%m/%Y %H:%M:%S",
+            ticklabelmode="instant",
+        ))
+
+
+    # ---- add colored legend-like labels inside plot (instead of axis titles) ----
+    annotations = []
+    y0 = 1.08  # start above plot
+    dy = 0.08  # spacing between labels
+    for i, col in enumerate(y_axes):
+        color = default_colors[i % len(default_colors)]
+        annotations.append(dict(
+            x=0.01,
+            y=y0 - i * dy,
+            xref="paper",
+            yref="paper",
+            text=f"<b>{col}</b>",
+            showarrow=False,
+            align="left",
+            font=dict(color=color, size=12),
+            bgcolor="rgba(0,0,0,0.35)",
+            bordercolor="rgba(255,255,255,0.12)",
+            borderwidth=1,
+            borderpad=6,
+        ))
+
+    fig.update_layout(
+        **layout_updates,
+        xaxis=xaxis_cfg,
+        annotations=annotations,
+        title=f"{' , '.join([str(y) for y in y_axes])} vs {x_axis}",
+        margin=dict(l=10, r=10, t=85, b=10),
+        height=620,
+
+        # ✅ remove bottom legend (we already have labels on plot)
+        legend=dict(visible=False),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ==========================================================
+    # Zones summary (kept)
+    # ==========================================================
+    if st.session_state["good_zones"]:
+        st.subheader("✅ Good Zones Summary")
+        summary_rows = []
+        combined = {y: [] for y in y_axes}
+
+        for i, (start, end) in enumerate(st.session_state["good_zones"], start=1):
+            try:
+                zone_data = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
+            except Exception:
+                zone_data = pd.DataFrame()
+            if zone_data.empty:
+                continue
+
+            for y_col in y_axes:
+                vals = pd.to_numeric(zone_data[y_col], errors="coerce").dropna()
+                if vals.empty:
+                    continue
+                summary_rows.append({
+                    "Zone": f"Zone {i}",
+                    "Y": y_col,
+                    "Start": _fmt_x(start),
+                    "End": _fmt_x(end),
+                    "Avg": float(vals.mean()),
+                    "Min": float(vals.min()),
+                    "Max": float(vals.max()),
+                })
+                combined[y_col].extend(vals.values.tolist())
+
+        if summary_rows:
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+    # ==========================================================
+    # SAVE
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("💾 Save Zones + T&M Cut/Save Instructions → Dataset CSV")
+
+    if not recent_dataset_csvs:
+        st.warning("No dataset CSV files found in data_set_csv/. Create one in Process Setup first.")
+    else:
+        left, right = st.columns([2, 1])
+        with left:
+            selected_dataset_csv = st.selectbox(
+                "Choose a dataset CSV (optional)",
+                options=[""] + recent_dataset_csvs,
+                index=0,
+                key="dash_save_target_csv_select",
+                help="If empty, use MOST RECENT dataset CSV.",
+            )
+        with right:
+            st.caption(f"Most recent: **{latest_dataset_csv if latest_dataset_csv else 'None'}**")
+
+        b1, b2 = st.columns(2)
+        with b1:
+            save_to_latest_clicked = st.button("⚡ Save to MOST RECENT dataset CSV", key="dash_save_to_latest_btn", use_container_width=True)
+        with b2:
+            save_to_selected_clicked = st.button("💾 Save to SELECTED dataset CSV", key="dash_save_to_selected_btn", use_container_width=True)
+
+        target_csv = None
+        if save_to_latest_clicked:
+            target_csv = latest_dataset_csv
+        elif save_to_selected_clicked:
+            target_csv = selected_dataset_csv
+
+        if target_csv:
+            if not st.session_state["good_zones"]:
+                st.error("No zones to save. Add at least one zone first.")
+            else:
+                dataset_path = os.path.join(DATASET_DIR, target_csv)
+                if not os.path.exists(dataset_path):
+                    st.error(f"Dataset CSV not found: {dataset_path}")
+                else:
+                    # read dataset
+                    try:
+                        df_params = pd.read_csv(dataset_path, keep_default_na=False)
+                    except Exception as e:
+                        st.error(f"Failed reading dataset CSV: {e}")
+                        df_params = None
+
+                    # Parse STEP plan (optional)
+                    steps = []
+                    if df_params is not None:
+                        try:
+                            steps = _parse_steps(df_params)
+                        except Exception:
+                            steps = []
+
+                    # Determine length column and reorder zones for saving + AUTO
+                    length_col = _choose_length_col(filtered_df)
+                    zones_for_save = st.session_state["good_zones"]
+                    if length_col:
+                        zones_for_save = reorder_zones_by_spool_end(filtered_df, x_axis, zones_for_save, length_col)
+
+                    # 1) Save zone stats (in spool-end order)
+                    rows_to_save = build_zone_save_rows(
+                        log_file_path=log_path,
+                        x_axis=x_axis,
+                        y_axes_selected=y_axes,
+                        filtered_df=filtered_df,
+                        zones=zones_for_save,
+                        include_all_numeric_cols=True,
+                    )
+
+                    # 2) zone lengths (same order)
+                    zones_info, length_col_name = ([], "")
+                    try:
+                        zones_info, length_col_name = zone_lengths_from_log_km(filtered_df, x_axis, zones_for_save)
+                    except Exception as e:
+                        rows_to_save.append({"Parameter Name": "T&M Length Error", "Value": str(e), "Units": ""})
+
+                    # 3) T&M instructions:
+                    try:
+                        if steps:
+                            # STEP plan path (alloc only; stable)
+                            rows_to_save += build_tm_rows_from_steps_allocate_only(
+                                dataset_csv_name=target_csv,
+                                steps=steps,
+                                zones_info=zones_info,
+                                length_col_name=length_col_name or "",
+                            )
+                        else:
+                            # AUTO plan path (CORRECT spool-end)
+                            rows_to_save += build_tm_instruction_rows_auto_from_good_zones(
+                                filtered_df=filtered_df,
+                                x_axis=x_axis,
+                                good_zones=zones_for_save,
+                                length_col_name=length_col_name or None,
+                                dataset_csv_name=os.path.basename(target_csv),
+                            )
+                    except Exception as e:
+                        rows_to_save.append({"Parameter Name": "T&M Instructions Error", "Value": str(e), "Units": ""})
+
+                    with st.expander("Preview what will be written", expanded=False):
+                        st.dataframe(pd.DataFrame(rows_to_save), use_container_width=True, hide_index=True)
+
+                    try:
+                        append_rows_to_dataset_csv(target_csv, rows_to_save)
+                        st.success(f"✅ Saved zones + T&M instructions to: {target_csv}")
+                    except Exception as e:
+                        st.error(f"Failed saving to dataset CSV: {e}")
+
+    # ==========================================================
+    # Math Lab (kept minimal)
+    # ==========================================================
+    st.markdown("---")
+    with st.expander("🧮 Math Lab (advanced)", expanded=False):
+        st.subheader("A) f(x,y) vs time")
+        math_numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        if len(math_numeric_cols) < 1:
+            st.info("No numeric columns found in this log.")
+        else:
+            m1, m2, m3 = st.columns([1, 1, 2])
+            with m1:
+                math_x_col = st.selectbox("Math X column", math_numeric_cols, key="dash_math_x_col")
+            with m2:
+                math_y_col = st.selectbox("Math Y column (optional)", ["None"] + math_numeric_cols, key="dash_math_y_col")
+            with m3:
+                default_expr = "x ** y" if math_y_col != "None" else "x"
+                math_expr = st.text_input("Expression (use x, y and np)", value=st.session_state.get("dash_math_expr", default_expr), key="dash_math_expr")
+                st.caption("Examples: `x**y`, `x*y`, `np.log(x)`, `np.sqrt(x+y)`")
+
+            math_df = df.copy()
+            math_df[x_axis] = df_work[x_axis]
+            x_arr = pd.to_numeric(math_df[math_x_col], errors="coerce").to_numpy(dtype=float)
+            y_arr = None if (math_y_col == "None") else pd.to_numeric(math_df[math_y_col], errors="coerce").to_numpy(dtype=float)
+
+            safe_env = {"x": x_arr, "y": y_arr, "np": np}
+            try:
+                math_res = eval(math_expr, {"__builtins__": {}}, safe_env)
+                math_res = np.asarray(math_res, dtype=float)
+                if math_res.shape[0] != len(math_df):
+                    st.error("Expression must return an array with the same length as the log.")
+                else:
+                    math_df["__math_result__"] = math_res
+                    math_plot_df = math_df.dropna(subset=[x_axis, "__math_result__"]).sort_values(by=x_axis)
+                    fig_math = px.line(math_plot_df, x=x_axis, y="__math_result__", markers=False, title=f"Math Lab: f(x,y) vs {x_axis}")
+                    st.plotly_chart(fig_math, use_container_width=True)
+            except Exception as e:
+                st.error(f"Math Lab error: {e}")
+# ------------------ Order Finalize Tab ------------------
+elif tab_selection == "✅ Draw Finalize":
+    # ==========================================================
+    # Imports (local)
+    # ==========================================================
+    import os, re, time
+    from datetime import datetime, timedelta
+
+    import pandas as pd
+    import streamlit as st
+
+    from helpers.text_utils import safe_str
+    from helpers.dataset_io import (
+        append_rows_to_dataset_csv,
+        resolve_dataset_csv_path,
+        ensure_dataset_dir,
+    )
+
+    st.title("✅ Draw Finalize")
+    st.caption("Mark orders as ✅ Done / ❌ Failed from a selected dataset CSV. (Moved out of Dashboard)")
+
+    # ==========================================================
+    # Constants
+    # ==========================================================
+    ORDERS_FILE = P.orders_csv
+    DATASET_DIR = P.dataset_dir
+    SAP_INVENTORY_FILE = "sap_rods_inventory.csv"
+
+    ensure_dataset_dir(DATASET_DIR)
+
+    # ==========================================================
+    # Short-lived message window (under Done / Failed)
+    # ==========================================================
+    FLASH_SECONDS = 6  # window visible for N seconds
+
+    def _set_flash(level: str, title: str, details: str = ""):
+        st.session_state["_finalize_flash"] = {
+            "ts": time.time(),
+            "level": level,      # "success" | "warning" | "info" | "error"
+            "title": title,
+            "details": details or "",
+            "just_set": True,    # ✅ prevents "instant disappear" on same rerun
+        }
+
+    def _render_flash_window(where: str):
+        flash = st.session_state.get("_finalize_flash")
+        if not flash:
+            return
+
+        now = time.time()
+
+        # ✅ allow at least one full render after setting (even if st.rerun happens)
+        if flash.get("just_set"):
+            flash["just_set"] = False
+            st.session_state["_finalize_flash"] = flash
+        else:
+            age = now - float(flash.get("ts", 0))
+            if age > FLASH_SECONDS:
+                st.session_state.pop("_finalize_flash", None)
+                return
+
+        # Try to auto-refresh while flash is visible (so it disappears by itself)
+        # If your Streamlit doesn't support it, it will still disappear on next interaction.
+        try:
+            st.autorefresh(interval=1000, limit=FLASH_SECONDS + 2, key=f"finalize_flash_refresh_{where}")
+        except Exception:
+            pass
+
+        with st.container(border=True):
+            lvl = flash.get("level", "info")
+            title = flash.get("title", "")
+            details = flash.get("details", "")
+
+            if lvl == "success":
+                st.success(title)
+            elif lvl == "warning":
+                st.warning(title)
+            elif lvl == "error":
+                st.error(title)
+            else:
+                st.info(title)
+
+            if details:
+                st.caption(details)
+
+    # ==========================================================
+    # Dataset CSV context
+    # ==========================================================
+    recent_csv_files = (
+        sorted([f for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")])
+        if os.path.exists(DATASET_DIR) else []
+    )
+
+    def get_most_recent_dataset_csv(dataset_dir=DATASET_DIR):
+        if not os.path.exists(dataset_dir):
+            return None
+        files = [os.path.join(dataset_dir, f) for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")]
+        if not files:
+            return None
+        return os.path.basename(max(files, key=os.path.getmtime))
+
+    latest_csv = get_most_recent_dataset_csv(DATASET_DIR)
+    st.caption(f"Most recent dataset CSV: **{latest_csv if latest_csv else 'None'}**")
+
+    # ==========================================================
+    # Helpers (shared)
+    # ==========================================================
+    def dataset_csv_path(name_or_path: str, dataset_dir: str) -> str:
+        # Accept filename or full path
+        return resolve_dataset_csv_path(name_or_path, dataset_dir=dataset_dir)
 
     def _norm_str(s: str) -> str:
         return (
@@ -5259,6 +6333,171 @@ elif tab_selection == "📊 Dashboard":
             alts.add("fp" + base[1:])
         return list(alts)
 
+    def _norm_col(series: pd.Series) -> pd.Series:
+        return (
+            series.astype(str).fillna("")
+            .str.replace("\ufeff", "", regex=False)
+            .str.replace('"', "", regex=False)
+            .str.replace("'", "", regex=False)
+            .str.strip()
+            .str.lower()
+        )
+
+    def _ensure_orders_schema(orders: pd.DataFrame) -> pd.DataFrame:
+        orders.columns = [str(c).replace("\ufeff", "").strip() for c in orders.columns]
+        for col, default in {
+            "Status": "Pending",
+            "Active CSV": "",
+            "Done CSV": "",
+            "Done Description": "",
+            "Done Timestamp": "",
+            "Failed CSV": "",
+            "Failed Description": "",
+            "Failed Timestamp": "",
+            "Preform Length After Draw (cm)": "",
+            "Next Planned Draw Date": "",
+            "T&M Moved": False,
+            "T&M Moved Timestamp": "",
+            "Status Updated At": "",
+            "Assigned Dataset CSV": "",
+        }.items():
+            if col not in orders.columns:
+                orders[col] = default
+        return orders
+
+    def _match_order_row(orders: pd.DataFrame, dataset_csv_filename: str) -> pd.Series:
+        target = _norm_str(dataset_csv_filename)
+        target_alts = _alt_names(target)
+
+        cols_to_check = []
+        for c in ["Assigned Dataset CSV", "Active CSV", "Done CSV", "Failed CSV"]:
+            if c in orders.columns:
+                cols_to_check.append(c)
+
+        if not cols_to_check:
+            return pd.Series([False] * len(orders))
+
+        m = pd.Series([False] * len(orders))
+        for c in cols_to_check:
+            normed = _norm_col(orders[c])
+            for t in target_alts:
+                m = m | (normed == t) | normed.str.endswith(t, na=False) | normed.str.contains(re.escape(t), na=False)
+
+        return m
+
+    def _read_dataset_params(target_csv: str):
+        p = dataset_csv_path(target_csv, DATASET_DIR)
+        if not p or not os.path.exists(p):
+            return None, f"Dataset CSV not found: {p}"
+        try:
+            dfp = pd.read_csv(p, keep_default_na=False)
+            return dfp, ""
+        except Exception as e:
+            return None, f"Failed reading dataset CSV: {e}"
+
+    # ==========================================================
+    # PM detection + SAP (optional)
+    # ==========================================================
+    def is_pm_draw_from_dataset_csv(df_params: pd.DataFrame) -> bool:
+        def norm(s):
+            return (
+                pd.Series([s]).astype(str).fillna("")
+                .str.replace("\ufeff", "", regex=False)
+                .str.replace('"', "", regex=False)
+                .str.replace("'", "", regex=False)
+                .str.strip()
+                .str.lower()
+                .iloc[0]
+            )
+
+        try:
+            if df_params is None or df_params.empty:
+                return False
+            if "Parameter Name" not in df_params.columns or "Value" not in df_params.columns:
+                return False
+
+            pn = df_params["Parameter Name"].astype(str).apply(norm)
+            m = pn == "pm iris system"
+            if not m.any():
+                return False
+
+            last_row = df_params.loc[m].iloc[-1]
+            val = last_row["Value"]
+
+            if isinstance(val, bool):
+                return bool(val)
+
+            num = pd.to_numeric(pd.Series([val]), errors="coerce").iloc[0]
+            if pd.notna(num):
+                return float(num) == 1.0
+
+            s = norm(val)
+            return s in {"1", "true", "yes", "y", "on", "t"}
+        except Exception:
+            return False
+
+    def ensure_sap_inventory_file():
+        if os.path.exists(SAP_INVENTORY_FILE):
+            return
+        inv = pd.DataFrame([{
+            "Item": "SAP Rods Set",
+            "Count": 0,
+            "Units": "sets",
+            "Last Updated": "",
+            "Notes": ""
+        }])
+        inv.to_csv(SAP_INVENTORY_FILE, index=False)
+
+    def decrement_sap_rods_set_by_one(source_draw: str, when_str: str = None):
+        ensure_sap_inventory_file()
+        when_str = when_str or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            inv = pd.read_csv(SAP_INVENTORY_FILE)
+        except Exception as e:
+            return False, f"Failed reading {SAP_INVENTORY_FILE}: {e}"
+
+        if "Item" not in inv.columns:
+            return False, f"{SAP_INVENTORY_FILE} format invalid (missing 'Item')."
+
+        m = inv["Item"].astype(str).str.strip().str.lower() == "sap rods set"
+        if not m.any():
+            inv = pd.concat([inv, pd.DataFrame([{
+                "Item": "SAP Rods Set",
+                "Count": 0,
+                "Units": "sets",
+                "Last Updated": "",
+                "Notes": ""
+            }])], ignore_index=True)
+            m = inv["Item"].astype(str).str.strip().str.lower() == "sap rods set"
+
+        idx = inv.index[m][0]
+
+        try:
+            current = int(float(inv.loc[idx, "Count"]))
+        except Exception:
+            current = 0
+
+        if current <= 0:
+            inv.loc[idx, "Last Updated"] = when_str
+            prev = safe_str(inv.loc[idx, "Notes"])
+            add = f"[{when_str}] Tried -1 set (PM draw {source_draw}) but Count was {current}."
+            inv.loc[idx, "Notes"] = (prev + "\n" + add).strip() if prev else add
+            inv.to_csv(SAP_INVENTORY_FILE, index=False)
+            return False, f"SAP NOT decremented (Count={current}). Please refill/update inventory."
+
+        inv.loc[idx, "Count"] = current - 1
+        inv.loc[idx, "Last Updated"] = when_str
+        prev = safe_str(inv.loc[idx, "Notes"])
+        add = f"[{when_str}] -1 set (PM draw {source_draw}). New Count={current - 1}."
+        inv.loc[idx, "Notes"] = (prev + "\n" + add).strip() if prev else add
+
+        inv.to_csv(SAP_INVENTORY_FILE, index=False)
+        return True, f"SAP Rods Set inventory: {current} → {current - 1}"
+
+    # ==========================================================
+    # Orders CSV: mark DONE / FAILED
+    # ==========================================================
     def mark_draw_order_done_by_dataset_csv(dataset_csv_filename: str, done_desc: str, preform_len_after_cm: float):
         if not os.path.exists(ORDERS_FILE):
             return False, f"{ORDERS_FILE} not found (couldn't mark order done)."
@@ -5268,57 +6507,14 @@ elif tab_selection == "📊 Dashboard":
         except Exception as e:
             return False, f"Failed reading {ORDERS_FILE}: {e}"
 
-        orders.columns = [str(c).replace("\ufeff", "").strip() for c in orders.columns]
-
-        for col, default in {
-            "Status": "Pending",
-            "Active CSV": "",
-            "Done CSV": "",
-            "Done Description": "",
-            "Preform Length After Draw (m)": "",
-            "T&M Moved": False,
-            "T&M Moved Timestamp": "",
-        }.items():
-            if col not in orders.columns:
-                orders[col] = default
-
-        def norm_col(series):
-            return (
-                series.astype(str).fillna("")
-                .str.replace("\ufeff", "", regex=False)
-                .str.replace('"', "", regex=False)
-                .str.replace("'", "", regex=False)
-                .str.strip()
-                .str.lower()
-            )
-
-        target = _norm_str(dataset_csv_filename)
-        target_alts = _alt_names(target)
-
-        active_norm = norm_col(orders["Active CSV"])
-        done_norm = norm_col(orders["Done CSV"])
-
-        match = pd.Series([False] * len(orders))
-        for t in target_alts:
-            match = match | (active_norm == t) | (done_norm == t)
+        orders = _ensure_orders_schema(orders)
+        match = _match_order_row(orders, dataset_csv_filename)
 
         if not match.any():
-            for t in target_alts:
-                match = match | active_norm.str.endswith(t, na=False) | done_norm.str.endswith(t, na=False)
-
-        if not match.any():
-            for t in target_alts:
-                contains = active_norm.str.contains(re.escape(t), na=False) | done_norm.str.contains(re.escape(t), na=False)
-                if contains.sum() == 1:
-                    match = contains
-                    break
-
-        if not match.any():
-            sample_active = active_norm.dropna().unique()[:12].tolist()
+            sample_active = _norm_col(orders.get("Active CSV", pd.Series([], dtype=str))).dropna().unique()[:12].tolist()
             return False, (
-                f"No matching row found in draw_orders.csv for '{dataset_csv_filename}' "
-                f"(matched against Active CSV / Done CSV).\n"
-                f"Sample Active CSV values: {sample_active}"
+                f"No matching row found in draw_orders.csv for '{dataset_csv_filename}'.\n"
+                f"Sample Done/Active CSV values: {sample_active}"
             )
 
         if match.sum() > 1:
@@ -5330,968 +6526,964 @@ elif tab_selection == "📊 Dashboard":
         orders.loc[match, "Done CSV"] = os.path.basename(dataset_csv_filename)
         orders.loc[match, "Done Description"] = str(done_desc).strip()
         orders.loc[match, "Preform Length After Draw (cm)"] = float(preform_len_after_cm)
+        orders.loc[match, "Done Timestamp"] = now_str
+        orders.loc[match, "Status Updated At"] = now_str
 
-        if "T&M Moved Timestamp" in orders.columns:
-            orders.loc[match, "T&M Moved Timestamp"] = now_str
+        orders.loc[match, "Failed CSV"] = ""
+        orders.loc[match, "Failed Description"] = ""
+        orders.loc[match, "Failed Timestamp"] = ""
+        orders.loc[match, "Next Planned Draw Date"] = ""
+
+        if "Assigned Dataset CSV" in orders.columns:
+            cur = orders.loc[match, "Assigned Dataset CSV"].astype(str).iloc[0].strip()
+            if cur == "" or cur.lower() == "nan":
+                orders.loc[match, "Assigned Dataset CSV"] = os.path.basename(dataset_csv_filename)
 
         orders.to_csv(ORDERS_FILE, index=False)
         return True, "Order marked as Done."
 
-    # -----------------------------
-    # Zones state
-    # -----------------------------
-    if "good_zones" not in st.session_state:
-        st.session_state["good_zones"] = []
+    def mark_draw_order_failed_by_dataset_csv(dataset_csv_filename: str, failed_desc: str, preform_left_cm: float):
+        if not os.path.exists(ORDERS_FILE):
+            return False, f"{ORDERS_FILE} not found (couldn't mark order failed)."
+
+        try:
+            orders = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+        except Exception as e:
+            return False, f"Failed reading {ORDERS_FILE}: {e}"
+
+        orders = _ensure_orders_schema(orders)
+        match = _match_order_row(orders, dataset_csv_filename)
+
+        if not match.any():
+            sample_active = _norm_col(orders.get("Active CSV", pd.Series([], dtype=str))).dropna().unique()[:12].tolist()
+            return False, (
+                f"No matching row found in draw_orders.csv for '{dataset_csv_filename}'.\n"
+                f"Sample Done/Active CSV values: {sample_active}"
+            )
+
+        if match.sum() > 1:
+            return False, f"Multiple matching rows found for '{dataset_csv_filename}'. Please fix duplicates in draw_orders.csv."
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        orders.loc[match, "Status"] = "Failed"
+        orders.loc[match, "Failed CSV"] = os.path.basename(dataset_csv_filename)
+        orders.loc[match, "Failed Description"] = str(failed_desc).strip()
+        orders.loc[match, "Failed Timestamp"] = now_str
+        orders.loc[match, "Preform Length After Draw (cm)"] = float(preform_left_cm)
+        orders.loc[match, "Status Updated At"] = now_str
+
+        orders.loc[match, "Done CSV"] = ""
+        orders.loc[match, "Done Description"] = ""
+        orders.loc[match, "Done Timestamp"] = ""
+
+        if "Assigned Dataset CSV" in orders.columns:
+            cur = orders.loc[match, "Assigned Dataset CSV"].astype(str).iloc[0].strip()
+            if cur == "" or cur.lower() == "nan":
+                orders.loc[match, "Assigned Dataset CSV"] = os.path.basename(dataset_csv_filename)
+
+        orders.to_csv(ORDERS_FILE, index=False)
+        return True, "Order marked as FAILED."
+
+    def reset_failed_order_to_beginning_and_schedule(
+        dataset_csv_filename: str,
+        schedule_date: str = None,
+        scheduled_status: str = "Scheduled",
+    ):
+        if not os.path.exists(ORDERS_FILE):
+            return False, f"{ORDERS_FILE} not found."
+
+        try:
+            orders = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+        except Exception as e:
+            return False, f"Failed reading {ORDERS_FILE}: {e}"
+
+        orders = _ensure_orders_schema(orders)
+        match = _match_order_row(orders, dataset_csv_filename)
+        if not match.any() or match.sum() != 1:
+            return False, f"Could not uniquely match order row for '{dataset_csv_filename}'."
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if schedule_date is None:
+            schedule_date = compute_next_planned_draw_date(datetime.now())
+        schedule_date = "" if schedule_date is None else str(schedule_date).strip()
+
+        if schedule_date:
+            orders.loc[match, "Status"] = scheduled_status
+            orders.loc[match, "Next Planned Draw Date"] = schedule_date
+        else:
+            orders.loc[match, "Status"] = "Pending"
+            orders.loc[match, "Next Planned Draw Date"] = ""
+
+        orders.loc[match, "Active CSV"] = ""
+        orders.loc[match, "Done CSV"] = ""
+        orders.loc[match, "Done Description"] = ""
+        orders.loc[match, "Done Timestamp"] = ""
+        orders.loc[match, "Failed CSV"] = ""
+        orders.loc[match, "Failed Description"] = ""
+        orders.loc[match, "Failed Timestamp"] = ""
+
+        orders.loc[match, "T&M Moved"] = False
+        orders.loc[match, "T&M Moved Timestamp"] = ""
+        orders.loc[match, "Status Updated At"] = now_str
+
+        if "Last Reset Timestamp" not in orders.columns:
+            orders["Last Reset Timestamp"] = ""
+        orders.loc[match, "Last Reset Timestamp"] = now_str
+
+        orders.to_csv(ORDERS_FILE, index=False)
+
+        if schedule_date:
+            return True, f"Reset to **Scheduled**. Next Planned Draw Date = {schedule_date}."
+        return True, "Reset to **Pending** (no schedule)."
+
+    def append_failed_metadata_to_dataset_csv(dataset_csv_filename: str, failed_desc: str, preform_left_cm: float):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = [
+            {"Parameter Name": "Failed Description", "Value": str(failed_desc).strip(), "Units": ""},
+            {"Parameter Name": "Preform Length After Failed Draw", "Value": float(preform_left_cm), "Units": "cm"},
+            {"Parameter Name": "Failed Timestamp", "Value": now_str, "Units": ""},
+        ]
+        return append_rows_to_dataset_csv(dataset_csv_filename, rows, dataset_dir=DATASET_DIR)
 
     # ==========================================================
-    # Plot controls (can be empty WITHOUT stopping the tab)
+    # Dataset picker (shared UI)
     # ==========================================================
-    column_options = df.columns.tolist()
+    st.markdown("---")
+    st.subheader("🎯 Select Target Dataset CSV")
 
-    x_axis = st.selectbox("Select X-axis", column_options, key="x_axis_dash")
-    y_axes = st.multiselect(
-        "Select Y-axis column(s)",
-        options=column_options,
-        default=[],
-        key="y_axes_dash_multi",
+    pick_mode = st.radio(
+        "Target selection",
+        options=["Most recent", "Choose from list"],
+        horizontal=True,
+        key="finalize_pick_mode",
     )
 
-    # Build df_work always (Math Lab uses fixed x too)
-    df_work = df.copy()
-
-    # Fix X dtype (datetime/numeric) BEFORE any plotting or math time axis
-    x_raw = df_work[x_axis]
-    x_dt = pd.to_datetime(x_raw, errors="coerce", utc=False)
-    dt_ok_ratio = float(x_dt.notna().mean()) if len(x_dt) else 0.0
-
-    if dt_ok_ratio > 0.80:
-        df_work[x_axis] = x_dt
+    if pick_mode == "Most recent":
+        target_csv = latest_csv
     else:
-        x_num = pd.to_numeric(x_raw, errors="coerce")
-        num_ok_ratio = float(x_num.notna().mean()) if len(x_num) else 0.0
-        if num_ok_ratio > 0.80:
-            df_work[x_axis] = x_num
-        else:
-            df_work[x_axis] = x_raw.astype(str)
+        target_csv = st.selectbox(
+            "Choose a dataset CSV",
+            options=[""] + recent_csv_files,
+            index=0,
+            key="finalize_choose_csv",
+        ) or None
 
-    # ==========================================================
-    # MAIN PLOT AREA (only if user selected Y columns)
-    # ==========================================================
-    if not y_axes:
-        st.info("Select one or more **Y-axis** columns to show the plot + zones. (Math Lab is below.)")
-    else:
-        filtered_df = df_work.dropna(subset=[x_axis] + y_axes).sort_values(by=x_axis)
+    if not target_csv:
+        st.info("Select a dataset CSV to enable Done/Failed actions.")
+        st.stop()
 
-        if filtered_df.empty:
-            st.warning("No data to plot after filtering NA values for the selected X/Y columns.")
-        else:
-            # -----------------------------
-            # Zone slider
-            # -----------------------------
-            st.subheader("🟩 Zone Marker")
-            st.caption("Use the slider to pick a range, then click 'Add Selected Zone'.")
-            time_range = None
+    st.success(f"Target: **{target_csv}**")
 
-            if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
-                time_min = filtered_df[x_axis].min().to_pydatetime()
-                time_max = filtered_df[x_axis].max().to_pydatetime()
-                time_range = st.slider(
-                    "Select Time Range for Good Zone",
-                    min_value=time_min,
-                    max_value=time_max,
-                    value=(time_min, time_max),
-                    step=pd.Timedelta(seconds=1).to_pytimedelta(),
-                    format="HH:mm:ss",
-                    key="dash_zone_slider_dt",
+    # Show matched order preview
+    if os.path.exists(ORDERS_FILE):
+        try:
+            orders_preview = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+            orders_preview = _ensure_orders_schema(orders_preview)
+            match = _match_order_row(orders_preview, target_csv)
+            if match.any() and match.sum() == 1:
+                r = orders_preview.loc[match].iloc[0]
+                st.caption(
+                    f"Matched order: **PF {r.get('Preform Number','')}** | "
+                    f"Project: **{r.get('Fiber Project','')}** | "
+                    f"Status: **{r.get('Status','')}**"
                 )
-            elif pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
-                x_min = float(filtered_df[x_axis].min())
-                x_max = float(filtered_df[x_axis].max())
-                step = (x_max - x_min) / 1000.0 if x_max > x_min else 1.0
-                if step <= 0:
-                    step = 1.0
-                time_range = st.slider(
-                    f"Select Range for Good Zone ({x_axis})",
-                    min_value=x_min,
-                    max_value=x_max,
-                    value=(x_min, x_max),
-                    step=step,
-                    key="dash_zone_slider_num",
-                )
+            elif match.sum() > 1:
+                st.warning("⚠️ Multiple order rows match this dataset CSV (duplicates).")
             else:
-                i0, i1 = st.slider(
-                    "Select Index Range for Good Zone",
-                    min_value=0,
-                    max_value=max(0, len(filtered_df) - 1),
-                    value=(0, max(0, len(filtered_df) - 1)),
-                    step=1,
-                    key="dash_zone_slider_idx",
-                )
-                xs = filtered_df[x_axis].iloc[int(i0)]
-                xe = filtered_df[x_axis].iloc[int(i1)]
-                time_range = (xs, xe)
+                st.warning("⚠️ No order row matches this dataset CSV in draw_orders.csv.")
+        except Exception as e:
+            st.warning(f"Order preview error: {e}")
 
-            # -----------------------------
-            # Plot (wide feel) + legend under plot
-            # -----------------------------
-            st.subheader("📈 Plot")
+    # ==========================================================
+    # Inner tabs: Done / Failed
+    # ==========================================================
+    tab_done, tab_failed = st.tabs(["✅ Done", "❌ Failed"])
 
-            fig = go.Figure()
-            for y_col in y_axes:
-                fig.add_trace(go.Scatter(
-                    x=filtered_df[x_axis],
-                    y=filtered_df[y_col],
-                    mode="lines+markers",
-                    name=y_col,
-                ))
+    with tab_done:
+        st.subheader("✅ Mark Done")
 
-            for start, end in st.session_state["good_zones"]:
-                fig.add_vrect(
-                    x0=start, x1=end,
-                    fillcolor="green", opacity=0.3, line_width=0,
-                    annotation_text="Good Zone", annotation_position="top left"
-                )
+        done_desc = st.text_area(
+            "Done description (what happened / notes)",
+            value=st.session_state.get("final_done_desc", ""),
+            key="final_done_desc",
+            height=100
+        )
 
-            if time_range:
-                fig.add_vrect(
-                    x0=time_range[0], x1=time_range[1],
-                    fillcolor="blue", opacity=0.2, line_width=1,
-                    line_dash="dot",
-                    annotation_text="Selected", annotation_position="top right"
-                )
+        preform_len_after_cm = st.number_input(
+            "Preform length after draw (cm) — can be 0",
+            min_value=0.0,
+            value=float(st.session_state.get("final_preform_len_after_cm", 0.0)),
+            step=0.5,
+            format="%.1f",
+            key="final_preform_len_after_cm",
+        )
 
-            fig.update_layout(
-                title=f"{' , '.join(y_axes)} vs {x_axis}",
-                margin=dict(l=10, r=10, t=55, b=10),
-                height=620,
-                xaxis_title=x_axis,
-                yaxis_title="Values",
-                legend=dict(
-                    title="Y columns",
-                    orientation="h",
-                    yanchor="top",
-                    y=-0.22,
-                    xanchor="center",
-                    x=0.5,
-                    bgcolor="rgba(0,0,0,0)",
-                ),
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            do_mark_done = st.button(
+                "✅ Mark DONE",
+                use_container_width=True,
+                disabled=(not str(done_desc).strip()),  # ✅ allow 0.0
+                key="final_mark_done_btn",
             )
+        with c2:
+            st.caption("Also appends Done info into dataset CSV.")
 
-            st.plotly_chart(fig, use_container_width=True)
+        # ✅ short-lived message window UNDER Done UI
+        _render_flash_window(where="done")
 
-            if time_range and st.button("➕ Add Selected Zone", key="dash_add_zone"):
-                st.session_state["good_zones"].append(time_range)
-                st.success(f"Zone added: {time_range[0]} to {time_range[1]}")
+        if do_mark_done:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            summary_lines = []
+            final_level = "success"  # success unless something fails hard
+
+            # -------------------------
+            # 1) Dataset CSV append
+            # -------------------------
+            ok_csv, msg_csv = append_rows_to_dataset_csv(
+                target_csv,
+                [
+                    {"Parameter Name": "Preform Length After Draw", "Value": float(preform_len_after_cm),
+                     "Units": "cm"},
+                    {"Parameter Name": "Done Description", "Value": str(done_desc).strip(), "Units": ""},
+                    {"Parameter Name": "Done Timestamp", "Value": now_str, "Units": ""},
+                ],
+                dataset_dir=DATASET_DIR
+            )
+            if ok_csv:
+                st.toast("✅ Dataset CSV updated", icon="✅")
+                summary_lines.append("✅ Dataset CSV updated")
+            else:
+                st.toast("⚠️ Dataset CSV update failed", icon="⚠️")
+                summary_lines.append("⚠️ Dataset CSV update failed")
+                final_level = "warning"
+
+            # -------------------------
+            # 2) Mark order done (hard fail stops)
+            # -------------------------
+            ok, msg = mark_draw_order_done_by_dataset_csv(target_csv, done_desc, float(preform_len_after_cm))
+            if not ok:
+                st.toast("❌ Failed to mark DONE", icon="❌")
+                _set_flash("error", "Finalize FAILED", msg)
                 st.rerun()
 
-            # -----------------------------
-            # Summary (per selected y)
-            # -----------------------------
-            if st.session_state["good_zones"]:
-                st.write("### ✅ Good Zones Summary")
+            st.toast("✅ Order marked DONE", icon="✅")
+            summary_lines.append("✅ Order marked DONE")
 
-                summary_rows = []
-                combined = {y: [] for y in y_axes}
-
-                for i, (start, end) in enumerate(st.session_state["good_zones"]):
-                    zone_data = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
-                    if zone_data.empty:
-                        continue
-                    for y_col in y_axes:
-                        vals = pd.to_numeric(zone_data[y_col], errors="coerce").dropna()
-                        if vals.empty:
-                            continue
-                        summary_rows.append({
-                            "Zone": f"Zone {i+1}",
-                            "Y": y_col,
-                            "Start": start,
-                            "End": end,
-                            "Avg": float(vals.mean()),
-                            "Min": float(vals.min()),
-                            "Max": float(vals.max()),
-                        })
-                        combined[y_col].extend(vals.values.tolist())
-
-                if summary_rows:
-                    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
-                    st.markdown("#### 📊 Combined Stats (all zones)")
-                    for y_col in y_axes:
-                        vals = combined.get(y_col, [])
-                        if vals:
-                            s = pd.Series(vals, dtype=float)
-                            st.write(f"**{y_col}**  |  Avg: {s.mean():.4f}   Min: {s.min():.4f}   Max: {s.max():.4f}")
-                else:
-                    st.info("No valid zone stats for the selected columns.")
-
-            # ==========================================================
-            # 💾 SAVE + MARK DONE
-            # ==========================================================
-            st.markdown("---")
-            st.subheader("💾 Save to Dataset CSV + ✅ Mark Order Done")
-
-            recent_csv_files = sorted([f for f in os.listdir("data_set_csv") if f.lower().endswith(".csv")]) if os.path.exists("data_set_csv") else []
-            latest_csv = get_most_recent_dataset_csv("data_set_csv")
-            st.caption(f"Most recent dataset CSV: **{latest_csv if latest_csv else 'None'}**")
-
-            done_desc = st.text_area(
-                "Done description (what happened / notes)",
-                value=st.session_state.get("dash_done_desc", ""),
-                key="dash_done_desc",
-                height=90
-            )
-            preform_len_after_cm = st.number_input(
-                "Preform length after draw (cm)",
-                min_value=0.0,
-                value=float(st.session_state.get("dash_preform_len_after_cm", 0.0)),
-                step=0.5,
-                format="%.1f",
-                key="dash_preform_len_after_cm",
-            )
-            if float(preform_len_after_cm) <= 0:
-                st.warning("Please enter **Preform length after draw (cm)** above to enable saving/marking done.")
-
-            do_save_latest = st.button(
-                "⚡ Save to MOST RECENT CSV & Mark Done",
-                key="dash_save_latest_btn",
-                disabled=(
-                    (latest_csv is None)
-                    or (not str(done_desc).strip())
-                    or (float(preform_len_after_cm) <= 0)
-                ),
-                use_container_width=True
-            )
-
-            st.write("**Or choose a dataset CSV**")
-            selected_csv = st.selectbox(
-                "Choose a dataset CSV",
-                options=[""] + recent_csv_files,
-                index=0,
-                key="dashboard_select_csv_update",
-                label_visibility="collapsed"
-            )
-
-            do_save_selected = st.button(
-                "💾 Save Zones Summary (selected CSV)",
-                key="dash_save_selected_btn",
-                disabled=(
-                    (selected_csv == "")
-                    or (not str(done_desc).strip())
-                    or (float(preform_len_after_cm) <= 0)
-                ),
-                use_container_width=True
-            )
-
-            target_csv = None
-            if do_save_latest:
-                target_csv = latest_csv
-            elif do_save_selected:
-                target_csv = selected_csv
-
-            if target_csv:
-                if not str(done_desc).strip():
-                    st.error("Please write Done description before saving + marking Done.")
-                elif float(preform_len_after_cm) <= 0:
-                    st.error("Please enter **Preform length after draw (m)** (must be > 0).")
-                else:
-                    csv_path = os.path.join("data_set_csv", target_csv)
-                    try:
-                        df_csv = pd.read_csv(csv_path, keep_default_na=False)
-                    except FileNotFoundError:
-                        st.error(f"CSV file '{target_csv}' not found.")
-                        df_csv = None
-
-                    if df_csv is not None:
-                        import numpy as np
-                        import pandas as pd
-                        import streamlit as st
-
-                        # -------------------------------------------------
-                        # Ensure required columns
-                        # -------------------------------------------------
-                        for c in ["Parameter Name", "Value", "Units"]:
-                            if c not in df_csv.columns:
-                                df_csv[c] = ""
-
-                        # -------------------------------------------------
-                        # Start building rows
-                        # -------------------------------------------------
-                        data_to_add = [
-                            {"Parameter Name": "Log File Name", "Value": selected_file, "Units": ""}
-                        ]
-
-                        # -------------------------------------------------
-                        # Save zone boundaries (traceability)
-                        # -------------------------------------------------
-                        for i, (start, end) in enumerate(st.session_state["good_zones"], start=1):
-                            data_to_add.extend([
-                                {"Parameter Name": f"Zone {i} Start", "Value": start, "Units": ""},
-                                {"Parameter Name": f"Zone {i} End", "Value": end, "Units": ""},
-                            ])
-
-                        # -------------------------------------------------
-                        # ✅ Restore: per-zone stats for ALL numeric log columns
-                        # (this is the “missing data” you complained about)
-                        # -------------------------------------------------
-                        try:
-                            numeric_cols_all = filtered_df.select_dtypes(include="number").columns.tolist()
-                            # remove x-axis if numeric
-                            if x_axis in numeric_cols_all:
-                                numeric_cols_all.remove(x_axis)
-                            # remove obvious junk cols
-                            for drop_col in ["index", "Index", "__index__", "Unnamed: 0"]:
-                                if drop_col in numeric_cols_all:
-                                    numeric_cols_all.remove(drop_col)
-
-                            for zone_idx, (zs, ze) in enumerate(st.session_state["good_zones"], start=1):
-                                zone_data = filtered_df[(filtered_df[x_axis] >= zs) & (filtered_df[x_axis] <= ze)]
-                                if zone_data.empty:
-                                    continue
-
-                                for col in numeric_cols_all:
-                                    vals = pd.to_numeric(zone_data[col], errors="coerce").dropna()
-                                    if vals.empty:
-                                        continue
-
-                                    s = pd.Series(vals, dtype=float)
-                                    data_to_add.extend([
-                                        {"Parameter Name": f"Good Zone {zone_idx} Avg - {col}",
-                                         "Value": float(s.mean()), "Units": ""},
-                                        {"Parameter Name": f"Good Zone {zone_idx} Min - {col}", "Value": float(s.min()),
-                                         "Units": ""},
-                                        {"Parameter Name": f"Good Zone {zone_idx} Max - {col}", "Value": float(s.max()),
-                                         "Units": ""},
-                                    ])
-                        except Exception as e:
-                            st.warning(f"Zone stats were not saved due to an error: {e}")
-
-
-                        # -------------------------------------------------
-                        # Helper: find Fiber Length column (already KM)
-                        # -------------------------------------------------
-                        def _find_length_col(cols):
-                            cols_map = {str(c).strip().lower(): c for c in cols}
-                            exact = [
-                                "fiber length", "fibre length",
-                                "fiber_length", "fibre_length",
-                                "draw length", "line length", "spool length",
-                            ]
-                            for k in exact:
-                                if k in cols_map:
-                                    return cols_map[k]
-                            for cl, orig in cols_map.items():
-                                if "length" in cl and ("fiber" in cl or "fibre" in cl):
-                                    return orig
-                            length_like = [orig for cl, orig in cols_map.items() if "length" in cl]
-                            return length_like[0] if len(length_like) == 1 else None
-
-
-                        fiber_len_col = _find_length_col(df_work.columns)
-
-                        # Always store how many zones were marked (as-drawn)
-                        data_to_add.append({
-                            "Parameter Name": "Total Marked Good Zones",
-                            "Value": int(len(st.session_state["good_zones"])),
-                            "Units": "count"
-                        })
-
-                        if fiber_len_col is None:
-                            st.warning("Fiber Length column not found – CUT/SAVE steps not written.")
-                        else:
-                            # -------------------------------------------------
-                            # Build mapping x_axis -> Fiber Length (KM)
-                            # -------------------------------------------------
-                            tmp = df_work[[x_axis, fiber_len_col]].copy()
-                            tmp = tmp.dropna(subset=[x_axis]).sort_values(by=x_axis)
-                            tmp[fiber_len_col] = pd.to_numeric(tmp[fiber_len_col], errors="coerce")
-                            tmp = tmp.dropna(subset=[fiber_len_col])
-
-                            if tmp.empty or len(tmp) < 2:
-                                st.warning("Not enough valid Fiber Length data to compute CUT/SAVE steps.")
-                            else:
-                                # Fiber length is ALREADY in KM
-                                L_end_km = float(tmp[fiber_len_col].iloc[-1])
-                                total_km = L_end_km
-
-                                # numeric x for interpolation
-                                if pd.api.types.is_datetime64_any_dtype(tmp[x_axis]):
-                                    x_num = (tmp[x_axis].view("int64") / 1e9).to_numpy(float)
-
-
-                                    def x_to_num(v):
-                                        return pd.to_datetime(v).value / 1e9
-                                else:
-                                    x_num = pd.to_numeric(tmp[x_axis], errors="coerce").to_numpy(float)
-
-
-                                    def x_to_num(v):
-                                        return float(pd.to_numeric(pd.Series([v]), errors="coerce").iloc[0])
-
-                                L_arr_km = tmp[fiber_len_col].to_numpy(float)
-
-                                # -------------------------------------------------
-                                # Zones -> SAVE segments in km from END (0=end)
-                                # -------------------------------------------------
-                                save_segments = []
-                                for (zs, ze) in st.session_state["good_zones"]:
-                                    xs, xe = x_to_num(zs), x_to_num(ze)
-                                    if not (np.isfinite(xs) and np.isfinite(xe)):
-                                        continue
-                                    if xe < xs:
-                                        xs, xe = xe, xs
-
-                                    Ls_km = float(np.interp(xs, x_num, L_arr_km))
-                                    Le_km = float(np.interp(xe, x_num, L_arr_km))
-                                    if Le_km < Ls_km:
-                                        Ls_km, Le_km = Le_km, Ls_km
-
-                                    # From-end coordinates
-                                    a = (L_end_km - Le_km)  # near end
-                                    b = (L_end_km - Ls_km)  # farther from end
-                                    a = max(0.0, min(total_km, a))
-                                    b = max(0.0, min(total_km, b))
-                                    if b > a:
-                                        save_segments.append((a, b))
-
-                                # merge overlaps
-                                save_segments.sort()
-                                merged = []
-                                for a, b in save_segments:
-                                    if not merged or a > merged[-1][1]:
-                                        merged.append([a, b])
-                                    else:
-                                        merged[-1][1] = max(merged[-1][1], b)
-                                save_segments = [(a, b) for a, b in merged]
-
-
-
-                                # Complement -> CUT segments
-                                cut_segments = []
-                                cur = 0.0
-                                for a, b in save_segments:
-                                    if a > cur:
-                                        cut_segments.append((cur, a))
-                                    cur = max(cur, b)
-                                if cur < total_km:
-                                    cut_segments.append((cur, total_km))
-
-                                # Build STEP list (length only)
-                                steps = []
-                                bounds = [0.0, total_km]
-                                for a, b in save_segments:
-                                    bounds.extend([a, b])
-                                bounds = sorted(set(bounds))
-
-
-                                def is_save(mid):
-                                    return any(a <= mid <= b for a, b in save_segments)
-
-
-                                for i in range(len(bounds) - 1):
-                                    a, b = bounds[i], bounds[i + 1]
-                                    if b <= a:
-                                        continue
-                                    action = "SAVE" if is_save(0.5 * (a + b)) else "CUT"
-                                    length = b - a
-                                    if steps and steps[-1][0] == action:
-                                        steps[-1] = (action, steps[-1][1] + length)
-                                    else:
-                                        steps.append((action, length))
-
-                                # Totals
-                                total_save_km = sum(b - a for a, b in save_segments)
-                                total_cut_km = sum(b - a for a, b in cut_segments)
-
-                                data_to_add.extend([
-                                    {"Parameter Name": "Fiber Total Length (Log End)", "Value": float(total_km),
-                                     "Units": "km"},
-                                    {"Parameter Name": "Total Saved Length", "Value": float(total_save_km),
-                                     "Units": "km"},
-                                    {"Parameter Name": "Total Cut Length", "Value": float(total_cut_km), "Units": "km"},
-                                ])
-
-
-                                # STEP i (Action + Length only)
-                                for i, (action, length) in enumerate(steps, start=1):
-                                    data_to_add.extend([
-                                        {"Parameter Name": f"STEP {i} Action", "Value": action, "Units": ""},
-                                        {"Parameter Name": f"STEP {i} Length", "Value": float(length), "Units": "km"},
-                                    ])
-
-                        # -------------------------------------------------
-                        # Done metadata
-                        # -------------------------------------------------
-                        data_to_add.extend([
-                            {"Parameter Name": "Preform Length After Draw", "Value": float(preform_len_after_cm),
-                             "Units": "cm"},
-                            {"Parameter Name": "Done Description", "Value": str(done_desc).strip(), "Units": ""},
-                            {"Parameter Name": "Done Timestamp", "Value": pd.Timestamp.now(), "Units": ""},
-                        ])
-
-                        # -------------------------------------------------
-                        # Write dataset CSV
-                        # -------------------------------------------------
-                        df_csv = pd.concat([df_csv, pd.DataFrame(data_to_add)], ignore_index=True)
-                        df_csv.to_csv(csv_path, index=False)
-                        st.success(f"CSV '{target_csv}' updated!")
-
-                        ok, msg = mark_draw_order_done_by_dataset_csv(target_csv, done_desc,
-                                                                      float(preform_len_after_cm))
-                        if ok:
-                            st.success(msg)
-                            append_preform_length(
-                                preform_name=df_csv.loc[df_csv["Parameter Name"] == "Preform Number", "Value"].iloc[0],
-                                length_cm=float(preform_len_after_cm),
-                                source_draw=target_csv.replace(".csv", "")
-                            )
-                        else:
-                            st.warning(msg)
-
-    # ==========================================================
-    # 🧮 MATH LAB (single expander, NO nested expanders)
-    # ==========================================================
-    st.markdown("---")
-    with st.expander("🧮 Math Lab (advanced)", expanded=False):
-
-        # ---------- A) f(x,y) ----------
-        st.subheader("A) f(x,y) vs time")
-
-        math_numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-        if len(math_numeric_cols) < 1:
-            st.info("No numeric columns found in this log.")
-        else:
-            m1, m2, m3 = st.columns([1, 1, 2])
-
-            with m1:
-                math_x_col = st.selectbox("Math X column", math_numeric_cols, key="dash_math_end_x_col")
-
-            with m2:
-                math_y_col = st.selectbox("Math Y column (optional)", ["None"] + math_numeric_cols, key="dash_math_end_y_col")
-
-            with m3:
-                default_expr = "x ** y" if math_y_col != "None" else "x"
-                math_expr = st.text_input(
-                    "Expression (use x, y and np)",
-                    value=st.session_state.get("dash_math_end_expr", default_expr),
-                    key="dash_math_end_expr_input"
-                )
-                st.session_state["dash_math_end_expr"] = math_expr
-                st.caption("Examples: `x**y`, `x*y`, `np.log(x)`, `np.sqrt(x+y)`, `(x-y)/x`")
-
-            show_math_preview = st.checkbox("Show f(x,y) preview table", value=False, key="dash_math_preview_chk")
-
-            math_df = df.copy()
-            math_df[x_axis] = df_work[x_axis]  # fixed x-axis
-
-            x_arr = pd.to_numeric(math_df[math_x_col], errors="coerce").to_numpy(dtype=float)
-            y_arr = None if (math_y_col == "None") else pd.to_numeric(math_df[math_y_col], errors="coerce").to_numpy(dtype=float)
-            safe_env = {"x": x_arr, "y": y_arr, "np": np}
-
+            # -------------------------
+            # 3) After-done hook
+            # -------------------------
             try:
-                math_res = eval(math_expr, {"__builtins__": {}}, safe_env)
-                math_res = np.asarray(math_res, dtype=float)
-
-                if math_res.shape[0] != len(math_df):
-                    st.error("Expression must return an array with the same length as the log.")
+                hook_ok, hook_msg = run_after_done_hook(
+                    target_csv=target_csv,
+                    done_desc=done_desc,
+                    preform_len_after_cm=float(preform_len_after_cm),
+                    hook_dir=P.hooks_dir,
+                    timeout_sec=120,
+                )
+                if hook_ok:
+                    st.toast("✅ After-done hook executed", icon="✅")
+                    summary_lines.append("✅ After-done hook executed")
                 else:
-                    math_df["__math_result__"] = math_res
-                    math_plot_df = math_df.dropna(subset=[x_axis, "__math_result__"]).sort_values(by=x_axis)
+                    st.toast("⚠️ After-done hook failed", icon="⚠️")
+                    summary_lines.append("⚠️ After-done hook failed")
+                    final_level = "warning"
+            except Exception:
+                st.toast("ℹ️ After-done hook skipped", icon="ℹ️")
+                summary_lines.append("ℹ️ After-done hook skipped")
 
-                    if math_plot_df.empty:
-                        st.warning("No data to plot after NA cleaning.")
+            # -------------------------
+            # 4) SAP (PM only)
+            # -------------------------
+            try:
+                df_params, err = _read_dataset_params(target_csv)
+                if df_params is None:
+                    st.toast("⚠️ SAP check failed", icon="⚠️")
+                    summary_lines.append("⚠️ SAP check failed")
+                    final_level = "warning"
+                else:
+                    pm_detected = is_pm_draw_from_dataset_csv(df_params)
+                    if not pm_detected:
+                        st.toast("ℹ️ SAP not updated (not PM)", icon="ℹ️")
+                        summary_lines.append("ℹ️ SAP not updated (not PM)")
                     else:
-                        fig_math = px.line(
-                            math_plot_df,
-                            x=x_axis,
-                            y="__math_result__",
-                            markers=False,
-                            title=f"Math Lab: f(x,y) vs {x_axis} | f={math_expr} | x={math_x_col}, y={math_y_col}"
+                        inv_ok, inv_msg = decrement_sap_rods_set_by_one(
+                            source_draw=os.path.splitext(os.path.basename(target_csv))[0],
+                            when_str=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         )
-                        st.plotly_chart(fig_math, use_container_width=True)
+                        if inv_ok:
+                            st.toast("🧪 SAP inventory updated", icon="✅")
+                            summary_lines.append("✅ SAP inventory updated")
+                        else:
+                            st.toast("⚠️ SAP NOT decremented", icon="⚠️")
+                            summary_lines.append("⚠️ SAP NOT decremented")
+                            final_level = "warning"
+            except Exception:
+                st.toast("ℹ️ SAP update skipped", icon="ℹ️")
+                summary_lines.append("ℹ️ SAP update skipped")
 
-                        if show_math_preview:
-                            show_cols = [x_axis, math_x_col]
-                            if math_y_col != "None":
-                                show_cols.append(math_y_col)
-                            show_cols.append("__math_result__")
-                            st.dataframe(math_plot_df[show_cols].head(300), use_container_width=True)
+            # -------------------------
+            # 5) Preform registry
+            # -------------------------
+            try:
+                df_params, err = _read_dataset_params(target_csv)
+                if df_params is not None and "Parameter Name" in df_params.columns:
+                    m = df_params["Parameter Name"].astype(str).str.strip() == "Preform Number"
+                    if m.any():
+                        pf_name = df_params.loc[m, "Value"].iloc[0]
+                        append_preform_length(
+                            preform_name=str(pf_name),
+                            length_cm=float(preform_len_after_cm),
+                            source_draw=os.path.splitext(os.path.basename(target_csv))[0],
+                        )
+                        st.toast("📏 Preform length saved", icon="✅")
+                        summary_lines.append(f"✅ Preform saved ({pf_name})")
+            except Exception:
+                st.toast("ℹ️ Preform registry skipped", icon="ℹ️")
+                summary_lines.append("ℹ️ Preform registry skipped")
 
-            except Exception as e:
-                st.error(f"Math Lab error: {e}")
+            # ✅ ONE flash only (no stacking)
+            _set_flash(
+                final_level,
+                "Finalize DONE",
+                "\n".join(summary_lines)
+            )
+            st.rerun()
 
-        st.markdown("---")
+    with tab_failed:
+        st.subheader("❌ Mark Failed")
 
-        # ---------- B) Derivative / Integral ----------
-        st.subheader("B) Single Column Derivative / Integral")
+        failed_desc = st.text_area(
+            "Failed description (why it failed)",
+            value=st.session_state.get("final_failed_desc", ""),
+            key="final_failed_desc",
+            height=100
+        )
 
-        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-        if len(numeric_cols) < 1:
-            st.info("No numeric columns found in this log.")
-        else:
-            b1, b2, b3 = st.columns([1, 1, 2])
+        preform_left_cm = st.number_input(
+            "Preform length after failed draw (cm) — can be 0",
+            min_value=0.0,
+            value=float(st.session_state.get("final_preform_left_cm", 0.0)),
+            step=0.5,
+            format="%.1f",
+            key="final_preform_left_cm",
+        )
 
-            with b1:
-                base_col = st.selectbox("Column", numeric_cols, key="dash_single_base_col")
+        do_mark_failed = st.button(
+            "❌ Mark FAILED",
+            use_container_width=True,
+            disabled=(not str(failed_desc).strip()),  # ✅ allow 0.0
+            key="final_mark_failed_btn",
+        )
 
-            with b2:
-                smooth_win = st.number_input(
-                    "Smoothing window (points, 1 = none)",
-                    min_value=1, max_value=501, value=1, step=2,
-                    key="dash_single_smooth"
-                )
+        # ✅ short-lived message window UNDER Failed UI
+        _render_flash_window(where="failed")
 
-            with b3:
-                show_derivative = st.checkbox("Show derivative d/dt", value=True, key="dash_single_show_deriv")
-                show_integral = st.checkbox("Show integral ∫ y dt", value=False, key="dash_single_show_integ")
+        if do_mark_failed:
+            okf, msgf = mark_draw_order_failed_by_dataset_csv(target_csv, failed_desc, float(preform_left_cm))
+            if okf:
+                st.toast("❌ Order marked FAILED", icon="✅")
+                _set_flash("success", "Order marked FAILED", msgf)
 
-            show_single_preview = st.checkbox("Show derivative/integral preview table", value=False, key="dash_single_preview_chk")
-
-            s_df = df[[base_col]].copy()
-            s_df[x_axis] = df_work[x_axis]
-            s_df[base_col] = pd.to_numeric(s_df[base_col], errors="coerce")
-            s_df = s_df.dropna(subset=[x_axis, base_col]).sort_values(by=x_axis)
-
-            if s_df.empty:
-                st.warning("No data available for this column after NA cleaning.")
-            else:
-                if pd.api.types.is_datetime64_any_dtype(s_df[x_axis]):
-                    t_sec = (s_df[x_axis] - s_df[x_axis].iloc[0]).dt.total_seconds().to_numpy(dtype=float)
+                ok_csv, msg_csv = append_failed_metadata_to_dataset_csv(target_csv, failed_desc, float(preform_left_cm))
+                if ok_csv:
+                    st.toast("✅ Failed metadata saved to dataset CSV", icon="✅")
+                    _set_flash("success", "Failed metadata saved to dataset CSV", msg_csv)
                 else:
-                    t_sec = pd.to_numeric(s_df[x_axis], errors="coerce").to_numpy(dtype=float)
+                    st.toast("⚠️ Failed metadata NOT saved to dataset CSV", icon="⚠️")
+                    _set_flash("warning", "Failed metadata NOT saved to dataset CSV", msg_csv)
 
-                y_vals = s_df[base_col].to_numpy(dtype=float)
+                st.info("Next step:")
+                c1, c2 = st.columns(2)
 
-                def moving_average(a, w: int):
-                    if w <= 1:
-                        return a
-                    w = int(w)
-                    kernel = np.ones(w) / w
-                    return np.convolve(a, kernel, mode="same")
+                with c1:
+                    if st.button("📅 Draw next day (reset + schedule)", key="final_failed_schedule_nextday", use_container_width=True):
+                        schedule_date = compute_next_planned_draw_date(datetime.now())
+                        oks, msgs = reset_failed_order_to_beginning_and_schedule(
+                            target_csv,
+                            schedule_date=schedule_date,
+                            scheduled_status="Scheduled",
+                        )
+                        if oks:
+                            st.toast("✅ Reset + scheduled", icon="✅")
+                            _set_flash("success", "Reset + scheduled", msgs)
+                        else:
+                            st.toast("⚠️ Reset failed", icon="⚠️")
+                            _set_flash("warning", "Reset failed", msgs)
+                        st.rerun()
 
-                y_s = moving_average(y_vals, int(smooth_win))
+                with c2:
+                    if st.button("↩ Return to Pending (no schedule)", key="final_failed_return_pending", use_container_width=True):
+                        oks, msgs = reset_failed_order_to_beginning_and_schedule(
+                            target_csv,
+                            schedule_date="",
+                            scheduled_status="Scheduled",
+                        )
+                        if oks:
+                            st.toast("✅ Reset to Pending", icon="✅")
+                            _set_flash("success", "Reset to Pending", msgs)
+                        else:
+                            st.toast("⚠️ Reset failed", icon="⚠️")
+                            _set_flash("warning", "Reset failed", msgs)
+                        st.rerun()
 
-                plot_df = s_df.copy()
-                plot_df["__y__"] = y_s
-
-                if show_derivative:
-                    plot_df["__d_dt__"] = np.gradient(y_s, t_sec)
-
-                if show_integral:
-                    integ = np.zeros_like(y_s, dtype=float)
-                    dt = np.diff(t_sec)
-                    integ[1:] = np.cumsum((y_s[1:] + y_s[:-1]) * 0.5 * dt)
-                    plot_df["__int_dt__"] = integ
-
-                y_series = ["__y__"]
-                labels = {"__y__": base_col}
-                if show_derivative:
-                    y_series.append("__d_dt__")
-                    labels["__d_dt__"] = f"d({base_col})/dt"
-                if show_integral:
-                    y_series.append("__int_dt__")
-                    labels["__int_dt__"] = f"∫ {base_col} dt"
-
-                fig_single = px.line(
-                    plot_df,
-                    x=x_axis,
-                    y=y_series,
-                    markers=False,
-                    title=f"{base_col} (and optional derivative/integral) vs {x_axis}"
-                )
-                fig_single.for_each_trace(lambda tr: tr.update(name=labels.get(tr.name, tr.name)))
-                st.plotly_chart(fig_single, use_container_width=True)
-
-                if show_single_preview:
-                    show_cols = [x_axis, base_col, "__y__"]
-                    if show_derivative:
-                        show_cols.append("__d_dt__")
-                    if show_integral:
-                        show_cols.append("__int_dt__")
-                    st.dataframe(plot_df[show_cols].head(300), use_container_width=True)
+            else:
+                st.toast("⚠️ Failed to mark order FAILED", icon="⚠️")
+                _set_flash("warning", "Failed to mark order FAILED", msgf)
+                st.rerun()
 # ------------------ Consumables Tab ------------------
 elif tab_selection == "🍃 Tower state - Consumables and dies":
-    log_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv") or f.endswith(".xlsx")]
-    selected_log_file = st.sidebar.selectbox("Select Log File for Gas Calculation", log_files, key="log_file_select")
+    # ==========================================================
+    # Imports (local to tab)
+    # ==========================================================
+    import os, json, math
+    from datetime import datetime
 
-    # Load saved stock levels if they exist
-    stock_path = "stock_levels.json"
-    if os.path.exists(stock_path):
-        with open(stock_path, "r") as f:
-            try:
-                saved_stock = json.load(f)
-                gas_stock = saved_stock.get("gas_stock", 0.0)
-                coating_stock = saved_stock.get("coating_stock", 0.0)
-            except Exception:
-                gas_stock = 0.0
-                coating_stock = 0.0
-    else:
-        gas_stock = 0.0
-        coating_stock = 0.0
+    import pandas as pd
+    import streamlit as st
 
-    st.title("🍃 Consumables")
-    st.subheader("Coating Containers & Argon Vessel Visualization")
-    with open("config_coating.json", "r") as config_file:
+    # ✅ Your project imports
+    from app_io.paths import P, ensure_logs_dir, ensure_gas_reports_dir, gas_report_path, _abs, ensure_dir
+    from helpers.process_setup_state import apply_order_row_to_process_setup_state
+    from renders.navigation import render_navigation
+
+    ensure_logs_dir()
+    ensure_gas_reports_dir()
+
+    # ==========================================================
+    # UI polish
+    # ==========================================================
+    st.markdown("""
+    <style>
+      .block-container { padding-top: 1.55rem; }
+
+      .section-card {
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.03);
+        padding: 14px 14px;
+        border-radius: 14px;
+        margin-bottom: 14px;
+      }
+
+      .vessel {
+        height: 120px; width: 34px; border: 1px solid rgba(255,255,255,0.22);
+        margin: auto; position: relative; border-radius: 10px;
+        background: rgba(255,255,255,0.04);
+        overflow: hidden;
+      }
+      .vessel-fill { position: absolute; bottom: 0; width: 100%; background: rgba(76, 175, 80, 0.85); }
+
+      .muted { opacity: 0.75; }
+      .low-card { border: 1px solid rgba(255, 77, 77, 0.60) !important; background: rgba(255, 77, 77, 0.05) !important; }
+      .low-num { color: rgba(255, 170, 170, 1.0); font-weight: 800; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Navigation (if you use it)
+    try:
+        render_navigation()
+    except Exception:
+        pass
+
+    st.title("🍃 Tower state — Consumables & Dies")
+
+    # ==========================================================
+    # Constants / Files
+    # ==========================================================
+    container_labels = ["A", "B", "C", "D"]
+
+    LOW_STOCK_KG = 1.0
+    WAREHOUSE_STOCK_FILE = _abs("coating_type_stock.json")
+
+    # ✅ temps csv (wide 1-row)
+    TOWER_TEMPS_CSV = getattr(P, "tower_temps_csv", _abs("tower_temps.csv"))
+
+    # ✅ containers csv (wide 1-row)
+    TOWER_CONTAINERS_CSV = getattr(P, "tower_containers_csv", _abs("tower_containers.csv"))
+
+    # We keep snapshot for delta logic so we don't subtract warehouse repeatedly
+    CONTAINER_SNAPSHOT_FILE = _abs("container_levels_prev.json")
+
+    # Also keep writing the legacy json if other parts depend on it (optional but safe)
+    CONTAINER_CFG_PATH = P.container_config_json
+
+    # ==========================================================
+    # Helpers
+    # ==========================================================
+    def _safe_float(x, default=0.0):
+        try:
+            return float(x)
+        except Exception:
+            return float(default)
+
+    def _read_json(path, default):
+        if not os.path.exists(path):
+            return default
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return default
+
+    def _write_json(path, obj):
+        ensure_dir(os.path.dirname(path) or ".")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(obj, f, indent=4)
+        os.replace(tmp, path)
+
+    def _file_mtime(path: str) -> float:
+        try:
+            return os.path.getmtime(path) if os.path.exists(path) else 0.0
+        except Exception:
+            return 0.0
+
+    def _read_one_row_csv(path: str) -> dict:
+        if not os.path.exists(path):
+            return {}
+        try:
+            df = pd.read_csv(path)
+            if df.empty:
+                return {}
+            return df.iloc[-1].to_dict()
+        except Exception:
+            return {}
+
+    def _write_one_row_csv(path: str, cols: list, data: dict):
+        ensure_dir(os.path.dirname(path) or ".")
+        row = {c: "" for c in cols}
+        row.update(data or {})
+        row["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pd.DataFrame([row], columns=cols).to_csv(path, index=False)
+
+    # ==========================================================
+    # Load coating types
+    # ==========================================================
+    with open(P.coating_config_json, "r") as config_file:
         config = json.load(config_file)
     coatings = config.get("coatings", {})
-
-    st.markdown("---")
-    st.subheader("🏷️ Coating Stock by Type")
-
-    # Load or initialize stock levels for each coating type
-    stock_file = "coating_type_stock.json"
-    if os.path.exists(stock_file):
-        with open(stock_file, "r") as f:
-            try:
-                coating_type_stock = json.load(f)
-            except Exception:
-                coating_type_stock = {ctype: 0.0 for ctype in coatings.keys()}
-    else:
-        coating_type_stock = {ctype: 0.0 for ctype in coatings.keys()}
-
-    # Display and update coating stock per type with vessel-style visuals
     coating_types = list(coatings.keys())
-    rows = [coating_types[i:i + 4] for i in range(0, len(coating_types), 4)]
-    updated_stock = {}
 
-    for row in rows:
-        cols = st.columns(len(row))
-        for i, coating_type in enumerate(row):
-            with cols[i]:
-                current_value = coating_type_stock.get(coating_type, 0.0)
-                updated_stock[coating_type] = st.slider(
-                    f"{coating_type}", min_value=0.0, max_value=40.0, value=float(current_value), step=0.1, key=f"stock_{coating_type}"
-                )
-                fill_height = int((updated_stock[coating_type] / 40) * 100)
-                st.markdown(
-                    f"""
-                    <div style='height: 120px; width: 30px; border: 1px solid black; margin: auto; position: relative; background: #eee;'>
-                        <div style='position: absolute; bottom: 0; height: {fill_height}%; width: 100%; background: #4CAF50;'></div>
-                    </div>
-                <p style='text-align: center;'>{updated_stock[coating_type]:.1f} kg</p>
-                    """,
-                    unsafe_allow_html=True
-                )
+    # ==========================================================
+    # 1) TEMPS CSV (wide)
+    # ==========================================================
+    TEMP_COLS = [
+        "updated_at",
+        "die_holder_primary_c",
+        "die_holder_secondary_c",
+        "A_container_c", "A_pipe_c",
+        "B_container_c", "B_pipe_c",
+        "C_container_c", "C_pipe_c",
+        "D_container_c", "D_pipe_c",
+    ]
 
-    if st.button("💾 Save Coating Stock by Type"):
-        with open(stock_file, "w") as f:
-            json.dump(updated_stock, f, indent=4)
-        st.success("Coating stock levels saved!")
+    TEMP_STATE_KEYS = {
+        "die_holder_primary_c": "die_holder_primary_temp_state",
+        "die_holder_secondary_c": "die_holder_secondary_temp_state",
+        "A_container_c": "temp_A_container_state",
+        "A_pipe_c": "temp_A_pipe_state",
+        "B_container_c": "temp_B_container_state",
+        "B_pipe_c": "temp_B_pipe_state",
+        "C_container_c": "temp_C_container_state",
+        "C_pipe_c": "temp_C_pipe_state",
+        "D_container_c": "temp_D_container_state",
+        "D_pipe_c": "temp_D_pipe_state",
+    }
 
-    st.markdown("### 🧪 Coating Containers (A, B, C, D)")
-    container_cols = st.columns(4)
-    container_labels = ["A", "B", "C", "D"]
-    container_levels = {}
-    container_temps = {}
+    wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
+    temps_mtime = _file_mtime(TOWER_TEMPS_CSV)
 
-    import os
+    for col, skey in TEMP_STATE_KEYS.items():
+        if skey not in st.session_state:
+            if col in wide_temps and str(wide_temps.get(col, "")).strip() != "":
+                st.session_state[skey] = float(_safe_float(wide_temps[col], 25.0))
+            else:
+                st.session_state[skey] = 25.0
 
-    CONFIG_PATH = "container_config.json"
+    # ==========================================================
+    # 2) CONTAINERS CSV (wide)  ✅ NEW
+    # ==========================================================
+    CONTAINER_COLS = [
+        "updated_at",
+        "A_level_kg", "A_type",
+        "B_level_kg", "B_type",
+        "C_level_kg", "C_type",
+        "D_level_kg", "D_type",
+    ]
 
-    # Load saved configuration if it exists
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
-            try:
-                saved_config = json.load(f)
-                if not isinstance(saved_config, dict):
-                    saved_config = {}
-            except Exception:
-                saved_config = {}
-    else:
-        saved_config = {}
+    # UI keys
+    def _lvl_key(lab): return f"cont_level_{lab}"
+    def _type_key(lab): return f"cont_type_{lab}"
 
-    # Use saved values if available
-    for label in container_labels:
-        st.session_state.setdefault(f"level_{label}", saved_config.get(label, {}).get("level", 50))
-        st.session_state.setdefault(f"coating_type_{label}", saved_config.get(label, {}).get("type", ""))
-        st.session_state.setdefault(f"temp_{label}", saved_config.get(label, {}).get("temp", 25.0))
+    wide_cont = _read_one_row_csv(TOWER_CONTAINERS_CSV)
+    cont_mtime = _file_mtime(TOWER_CONTAINERS_CSV)
 
-    for col, label in zip(container_cols, container_labels):
+    # Defaults if csv missing: try legacy json, else 0 + first type
+    legacy_cfg = _read_json(CONTAINER_CFG_PATH, {})
+    if not isinstance(legacy_cfg, dict):
+        legacy_cfg = {}
+
+    for lab in container_labels:
+        default_level = 0.0
+        default_type = coating_types[0] if coating_types else ""
+
+        # from CSV
+        lvl_col = f"{lab}_level_kg"
+        typ_col = f"{lab}_type"
+        if lvl_col in wide_cont and str(wide_cont.get(lvl_col, "")).strip() != "":
+            default_level = _safe_float(wide_cont.get(lvl_col), default_level)
+        else:
+            # from legacy json
+            if isinstance(legacy_cfg.get(lab, {}), dict):
+                default_level = _safe_float(legacy_cfg.get(lab, {}).get("level", default_level), default_level)
+
+        if typ_col in wide_cont and str(wide_cont.get(typ_col, "")).strip() != "":
+            default_type = str(wide_cont.get(typ_col))
+        else:
+            if isinstance(legacy_cfg.get(lab, {}), dict):
+                default_type = str(legacy_cfg.get(lab, {}).get("type", default_type))
+
+        if coating_types and default_type not in coating_types:
+            default_type = coating_types[0]
+
+        st.session_state.setdefault(_lvl_key(lab), float(default_level))
+        st.session_state.setdefault(_type_key(lab), default_type)
+
+    # ==========================================================
+    # Top toolbar: Refresh buttons
+    # ==========================================================
+    tL, tM, tR = st.columns([1.3, 1.3, 1])
+    with tL:
+        st.caption(f"Temps CSV: `{TOWER_TEMPS_CSV}`")
+        refresh_temps = st.button("🔄 Refresh temps", use_container_width=True, key="refresh_temps_btn")
+    with tM:
+        st.caption(f"Containers CSV: `{TOWER_CONTAINERS_CSV}`")
+        refresh_containers = st.button("🔄 Refresh containers", use_container_width=True, key="refresh_containers_btn")
+    with tR:
+        st.caption(" ")
+        st.caption(" ")
+
+    # Manual refresh: Temps
+    if refresh_temps:
+        wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
+        for col, skey in TEMP_STATE_KEYS.items():
+            if col in wide_temps and str(wide_temps.get(col, "")).strip() != "":
+                st.session_state[skey] = float(_safe_float(wide_temps[col], st.session_state.get(skey, 25.0)))
+        st.success("Temps reloaded from CSV.")
+        st.rerun()
+
+    # Manual refresh: Containers
+    if refresh_containers:
+        wide_cont = _read_one_row_csv(TOWER_CONTAINERS_CSV)
+        for lab in container_labels:
+            lvl_col = f"{lab}_level_kg"
+            typ_col = f"{lab}_type"
+            if lvl_col in wide_cont and str(wide_cont.get(lvl_col, "")).strip() != "":
+                st.session_state[_lvl_key(lab)] = float(_safe_float(wide_cont[lvl_col], st.session_state[_lvl_key(lab)]))
+            if typ_col in wide_cont and str(wide_cont.get(typ_col, "")).strip() != "":
+                t = str(wide_cont[typ_col])
+                if coating_types and t not in coating_types:
+                    t = coating_types[0]
+                st.session_state[_type_key(lab)] = t
+        st.success("Containers reloaded from CSV.")
+        st.rerun()
+
+    # ==========================================================
+    # Warehouse stock (kg) - JSON (bulk stock)
+    # ==========================================================
+    warehouse_stock = _read_json(WAREHOUSE_STOCK_FILE, {})
+    if not isinstance(warehouse_stock, dict):
+        warehouse_stock = {}
+    for t in coating_types:
+        warehouse_stock[t] = _safe_float(warehouse_stock.get(t, 0.0), 0.0)
+
+    # Snapshot for delta (so refill subtract once)
+    prev_snapshot = _read_json(CONTAINER_SNAPSHOT_FILE, {})
+    if not isinstance(prev_snapshot, dict):
+        prev_snapshot = {}
+    for lab in container_labels:
+        prev_snapshot.setdefault(lab, {"level": float(st.session_state[_lvl_key(lab)]), "type": str(st.session_state[_type_key(lab)])})
+
+    # ==========================================================
+    # UI: Containers (levels/types)  ✅ now CSV-based
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("🧪 Coating Containers (A–D)")
+    st.caption("Rule: level ↑ = refill (auto subtract from warehouse). level ↓ = consumption (total decreases).")
+
+    cols = st.columns(4)
+    current_container_state = {}
+
+    for col, lab in zip(cols, container_labels):
         with col:
-            st.markdown(f"**Container {label}**")
-            level_key = f"level_{label}"
-            type_key = f"coating_type_{label}"
-            temp_key = f"temp_{label}"
+            st.markdown(f"**Container {lab}**")
 
-            # Input controls managed by Streamlit defaults
-            default_level = updated_stock.get(label, saved_config.get(label, {}).get("level", 0.0))
-            level = st.slider(f"Fill Level {label} (kg)", min_value=0.0, max_value=4.0, value=float(default_level), step=0.1, key=level_key)
-            coating_options = list(coatings.keys())
-            default_type = st.session_state.get(type_key, "")
-            if default_type not in coating_options:
-                default_type = coating_options[0] if coating_options else ""
-            st.session_state[type_key] = default_type
-            coating_type = st.selectbox(f"Coating Type for {label}", options=coating_options, key=type_key)
-            temperature = st.number_input(f"Temperature for {label} (°C)", min_value=0.0, step=0.1, key=temp_key)
+            lvl = st.slider(
+                f"Fill Level {lab} (kg)",
+                0.0, 4.0,
+                float(st.session_state[_lvl_key(lab)]),
+                0.1,
+                key=_lvl_key(lab)
+            )
 
-            # Store values
-            container_levels[label] = level
-            container_temps[label] = temperature
+            if coating_types:
+                cur_t = st.session_state[_type_key(lab)]
+                if cur_t not in coating_types:
+                    cur_t = coating_types[0]
+                idx = coating_types.index(cur_t)
+                ctype = st.selectbox(
+                    f"Coating Type {lab}",
+                    options=coating_types,
+                    index=idx,
+                    key=_type_key(lab)
+                )
+            else:
+                ctype = ""
+                st.info("No coating types configured.")
 
-            # Progress bar
-            fill_height = int((level / 4.0) * 100)
+            fill_height = int((float(lvl) / 4.0) * 100.0)
             st.markdown(
                 f"""
-                <div style='height: 120px; width: 30px; border: 1px solid black; margin: auto; position: relative; background: #eee;'>
-                    <div style='position: absolute; bottom: 0; height: {fill_height}%; width: 100%; background: #4CAF50;'></div>
-                </div>
-                <p style='text-align: center;'>{level:.1f} kg</p>
+                <div class="vessel"><div class="vessel-fill" style="height:{fill_height}%;"></div></div>
+                <div style="text-align:center; margin-top:6px;"><b>{float(lvl):.2f} kg</b></div>
                 """,
                 unsafe_allow_html=True
             )
-            refill_checkbox = st.checkbox(f"Refill Container {label}?", key=f"refill_{label}")
-            if refill_checkbox:
-                refill_kg = st.number_input(f"Amount to Refill (kg)", min_value=0.0, step=0.1, key=f"refill_kg_{label}")
-                if st.button(f"💾 Confirm Refill {label}"):
 
-                    coating_type = st.session_state[type_key]
-                    stock_file = "coating_type_stock.json"
-                    if os.path.exists(stock_file):
-                        with open(stock_file, "r") as f:
-                            coating_type_stock = json.load(f)
-                    else:
-                        coating_type_stock = {}
+            current_container_state[lab] = {"level": float(lvl), "type": str(ctype)}
 
-                    current_stock = coating_type_stock.get(coating_type, 0.0)
-                    coating_type_stock[coating_type] = max(0.0, current_stock - refill_kg)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-                    with open(stock_file, "w") as f:
-                        json.dump(coating_type_stock, f, indent=4)
-                    updated_stock[coating_type] = coating_type_stock[coating_type]
-                    # Save refill info to config and update session state
-                    if os.path.exists(CONFIG_PATH):
-                        with open(CONFIG_PATH, "r") as f:
-                            config_data = json.load(f)
-                    else:
-                        config_data = {}
+    # ==========================================================
+    # Apply refill delta to warehouse (based on snapshot)
+    # ==========================================================
+    refill_events = []
+    for lab in container_labels:
+        prev_level = _safe_float(prev_snapshot.get(lab, {}).get("level", 0.0), 0.0)
+        cur_level  = _safe_float(current_container_state[lab]["level"], 0.0)
+        cur_type   = str(current_container_state[lab]["type"])
+        delta = cur_level - prev_level
 
-                    new_level = min(4.0, st.session_state[level_key] + refill_kg)
-                    config_data[label] = {
-                        "level": new_level,
-                        "type": coating_type,
-                        "temp": st.session_state[temp_key]
-                    }
-                    with open(CONFIG_PATH, "w") as f:
-                        json.dump(config_data, f, indent=4)
+        if delta > 1e-9 and cur_type in warehouse_stock:
+            before = _safe_float(warehouse_stock.get(cur_type, 0.0), 0.0)
+            after = max(0.0, before - float(delta))
+            warehouse_stock[cur_type] = after
+            refill_events.append((lab, cur_type, float(delta), before, after))
 
-                    # Instead of trying to assign to st.session_state[level_key], assign to updated_stock
-                    updated_stock[label] = new_level
+        prev_snapshot[lab] = {"level": float(cur_level), "type": cur_type}
 
-                    st.rerun()
-    st.subheader("🔥 Coating Heater Temperatures")
+    # Persist: warehouse + snapshot
+    try:
+        _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
+        _write_json(CONTAINER_SNAPSHOT_FILE, prev_snapshot)
+    except Exception as e:
+        st.error(f"Auto-save failed: {e}")
 
-    heater_config_path = "heater_config.json"
-    if os.path.exists(heater_config_path):
-        with open(heater_config_path, "r") as f:
+    if refill_events:
+        with st.expander("🧾 Detected refills (auto)", expanded=False):
+            for lab, ctype, delta, before, after in refill_events:
+                st.write(f"Container **{lab}** refilled **+{delta:.2f} kg** of **{ctype}** → Warehouse: {before:.2f} → {after:.2f} kg")
+
+    # ==========================================================
+    # Auto-save containers to CSV  ✅ NEW
+    # ==========================================================
+    last_cont_saved = st.session_state.get("containers_last_saved_snapshot", {})
+    cur_cont_snapshot = {lab: (current_container_state[lab]["level"], current_container_state[lab]["type"]) for lab in container_labels}
+
+    if not last_cont_saved:
+        st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
+        last_cont_saved = cur_cont_snapshot
+
+    containers_changed = cur_cont_snapshot != last_cont_saved
+    if containers_changed:
+        out = {}
+        for lab in container_labels:
+            out[f"{lab}_level_kg"] = float(current_container_state[lab]["level"])
+            out[f"{lab}_type"] = str(current_container_state[lab]["type"])
+
+        try:
+            _write_one_row_csv(TOWER_CONTAINERS_CSV, CONTAINER_COLS, out)
+            st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
+
+            # also update legacy json for compatibility (optional)
+            legacy_out = {lab: {"level": float(current_container_state[lab]["level"]), "type": str(current_container_state[lab]["type"])} for lab in container_labels}
+            _write_json(CONTAINER_CFG_PATH, legacy_out)
+        except Exception as e:
+            st.error(f"Failed to write containers CSV: {e}")
+
+    # ==========================================================
+    # Stock by type (warehouse + containers)
+    # ==========================================================
+    def _sum_containers_by_type(container_state: dict):
+        sums = {t: 0.0 for t in coating_types}
+        for lab in container_labels:
+            t = container_state.get(lab, {}).get("type", "")
+            lvl = _safe_float(container_state.get(lab, {}).get("level", 0.0), 0.0)
+            if t in sums:
+                sums[t] += float(lvl)
+        return sums
+
+    container_sums = _sum_containers_by_type(current_container_state)
+    total_by_type = {t: _safe_float(warehouse_stock.get(t, 0.0), 0.0) + _safe_float(container_sums.get(t, 0.0), 0.0) for t in coating_types}
+
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("🏷️ Coating Stock by Type (Auto)")
+    st.caption("Computed from warehouse + container contents. Auto-updates. Red when total < 1 kg.")
+
+    if coating_types:
+        max_total = max(total_by_type.values()) if total_by_type else 0.0
+        display_max = max(40.0, math.ceil(max_total / 5.0) * 5.0) if max_total > 0 else 40.0
+
+        rows = [coating_types[i:i + 4] for i in range(0, len(coating_types), 4)]
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, ctype in zip(cols, row):
+                with col:
+                    total_kg = float(total_by_type.get(ctype, 0.0))
+                    ware_kg = float(warehouse_stock.get(ctype, 0.0))
+                    cont_kg = float(container_sums.get(ctype, 0.0))
+                    fill_height = int(min(100.0, (total_kg / display_max) * 100.0)) if display_max > 0 else 0
+                    is_low = total_kg < LOW_STOCK_KG
+
+                    st.markdown(f"**{ctype}**")
+                    st.markdown(
+                        f"""
+                        <div class="{'vessel low-card' if is_low else 'vessel'}">
+                          <div class="vessel-fill" style="height:{fill_height}%; {'background: rgba(255, 77, 77, 0.85);' if is_low else ''}"></div>
+                        </div>
+                        <div style="text-align:center; margin-top:6px;">
+                          <div class="{ 'low-num' if is_low else '' }"><b>{total_kg:.2f} kg</b></div>
+                          <div class="muted" style="font-size:0.85rem;">Warehouse {ware_kg:.2f} + Containers {cont_kg:.2f}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+    else:
+        st.info("No coating types found in coating config.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================================
+    # Warehouse editor
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("📦 Warehouse Stock (Edit when new material arrives)")
+    st.caption("Bulk stock not inside containers A–D.")
+
+    if coating_types:
+        edited = False
+        rows = [coating_types[i:i + 3] for i in range(0, len(coating_types), 3)]
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, ctype in zip(cols, row):
+                with col:
+                    k = f"wh_{ctype}"
+                    st.session_state.setdefault(k, float(warehouse_stock.get(ctype, 0.0)))
+                    val = st.number_input(f"{ctype} (kg)", min_value=0.0, step=0.1, value=float(st.session_state[k]), key=k)
+                    if abs(val - float(warehouse_stock.get(ctype, 0.0))) > 1e-9:
+                        warehouse_stock[ctype] = float(val)
+                        edited = True
+
+        if edited:
             try:
-                saved_heater_config = json.load(f)
-            except Exception:
-                saved_heater_config = {}
+                _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
+                st.success("Warehouse stock updated.")
+            except Exception as e:
+                st.error(f"Failed to save warehouse stock: {e}")
     else:
-        saved_heater_config = {}
+        st.info("No coating types configured.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    main_default = saved_heater_config.get("main_heater_temp", 0.0)
-    secondary_default = saved_heater_config.get("secondary_heater_temp", 0.0)
+    # ==========================================================
+    # Temps UI (containers + pipe are near containers; die-holder is global)
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("🌡️ Temperatures (CSV-based)")
+    st.caption("Temps are stored in one-row CSV and can be refreshed from external edits.")
 
-    main_heater_temp = st.number_input("Main Coating Heater Temperature (°C)", min_value=0.0, step=0.1, value=main_default, key="main_heater_temp_value")
-    secondary_heater_temp = st.number_input("Secondary Coating Heater Temperature (°C)", min_value=0.0, step=0.1, value=secondary_default, key="secondary_heater_temp_value")
+    # Containers temps
+    for lab in container_labels:
+        st.markdown(f"**Container {lab} temps**")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.number_input(
+                f"Container temp {lab} (°C)",
+                min_value=0.0,
+                step=0.1,
+                value=float(st.session_state[TEMP_STATE_KEYS[f"{lab}_container_c"]]),
+                key=TEMP_STATE_KEYS[f"{lab}_container_c"]
+            )
+        with c2:
+            st.number_input(
+                f"Pipe temp {lab} (°C)",
+                min_value=0.0,
+                step=0.1,
+                value=float(st.session_state[TEMP_STATE_KEYS[f"{lab}_pipe_c"]]),
+                key=TEMP_STATE_KEYS[f"{lab}_pipe_c"]
+            )
 
-    if st.button("💾 Save Heater Temperature Configuration"):
-        heater_config = {
-            "main_heater_temp": main_heater_temp,
-            "secondary_heater_temp": secondary_heater_temp
-        }
-        with open("heater_config.json", "w") as f:
-            json.dump(heater_config, f, indent=4)
-    st.success("Heater temperature configuration saved!")
-    # Gas calculation logic
-    if selected_log_file:
-        # Display the "Calculate Gas Spent" button only if a file is selected
-        if st.button("Calculate Gas Spent"):
-            log_file_path = os.path.join(DATA_FOLDER, selected_log_file)
-            if selected_log_file.endswith(".csv"):
-                log_data = pd.read_csv(log_file_path)
-            else:
-                log_data = pd.read_excel(log_file_path)
-
-            # Ensure "Date/Time" column is parsed correctly
-            def try_parse_datetime(dt_str):
-                try:
-                    return pd.to_datetime(dt_str, errors='coerce')  # Use 'coerce' to handle invalid timestamps
-                except Exception:
-                    return pd.NaT
-
-            # Try parsing the "Date/Time" column
-            if "Date/Time" in log_data.columns:
-                log_data["Date/Time"] = log_data["Date/Time"].apply(try_parse_datetime)
-            else:
-                st.error("No 'Date/Time' column found in the data.")
-                st.stop()
-
-            # Check if valid timestamps exist after parsing
-            if log_data["Date/Time"].isna().all():
-                st.error("No valid timestamps found in the log data.")
-                st.dataframe(log_data)
-                st.stop()
-
-            # Gas calculation logic
-            total_gas = 0.0
-            mfc_columns = ["Furnace MFC1 Actual", "Furnace MFC2 Actual", "Furnace MFC3 Actual", "Furnace MFC4 Actual"]
-            if all(col in log_data.columns for col in mfc_columns):
-                log_data["Total Flow"] = log_data[mfc_columns].sum(axis=1)
-                time_column = "Date/Time"
-                log_data[time_column] = log_data[time_column].apply(try_parse_datetime)
-
-                log_data['Time Difference'] = log_data[time_column].diff().dt.total_seconds() / 60.0  # in minutes
-                total_gas = 0
-                for i in range(1, len(log_data)):
-                    flow_avg = (log_data['Total Flow'].iloc[i - 1] + log_data['Total Flow'].iloc[i]) / 2
-                    time_diff = log_data['Time Difference'].iloc[i]
-                    total_gas += flow_avg * time_diff
-
-            # Show the result of the gas calculation
-            st.success(f"Gas calculation completed! Total Gas Spent: {total_gas:.2f} liters")
-
-            # Option to save the result to the CSV file
-            save_to_csv = st.checkbox("Save Gas Calculation to CSV", key="save_gas_to_csv")
-
-            if save_to_csv:
-                # Let the user choose a CSV file to append the result
-                csv_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
-                selected_csv = st.selectbox("Select CSV to Save Gas Calculation", csv_files)
-
-                if selected_csv:
-                    csv_path = os.path.join('data_set_csv', selected_csv)
-
-                    try:
-                        df_csv = pd.read_csv(csv_path)
-                    except FileNotFoundError:
-                        st.error(f"CSV file '{selected_csv}' not found.")
-                        st.stop()
-
-                    # Prepare the new data to append
-                    new_data = [
-                        {"Parameter Name": "Total Gas Spent", "Value": total_gas, "Units": "liters"}
-                    ]
-                    new_df = pd.DataFrame(new_data)
-
-                    # Append the new data to the existing DataFrame
-                    df_csv = pd.concat([df_csv, new_df], ignore_index=True)
-
-                    # Save the updated CSV
-                    df_csv.to_csv(csv_path, index=False)
-                    st.success(f"Gas calculation saved to '{selected_csv}'!")
-        else:
-            st.warning("Please select a CSV file before calculating the gas.")
-    else:
-        st.warning("Please select a CSV file for calculation.")
-    # =========================
-    # 🔩 Dies System (names from JSON keys) — auto save/load
-    # =========================
     st.markdown("---")
+    st.subheader("🔥 Die Holder Heater (Global)")
+    cH1, cH2 = st.columns(2)
+    with cH1:
+        st.number_input(
+            "Primary die holder heater temp (°C)",
+            min_value=0.0,
+            step=0.1,
+            value=float(st.session_state[TEMP_STATE_KEYS["die_holder_primary_c"]]),
+            key=TEMP_STATE_KEYS["die_holder_primary_c"]
+        )
+    with cH2:
+        st.number_input(
+            "Secondary die holder heater temp (°C)",
+            min_value=0.0,
+            step=0.1,
+            value=float(st.session_state[TEMP_STATE_KEYS["die_holder_secondary_c"]]),
+            key=TEMP_STATE_KEYS["die_holder_secondary_c"]
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Auto-save temps to CSV if changed
+    last_temp_saved = st.session_state.get("temps_last_saved_snapshot", {})
+    cur_temp_snapshot = {skey: float(st.session_state.get(skey, 0.0)) for skey in TEMP_STATE_KEYS.values()}
+
+    if not last_temp_saved:
+        st.session_state["temps_last_saved_snapshot"] = cur_temp_snapshot
+        last_temp_saved = cur_temp_snapshot
+
+    temps_changed = cur_temp_snapshot != last_temp_saved
+    if temps_changed:
+        out = {
+            "die_holder_primary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_primary_c"]]),
+            "die_holder_secondary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_secondary_c"]]),
+        }
+        for lab in container_labels:
+            out[f"{lab}_container_c"] = float(st.session_state[TEMP_STATE_KEYS[f"{lab}_container_c"]])
+            out[f"{lab}_pipe_c"] = float(st.session_state[TEMP_STATE_KEYS[f"{lab}_pipe_c"]])
+
+        try:
+            _write_one_row_csv(TOWER_TEMPS_CSV, TEMP_COLS, out)
+            st.session_state["temps_last_saved_snapshot"] = cur_temp_snapshot
+        except Exception as e:
+            st.error(f"Failed to write temps CSV: {e}")
+
+    # ==========================================================
+    # Gas section folded by default (keep your full logic here)
+    # ==========================================================
+    with st.expander("🧯 Gas Reports", expanded=False):
+        st.info("Gas section folded (as requested). Paste your full gas logic here if you want it integrated in this same block.")
+
+    # ==========================================================
+    # Dies system (auto save/load)
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("🔩 Dies System")
 
-    DIES_CONFIG_PATH = "dies_6station.json"
+    DIES_CONFIG_PATH = _abs("dies_6station.json")
 
-    # Default template if file doesn't exist yet
     default_cfg = {
         f"Station {i}": {
             "entry_die_um": 0.0,
@@ -6301,7 +7493,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         } for i in range(1, 7)
     }
 
-    # Load or create
     if os.path.exists(DIES_CONFIG_PATH):
         with open(DIES_CONFIG_PATH, "r") as f:
             try:
@@ -6315,21 +7506,15 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         with open(DIES_CONFIG_PATH, "w") as f:
             json.dump(dies_cfg, f, indent=4)
 
-    # IMPORTANT: station names come from the JSON keys (your names)
     station_names = list(dies_cfg.keys())
 
-    # Init session_state based on JSON
     for name in station_names:
         safe_key = name.replace(" ", "_").replace("/", "_")
         st.session_state.setdefault(f"dies_entry_{safe_key}", float(dies_cfg.get(name, {}).get("entry_die_um", 0.0)))
-        st.session_state.setdefault(f"dies_primary_{safe_key}",
-                                    float(dies_cfg.get(name, {}).get("primary_die_um", 0.0)))
-        st.session_state.setdefault(f"dies_primary_on_{safe_key}",
-                                    bool(dies_cfg.get(name, {}).get("primary_on_tower", False)))
-        st.session_state.setdefault(f"dies_secondary_on_{safe_key}",
-                                    bool(dies_cfg.get(name, {}).get("secondary_on_tower", False)))
+        st.session_state.setdefault(f"dies_primary_{safe_key}", float(dies_cfg.get(name, {}).get("primary_die_um", 0.0)))
+        st.session_state.setdefault(f"dies_primary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("primary_on_tower", False)))
+        st.session_state.setdefault(f"dies_secondary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("secondary_on_tower", False)))
 
-    # Layout: 3 per row
     rows = [station_names[i:i + 3] for i in range(0, len(station_names), 3)]
     updated_dies_cfg = {}
 
@@ -6337,26 +7522,11 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         cols = st.columns(len(row))
         for col, name in zip(cols, row):
             safe_key = name.replace(" ", "_").replace("/", "_")
-
             with col:
                 st.markdown(f"### {name}")
 
-                entry_um = st.number_input(
-                    "Entry die (µm)",
-                    min_value=0.0,
-                    step=1.0,
-                    format="%.1f",
-                    key=f"dies_entry_{safe_key}",
-                )
-
-                primary_um = st.number_input(
-                    "Primary die (µm)",
-                    min_value=0.0,
-                    step=1.0,
-                    format="%.1f",
-                    key=f"dies_primary_{safe_key}",
-                )
-
+                entry_um = st.number_input("Entry die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_entry_{safe_key}")
+                primary_um = st.number_input("Primary die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_primary_{safe_key}")
                 primary_on = st.checkbox("Primary on tower", key=f"dies_primary_on_{safe_key}")
                 secondary_on = st.checkbox("Secondary on tower", key=f"dies_secondary_on_{safe_key}")
 
@@ -6369,311 +7539,29 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
 
                 st.caption(f"Entry: **{entry_um:.1f} µm** | Primary: **{primary_um:.1f} µm**")
 
-    # Auto-save every rerun
     try:
         with open(DIES_CONFIG_PATH, "w") as f:
             json.dump(updated_dies_cfg, f, indent=4)
         st.caption(f"Auto-saved to `{DIES_CONFIG_PATH}`")
     except Exception as e:
         st.error(f"Failed to save dies config: {e}")
-# ------------------ History Log Tab ------------------
-elif tab_selection == "📝 History Log":
-    st.title("📝 History Log")
-    st.sidebar.title("History Log Management")
-    if os.path.exists(HISTORY_FILE):
-        history_df = pd.read_csv(HISTORY_FILE)
-        history_df["Timestamp"] = pd.to_datetime(history_df["Timestamp"])
-        if 'Status' not in history_df.columns:
-            history_df['Status'] = 'Not Yet Addressed'
 
-        # Define relevant columns for each history type
-        draw_history_fields = ["Draw Name", "Timestamp"]
-
-        problem_history_fields = ["Description", "Status"]
-
-        maintenance_history_fields = ["Part Changed", "Notes"]
-
-        fields_mapping = {
-            "Draw History": draw_history_fields,
-            "Problem History": problem_history_fields,
-            "Maintenance History": maintenance_history_fields
-        }
-
-        # Ensure column names are unique
-        def make_column_names_unique(columns):
-            seen = {}
-            new_columns = []
-            for col in columns:
-                if col in seen:
-                    seen[col] += 1
-                    new_columns.append(f"{col}_{seen[col]}")
-                else:
-                    seen[col] = 0
-                    new_columns.append(col)
-            return new_columns
-
-        history_df.columns = make_column_names_unique(history_df.columns.tolist())
-
-        # Sidebar Selection for History Type
-        history_type = st.sidebar.radio("Select History Type", [ "Draw History", "Problem History", "Maintenance History"], key="history_type_select")
-
-        if history_type == "All":
-            # Show all history logs with separate tables & plots
-            for log_type, fields in zip(["Draw History", "Problem History", "Maintenance History"],
-                                        [draw_history_fields, problem_history_fields, maintenance_history_fields]):
-                st.write(f"## {log_type}")
-
-                if log_type == "Problem History":
-                    filtered_df = history_df[(history_df["Type"] == log_type) & (history_df["Status"] != "Fixed")]
-                else:
-                    filtered_df = history_df[history_df["Type"] == log_type]
-                if not filtered_df.empty:
-                    st.write(f"### {log_type} Table")
-                    st.data_editor(filtered_df[fields], height=200, use_container_width=True)
-
-
-                else:
-                    st.warning(f"No records found for {log_type}")
-
-        else:
-            # Show only selected history type
-            if history_type == "Problem History":
-                filtered_df = history_df[(history_df["Type"] == history_type) & (history_df["Status"] != "Fixed")]
-            else:
-                filtered_df = history_df[history_df["Type"] == history_type]
-            if not filtered_df.empty:
-                st.write(f"### {history_type} Table")
-                st.data_editor(filtered_df[fields_mapping[history_type]], height=200, use_container_width=True)
-
-
-            else:
-                st.warning(f"No records found for {history_type}")
-
-        # ------------------ Add Event Form ------------------
-        with open("config_coating.json", "r") as config_file:
-            config = json.load(config_file)
-        # Extract coatings and dies dictionaries
-        coatings = config.get("coatings", {})
-        dies = config.get("dies", {})
-
-        if history_type == "Draw History":
-            # st.sidebar.subheader("Draw History")
-            # Load all CSV files from the dataset folder and combine them
-            data_set_files = [f for f in os.listdir('data_set_csv') if f.endswith('.csv')]
-            folder_data = []
-            for file in data_set_files:
-                csv_data = pd.read_csv(os.path.join('data_set_csv', file), header=None)
-                if not csv_data.empty:
-                    csv_data.columns = ['Parameter Name', 'Value', 'Units']
-                    csv_data['Draw Name'] = file.replace('.csv', '')
-                    folder_data.append(csv_data)
-            if folder_data:
-                all_data = pd.concat(folder_data, ignore_index=True)
-                st.write("### Combined Draw History from All CSV Files")
-                # Let the user select parameters to display from the combined data
-                parameters_to_display = st.multiselect("Select Parameters to Display", all_data["Parameter Name"].unique().tolist())
-                if parameters_to_display:
-                    filtered_data = all_data[all_data["Parameter Name"].isin(parameters_to_display)]
-                    st.dataframe(filtered_data, height=300, use_container_width=True)
-                    # Optionally, allow detailed view per draw entry
-                    selected_draw = st.selectbox("Select a Draw Entry", filtered_data["Parameter Name"].tolist())
-                    if selected_draw:
-                        selected_draw_data = filtered_data[filtered_data["Parameter Name"] == selected_draw].iloc[0]
-                        st.write(f"**Selected Data for {selected_draw}:**")
-                        st.write(f"**Value:** {selected_draw_data['Value']} {selected_draw_data['Units']}")
-                else:
-                    st.warning("No parameters selected.")
-            else:
-                st.warning("No CSV files found in the folder.")
-        elif history_type == "Maintenance History":
-            st.sidebar.subheader("Add Maintenance History Entry")
-
-            # Checkbox to indicate if a part was changed
-            part_changed_checkbox = st.sidebar.checkbox("Was a part changed?")
-
-            # Show part name input only if checked
-            part_changed = ""
-
-            if part_changed_checkbox:
-                part_changed = st.sidebar.text_input("Part Changed")
-
-            maintenance_notes = st.sidebar.text_area("Maintenance Details")
-
-            if st.sidebar.button("Save Maintenance History"):
-                new_entry = pd.DataFrame([{
-                    "Timestamp": pd.Timestamp.now(),
-                    "Type": "Maintenance History",
-                    "Part Changed": part_changed if part_changed_checkbox else "N/A",
-                    "Notes": maintenance_notes
-                }])
-
-                history_df = pd.concat([history_df, new_entry], ignore_index=True)
-                history_df.to_csv(HISTORY_FILE, index=False)
-                st.sidebar.success("Maintenance history saved!")
-        elif history_type == "Problem History":
-            st.sidebar.subheader("Add or Update Problem History Entry")
-            problem_action = st.sidebar.radio("Select Action", ["Add New Problem", "Update Existing Problem"], index=0)
-            if problem_action == "Add New Problem":
-                problem_description = st.sidebar.text_area("Describe the Problem")
-                problem_status = st.sidebar.selectbox("Problem Status", ["Not Yet Addressed", "Waiting for Parts", "Fixed"])
-                if st.sidebar.button("Save Problem History"):
-                    new_entry = pd.DataFrame([{
-                        "Timestamp": pd.Timestamp.now(),
-                        "Type": "Problem History",
-                        "Description": problem_description,
-                        "Status": problem_status
-                    }])
-
-                    history_df = pd.concat([history_df, new_entry], ignore_index=True)
-                    history_df.to_csv(HISTORY_FILE, index=False)
-                    #st.rerun()
-            elif problem_action == "Update Existing Problem":
-                filtered_df = history_df[(history_df["Type"] == "Problem History") & (history_df["Status"] != "Fixed")]
-                if not filtered_df.empty:
-                    selected_problem = st.sidebar.selectbox("Select Problem to Update", filtered_df["Description"])
-                    selected_index = filtered_df.index[filtered_df["Description"] == selected_problem].tolist()[0]
-
-                    new_status = st.sidebar.selectbox("Update Problem Status",
-                                                      ["Not Yet Addressed", "Waiting for Parts", "Fixed"],
-                                                      index=["Not Yet Addressed", "Waiting for Parts", "Fixed"].index(
-                                                          filtered_df.at[selected_index, "Status"]))
-
-                    if st.sidebar.button("Update Problem Status"):
-                        history_df.at[selected_index, "Status"] = new_status
-                        history_df.to_csv(HISTORY_FILE, index=False)
-                        #st.rerun()
-                else:
-                    st.sidebar.info("No existing problem entries to update.")
-    else:
-        st.warning("No history logs found. You can add new records using the form below.")# Ensure df is only processed if it contains data
-        if not df.empty and "Date/Time" in df.columns:
-            def try_parse_datetime(dt_str):
-                try:
-                    return pd.to_datetime(dt_str)
-                except Exception:
-                    try:
-                        if isinstance(dt_str, str) and len(dt_str.split(":")[-1]) > 2:
-                            parts = dt_str.rsplit(":", 1)
-                            fixed_time = parts[0] + ":" + parts[1][:2] + "." + parts[1][2:]
-                            return pd.to_datetime(fixed_time)
-                    except:
-                        return pd.NaT
-                return pd.NaT
-
-            df["Date/Time"] = df["Date/Time"].apply(try_parse_datetime)
-
-        column_options = df.columns.tolist() if not df.empty else []
-
-        # ------------------ Schedule Tab ------------------
-        if tab_selection == "📅 Schedule":
-            st.title("📅 Tower Schedule")
-            st.sidebar.title("Schedule Management")
-
-            SCHEDULE_FILE = "tower_schedule.csv"
-            required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
-            if not os.path.exists(SCHEDULE_FILE):
-                pd.DataFrame(columns=required_columns).to_csv(SCHEDULE_FILE, index=False)
-                st.warning("Schedule file was empty. New file with required columns created.")
-            else:
-                schedule_df = pd.read_csv(SCHEDULE_FILE)
-                missing_columns = [col for col in required_columns if col not in schedule_df.columns]
-                if missing_columns:
-                    st.error(f"Missing columns in schedule file: {missing_columns}")
-                    st.stop()
-                else:
-                    # Clean column names by stripping extra spaces
-                    schedule_df.columns = schedule_df.columns.str.strip()
-
-                    # Parse 'Start DateTime' and 'End DateTime' columns
-                    try:
-                        schedule_df['Start DateTime'] = pd.to_datetime(schedule_df['Start DateTime'], errors='coerce')
-                        schedule_df['End DateTime'] = pd.to_datetime(schedule_df['End DateTime'], errors='coerce')
-                    except Exception as e:
-                        st.error(f"Error parsing datetime columns: {e}")
-                        st.stop()
-
-                    # Check if 'Start DateTime' and 'End DateTime' columns are valid
-                    if schedule_df['Start DateTime'].isna().all() or schedule_df['End DateTime'].isna().all():
-                        st.error("One or both datetime columns ('Start DateTime', 'End DateTime') could not be parsed. Please check the data.")
-                        st.stop()
-
-                    # Apply date filtering safely
-                    start_filter = st.sidebar.date_input("Start Date", pd.Timestamp.now().date(), key="schedule_start_date")
-                    end_filter = st.sidebar.date_input("End Date", (pd.Timestamp.now() + pd.DateOffset(weeks=1)).date(), key="schedule_end_date")
-
-                    start_datetime = schedule_df['Start DateTime']
-                    end_datetime = schedule_df['End DateTime']
-
-                    # Apply filtering based on user-selected date range
-                    filtered_schedule = schedule_df[
-                        (start_datetime >= pd.to_datetime(start_filter)) &
-                        (end_datetime <= pd.to_datetime(end_filter))
-                    ]
-
-                    # Display schedule as a timeline
-                    st.write("### Schedule Timeline")
-                    event_colors = {
-                        "Maintenance": "blue",
-                        "Drawing": "green",
-                        "Stop": "red",
-                        "Management Event": "purple"  # New color for the management event
-                    }
-                    if not filtered_schedule.empty:
-                        fig = px.timeline(
-                            filtered_schedule,
-                            x_start="Start DateTime",
-                            x_end="End DateTime",
-                            y="Event Type",
-                            color="Event Type",
-                            title="Tower Schedule",
-                            color_discrete_map=event_colors
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-
-
-                    st.write("### Current Schedule")
-                    st.data_editor(schedule_df, height=300, use_container_width=True)
-                    # Add new event form
-                    st.sidebar.subheader("Add New Event")
-                    event_description = st.sidebar.text_area("Event Description")
-                    event_type = st.sidebar.selectbox("Select Event Type", ["Maintenance", "Drawing", "Stop","Management Event"])
-                    deadline_date = None
-                    if event_type == "Management Event":
-                        deadline_date = st.sidebar.date_input("Deadline Date")
-                    start_date = st.sidebar.date_input("Start Date", pd.Timestamp.now().date())
-                    start_time = st.sidebar.time_input("Start Time")
-                    end_date = st.sidebar.date_input("End Date", pd.Timestamp.now().date())
-                    end_time = st.sidebar.time_input("End Time")
-                    recurrence = st.sidebar.selectbox("Recurrence", ["None", "Weekly", "Monthly", "Yearly"])
-
-                    start_datetime = pd.to_datetime(f"{start_date} {start_time}")
-                    end_datetime = pd.to_datetime(f"{end_date} {end_time}")
-
-                    if st.sidebar.button("Add Event"):
-                        new_event = pd.DataFrame([{
-                            "Event Type": event_type,
-                            "Start DateTime": start_datetime,
-                            "End DateTime": end_datetime,
-                            "Description": event_description,
-                            "Recurrence": recurrence,
-                            "Deadline Date": deadline_date if event_type == "Management Event" else None
-                            # Add deadline only for Management Event
-                        }])
-
-                        full_schedule_df = pd.read_csv(SCHEDULE_FILE)
-                        full_schedule_df = pd.concat([full_schedule_df, new_event], ignore_index=True)
-                        full_schedule_df.to_csv(SCHEDULE_FILE, index=False)
-
-                        st.sidebar.success("Event added to schedule!")
+    st.markdown("</div>", unsafe_allow_html=True)
 # ------------------ Schedule Tab ------------------
 elif tab_selection == "📅 Schedule":
-    st.title("📅 Tower Schedule")
-    st.sidebar.title("Schedule Management")
+    import os
+    import pandas as pd
+    import streamlit as st
+    import plotly.express as px
 
-    SCHEDULE_FILE = "tower_schedule.csv"
+    st.title("📅 Tower Schedule")
+
+    SCHEDULE_FILE = P.schedule_csv
     required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
 
-    # --- Ensure schedule file exists + has required columns (works with empty/old files) ---
+    # =========================================================
+    # Ensure schedule file exists + required columns
+    # =========================================================
     if not os.path.exists(SCHEDULE_FILE):
         pd.DataFrame(columns=required_columns).to_csv(SCHEDULE_FILE, index=False)
         st.warning("Schedule file was missing. New file with required columns created.")
@@ -6693,7 +7581,7 @@ elif tab_selection == "📅 Schedule":
     schedule_df["Start DateTime"] = pd.to_datetime(schedule_df["Start DateTime"], errors="coerce")
     schedule_df["End DateTime"] = pd.to_datetime(schedule_df["End DateTime"], errors="coerce")
 
-    # --- Clean leaked Plotly template text from Description (prevents showing %{customdata[0]} in hover) ---
+    # Clean leaked Plotly template text from Description
     schedule_df["Description"] = (
         schedule_df["Description"]
         .astype(str)
@@ -6702,25 +7590,79 @@ elif tab_selection == "📅 Schedule":
         .str.strip()
     )
 
-    # ----------------------------
-    # Sidebar date filter
-    # ----------------------------
-    start_filter = st.sidebar.date_input(
-        "Start Date", pd.Timestamp.now().date(), key="schedule_start_date"
-    )
-    end_filter = st.sidebar.date_input(
-        "End Date", (pd.Timestamp.now() + pd.DateOffset(weeks=1)).date(), key="schedule_end_date"
-    )
+    # Normalize recurrence display in MASTER (so empty shows "None")
+    def _norm_recur(v) -> str:
+        r = str(v).strip()
+        return "None" if r in ["", "None", "none", "NONE", "nan", "NaN"] else r
+
+    schedule_df["Recurrence"] = schedule_df["Recurrence"].apply(_norm_recur)
+
+    # =========================================================
+    # Quick range presets (SAFE: apply before widgets instantiate)
+    # =========================================================
+    if "schedule_apply_preset" not in st.session_state:
+        st.session_state["schedule_apply_preset"] = None  # None / "w1" / "m1" / "m3"
+
+    preset = st.session_state.get("schedule_apply_preset")
+    if preset:
+        today = pd.Timestamp.now().date()
+        if preset == "w1":
+            st.session_state["schedule_start_date"] = today
+            st.session_state["schedule_end_date"] = (pd.Timestamp.now() + pd.DateOffset(weeks=1)).date()
+        elif preset == "m1":
+            st.session_state["schedule_start_date"] = today
+            st.session_state["schedule_end_date"] = (pd.Timestamp.now() + pd.DateOffset(months=1)).date()
+        elif preset == "m3":
+            st.session_state["schedule_start_date"] = today
+            st.session_state["schedule_end_date"] = (pd.Timestamp.now() + pd.DateOffset(months=3)).date()
+
+        st.session_state["schedule_apply_preset"] = None
+
+    # =========================================================
+    # Main-page Filters
+    # =========================================================
+    st.subheader("🗓️ View Range")
+
+    f1, f2, f3 = st.columns([1.1, 1.1, 1.4])
+
+    with f1:
+        start_filter = st.date_input(
+            "Start Date",
+            value=st.session_state.get("schedule_start_date", pd.Timestamp.now().date()),
+            key="schedule_start_date",
+        )
+
+    with f2:
+        end_filter = st.date_input(
+            "End Date",
+            value=st.session_state.get("schedule_end_date", (pd.Timestamp.now() + pd.DateOffset(weeks=1)).date()),
+            key="schedule_end_date",
+        )
+
+    with f3:
+        st.markdown("#### Quick ranges")
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            if st.button("1 Week", use_container_width=True, key="sched_preset_w1"):
+                st.session_state["schedule_apply_preset"] = "w1"
+                st.rerun()
+        with b2:
+            if st.button("1 Month", use_container_width=True, key="sched_preset_m1"):
+                st.session_state["schedule_apply_preset"] = "m1"
+                st.rerun()
+        with b3:
+            if st.button("3 Months", use_container_width=True, key="sched_preset_m3"):
+                st.session_state["schedule_apply_preset"] = "m3"
+                st.rerun()
 
     range_start = pd.to_datetime(start_filter)
-    range_end = pd.to_datetime(end_filter) + pd.to_timedelta(1, unit="day")  # include the end day
+    range_end = pd.to_datetime(end_filter) + pd.to_timedelta(1, unit="day")  # include end day
 
-    # Filter safely (ignore NaT rows)
     base = schedule_df.dropna(subset=["Start DateTime", "End DateTime"]).copy()
 
-    # -------------------------------------------------
+    # =========================================================
     # Expand recurring events so they "show all"
-    # -------------------------------------------------
+    # =========================================================
     def _next_dt(dt: pd.Timestamp, recurrence: str) -> pd.Timestamp:
         r = str(recurrence).strip().lower()
         if r == "weekly":
@@ -6732,40 +7674,37 @@ elif tab_selection == "📅 Schedule":
         return dt
 
     expanded_rows = []
-
     for _, row in base.iterrows():
-        rec = str(row.get("Recurrence", "")).strip()
+        rec = _norm_recur(row.get("Recurrence", "None"))
         start_dt = row["Start DateTime"]
         end_dt = row["End DateTime"]
 
-        # If no recurrence -> keep as single event
-        if rec in ["", "None", "none", "NONE"]:
-            expanded_rows.append(row.to_dict())
+        if pd.isna(start_dt) or pd.isna(end_dt):
             continue
 
-        # Duration stays constant for each occurrence
-        duration = end_dt - start_dt
+        # If no recurrence -> keep single
+        if rec == "None":
+            rdict = row.to_dict()
+            rdict["Recurrence"] = "None"
+            expanded_rows.append(rdict)
+            continue
 
-        # Move occurrence start forward until it can intersect the window
+        duration = end_dt - start_dt
         occ_start = start_dt
         occ_end = occ_start + duration
 
-        # If the base event is far in the past, fast-forward occurrences
-        # until it reaches near the range (avoid infinite loops)
         safety = 0
         while occ_end < range_start and safety < 5000:
             occ_start = _next_dt(occ_start, rec)
             occ_end = occ_start + duration
             safety += 1
 
-        # Now generate occurrences while within window
         safety = 0
         while occ_start <= range_end and safety < 5000:
             new_row = row.to_dict()
             new_row["Start DateTime"] = occ_start
             new_row["End DateTime"] = occ_end
-            # Optional: mark that it's an occurrence (keeps description same but more clear)
-            # new_row["Description"] = f"{new_row['Description']} (recurring)"
+            new_row["Recurrence"] = rec  # keep as display-ready
             expanded_rows.append(new_row)
 
             occ_start = _next_dt(occ_start, rec)
@@ -6778,17 +7717,24 @@ elif tab_selection == "📅 Schedule":
         expanded_df["End DateTime"] = pd.to_datetime(expanded_df["End DateTime"], errors="coerce")
         expanded_df = expanded_df.dropna(subset=["Start DateTime", "End DateTime"])
 
-    # --------------------------------
-    # Filter (OVERLAP logic) on expanded
-    # --------------------------------
-    # event intersects [range_start, range_end]
-    filtered_schedule = expanded_df[
-        (expanded_df["End DateTime"] >= range_start) &
-        (expanded_df["Start DateTime"] <= range_end)
-    ].copy()
+    # =========================================================
+    # Filter by overlap (on expanded)
+    # =========================================================
+    if expanded_df.empty:
+        filtered_schedule = expanded_df
+    else:
+        filtered_schedule = expanded_df[
+            (expanded_df["End DateTime"] >= range_start) &
+            (expanded_df["Start DateTime"] <= range_end)
+        ].copy()
 
-    # --- Timeline ---
-    st.write("### Schedule Timeline")
+    # =========================================================
+    # Timeline (FIXED hover formatting)
+    #   px.timeline does NOT support %{x_end|...} in hovertemplate.
+    #   So we precompute formatted strings and show them via custom_data.
+    # =========================================================
+    st.subheader("📈 Timeline")
+
     event_colors = {
         "Maintenance": "blue",
         "Drawing": "green",
@@ -6797,26 +7743,38 @@ elif tab_selection == "📅 Schedule":
     }
 
     if not filtered_schedule.empty:
-        # Build timeline with explicit custom_data so hover is stable
+        # Precompute clean display strings
+        filtered_schedule["StartStr"] = filtered_schedule["Start DateTime"].dt.strftime("%Y-%m-%d %H:%M")
+        filtered_schedule["EndStr"] = filtered_schedule["End DateTime"].dt.strftime("%Y-%m-%d %H:%M")
+        filtered_schedule["RecurrenceDisp"] = filtered_schedule["Recurrence"].apply(_norm_recur)
+
+        # Also ensure description is clean for hover
+        filtered_schedule["Description"] = (
+            filtered_schedule["Description"]
+            .astype(str)
+            .str.replace(r"%\{.*?\}", "", regex=True)
+            .str.replace("Description=", "", regex=False)
+            .str.strip()
+        )
+
         fig = px.timeline(
             filtered_schedule,
             x_start="Start DateTime",
             x_end="End DateTime",
             y="Event Type",
             color="Event Type",
-            title="Tower Schedule",
             color_discrete_map=event_colors,
-            custom_data=["Description", "Recurrence"],
+            custom_data=["StartStr", "EndStr", "RecurrenceDisp", "Description"],
+            title="Tower Schedule",
         )
 
-        # Force a clean hover that always includes Description + Recurrence
         fig.update_traces(
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "Start: %{x|%Y-%m-%d %H:%M}<br>"
-                "End: %{x_end|%Y-%m-%d %H:%M}<br>"
-                "Recurrence: %{customdata[1]}<br>"
-                "Description: %{customdata[0]}"
+                "Start: %{customdata[0]}<br>"
+                "End: %{customdata[1]}<br>"
+                "Recurrence: %{customdata[2]}<br>"
+                "Description: %{customdata[3]}"
                 "<extra></extra>"
             )
         )
@@ -6825,63 +7783,123 @@ elif tab_selection == "📅 Schedule":
     else:
         st.info("No events in the selected date range.")
 
-    # --- Current schedule table (MASTER, not expanded) ---
-    st.write("### Current Schedule (Master)")
-    st.data_editor(schedule_df, height=300, use_container_width=True)
+    st.divider()
 
-    # --- Add new event ---
-    st.sidebar.subheader("Add New Event")
-    event_description = st.sidebar.text_area("Event Description", key="sched_desc")
-    event_type = st.sidebar.selectbox(
-        "Select Event Type", ["Maintenance", "Drawing", "Stop", "Management Event"], key="sched_type"
-    )
-    start_date = st.sidebar.date_input("Start Date", pd.Timestamp.now().date(), key="sched_start_date2")
-    start_time = st.sidebar.time_input("Start Time", key="sched_start_time")
-    end_date = st.sidebar.date_input("End Date", pd.Timestamp.now().date(), key="sched_end_date2")
-    end_time = st.sidebar.time_input("End Time", key="sched_end_time")
-    recurrence = st.sidebar.selectbox("Recurrence", ["None", "Weekly", "Monthly", "Yearly"], key="sched_recur")
+    # =========================================================
+    # Management area (Main page, no sidebar)
+    # =========================================================
+    st.subheader("🧩 Manage Schedule")
 
-    start_datetime = pd.to_datetime(f"{start_date} {start_time}")
-    end_datetime = pd.to_datetime(f"{end_date} {end_time}")
+    left, right = st.columns([1.05, 0.95], gap="large")
 
-    if st.sidebar.button("Add Event", key="sched_add_btn"):
-        new_event = pd.DataFrame([{
-            "Event Type": event_type,
-            "Start DateTime": start_datetime,
-            "End DateTime": end_datetime,
-            "Description": event_description,
-            "Recurrence": recurrence,
-        }])
+    # -----------------------------
+    # LEFT: Master table editor
+    # -----------------------------
+    with left:
+        st.write("### Current Schedule (Master)")
+        st.caption("Master stores recurrence once; timeline shows expanded occurrences.")
+        st.data_editor(schedule_df, height=320, use_container_width=True, key="sched_master_editor")
 
-        full_schedule_df = pd.read_csv(SCHEDULE_FILE)
-        for c in required_columns:
-            if c not in full_schedule_df.columns:
-                full_schedule_df[c] = ""
-        full_schedule_df = full_schedule_df[required_columns]
+        csave, creload = st.columns([1, 1])
+        with csave:
+            if st.button("💾 Save Master Table", use_container_width=True, key="sched_save_master"):
+                edited = st.session_state.get("sched_master_editor", schedule_df)
 
-        full_schedule_df = pd.concat([full_schedule_df, new_event], ignore_index=True)
-        full_schedule_df.to_csv(SCHEDULE_FILE, index=False)
-        st.sidebar.success("Event added to schedule!")
-        st.rerun()
+                for c in required_columns:
+                    if c not in edited.columns:
+                        edited[c] = ""
+                edited = edited[required_columns].copy()
 
-    # --- Delete event ---
-    st.sidebar.subheader("Delete Event")
-    if not schedule_df.empty:
-        delete_options = [
-            f"{i}: {schedule_df.loc[i, 'Event Type']} | {schedule_df.loc[i, 'Start DateTime']} | {schedule_df.loc[i, 'Description']}"
-            for i in schedule_df.index
-        ]
-        to_delete = st.sidebar.selectbox("Select Event to Delete", delete_options, key="sched_del_select")
-        del_idx = int(to_delete.split(":")[0])
+                edited["Start DateTime"] = pd.to_datetime(edited["Start DateTime"], errors="coerce")
+                edited["End DateTime"] = pd.to_datetime(edited["End DateTime"], errors="coerce")
 
-        if st.sidebar.button("Delete Event", key="sched_del_btn"):
-            schedule_df = schedule_df.drop(index=del_idx).reset_index(drop=True)
-            schedule_df.to_csv(SCHEDULE_FILE, index=False)
-            st.sidebar.success("Event deleted successfully!")
-            st.rerun()
-    else:
-        st.sidebar.info("No events available for deletion.")
-# ------------------ Draw order Tab ------------------
+                edited["Description"] = (
+                    edited["Description"]
+                    .astype(str)
+                    .str.replace(r"%\{.*?\}", "", regex=True)
+                    .str.replace("Description=", "", regex=False)
+                    .str.strip()
+                )
+
+                edited["Recurrence"] = edited["Recurrence"].apply(_norm_recur)
+
+                edited.to_csv(SCHEDULE_FILE, index=False)
+                st.success("Saved master schedule.")
+                st.rerun()
+
+        with creload:
+            if st.button("🔄 Reload From File", use_container_width=True, key="sched_reload"):
+                st.rerun()
+
+    # -----------------------------
+    # RIGHT: Add / Delete
+    # -----------------------------
+    with right:
+        with st.expander("➕ Add New Event", expanded=True):
+            event_type = st.selectbox(
+                "Event Type",
+                ["Maintenance", "Drawing", "Stop", "Management Event"],
+                key="sched_type",
+            )
+            event_description = st.text_area("Description", key="sched_desc", height=90)
+
+            d1, d2 = st.columns(2)
+            with d1:
+                start_date = st.date_input("Start Date", pd.Timestamp.now().date(), key="sched_start_date2")
+                start_time = st.time_input("Start Time", key="sched_start_time")
+            with d2:
+                end_date = st.date_input("End Date", pd.Timestamp.now().date(), key="sched_end_date2")
+                end_time = st.time_input("End Time", key="sched_end_time")
+
+            recurrence = st.selectbox("Recurrence", ["None", "Weekly", "Monthly", "Yearly"], key="sched_recur")
+
+            start_datetime = pd.to_datetime(f"{start_date} {start_time}")
+            end_datetime = pd.to_datetime(f"{end_date} {end_time}")
+
+            if end_datetime < start_datetime:
+                st.warning("End DateTime is before Start DateTime.")
+
+            if st.button("Add Event", use_container_width=True, key="sched_add_btn"):
+                new_event = pd.DataFrame([{
+                    "Event Type": event_type,
+                    "Start DateTime": start_datetime,
+                    "End DateTime": end_datetime,
+                    "Description": str(event_description).strip(),
+                    "Recurrence": _norm_recur(recurrence),
+                }])
+
+                full_schedule_df = pd.read_csv(SCHEDULE_FILE)
+                for c in required_columns:
+                    if c not in full_schedule_df.columns:
+                        full_schedule_df[c] = ""
+                full_schedule_df = full_schedule_df[required_columns]
+
+                full_schedule_df = pd.concat([full_schedule_df, new_event], ignore_index=True)
+                full_schedule_df.to_csv(SCHEDULE_FILE, index=False)
+                st.success("Event added to schedule!")
+                st.rerun()
+
+        with st.expander("🗑️ Delete Event", expanded=False):
+            if schedule_df.empty:
+                st.info("No events available for deletion.")
+            else:
+                # show Recurrence too (helps users pick the right one)
+                delete_options = [
+                    f"{i}: {schedule_df.loc[i, 'Event Type']} | "
+                    f"{schedule_df.loc[i, 'Start DateTime']} | "
+                    f"{_norm_recur(schedule_df.loc[i, 'Recurrence'])} | "
+                    f"{str(schedule_df.loc[i, 'Description'])[:60]}"
+                    for i in schedule_df.index
+                ]
+                to_delete = st.selectbox("Select event to delete", delete_options, key="sched_del_select")
+                del_idx = int(to_delete.split(":")[0])
+
+                if st.button("Delete Selected Event", use_container_width=True, key="sched_del_btn"):
+                    schedule_df2 = schedule_df.drop(index=del_idx).reset_index(drop=True)
+                    schedule_df2.to_csv(SCHEDULE_FILE, index=False)
+                    st.success("Event deleted successfully!")
+                    st.rerun()
+# ------------------ Order draw ------------------
 elif tab_selection == "📦 Order Draw":
     st.title("📦 Order Draw")
 
@@ -6889,55 +7907,300 @@ elif tab_selection == "📦 Order Draw":
     import datetime as dt
     import pandas as pd
     import streamlit as st
+    import json
 
-    orders_file = "draw_orders.csv"
-    SCHEDULE_FILE = "tower_schedule.csv"
+    orders_file = P.orders_csv
+    SCHEDULE_FILE = P.schedule_csv
     schedule_required_cols = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
 
-    # Password for scheduling
     SCHEDULE_PASSWORD = "DORON"
 
-    # New column (replaces Spools)
     GOOD_ZONES_COL = "Good Zones Count (required length zones)"
+    FIBER_GEOMETRY_COL = "Fiber Geometry Type"
 
+    SAP_INVENTORY_FILE = "sap_rods_inventory.csv"
+
+    PROJECTS_FILE = P.projects_fiber_csv
+    PROJECTS_COL = "Fiber Project"
+    PROJECT_TEMPLATES_FILE = P.projects_fiber_templates_csv
+
+    # ✅ coating temperature columns
+    MAIN_COAT_TEMP_COL = "Main Coating Temperature (°C)"
+    SEC_COAT_TEMP_COL = "Secondary Coating Temperature (°C)"
+
+    # ✅ geometry-specific columns
+    TIGER_CUT_COL = "Tiger Cut (%)"
+    OCT_F2F_COL = "Octagonal F2F (mm)"
+
+    # ✅ config_coating.json path (coatings list must match this!)
+    COATING_CFG_PATH = P.coating_config_json
+
+    # ✅ tolerance columns
+    FIBER_D_TOL_COL = "Fiber Diameter Tol (± µm)"
+    MAIN_D_TOL_COL = "Main Coating Diameter Tol (± µm)"
+    SEC_D_TOL_COL = "Secondary Coating Diameter Tol (± µm)"
+
+    FIBER_GEOMETRY_OPTIONS = [
+        "",
+        "PANDA - PM",
+        "TIGER - PM",
+        "Octagonal",
+        "STEP INDEX",
+        "Ring Core",
+        "Hollow Core",
+        "Photonic Crystal",
+        "Custom (write in Notes)",
+    ]
+
+    # ---------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------
+
+
+    def __from_state(key: str, default=0.0) -> float:
+        return to_float(st.session_state.get(key, default), default)
+
+
+    def _fmt_pm(val: float, tol: float, unit: str = "µm") -> str:
+        try:
+            val = float(val)
+            tol = float(tol)
+        except Exception:
+            return ""
+        if val <= 0:
+            return ""
+        if tol > 0:
+            return f"{val:g} ± {tol:g} {unit}"
+        return f"{val:g} {unit}"
+
+    # ---------------------------------------------------------
+    # Load coating options from config_coating.json
+    # ---------------------------------------------------------
+    def load_config_coating_json(path: str = COATING_CFG_PATH) -> dict:
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def coating_options_from_cfg(cfg: dict) -> list:
+        coats = (cfg or {}).get("coatings", {})
+        if isinstance(coats, dict):
+            return [str(k).strip() for k in coats.keys() if str(k).strip() != ""]
+        return []
+
+
+    coating_cfg = load_coating_config()
+    COATING_OPTIONS = coating_options_from_cfg(coating_cfg) or [""]
+    if not COATING_OPTIONS:
+        st.warning("⚠️ No coatings found in config_coating.json → using empty list.")
+        COATING_OPTIONS = []
+
+    # ---------------------------------------------------------
     # Ensure schedule file exists
+    # ---------------------------------------------------------
     if not os.path.exists(SCHEDULE_FILE):
         pd.DataFrame(columns=schedule_required_cols).to_csv(SCHEDULE_FILE, index=False)
 
-    # =========================
-    # Helper (kept, harmless even if not used here)
-    # =========================
-    def _append_done_desc_to_dataset_csv(dataset_dir: str, csv_filename: str, done_desc: str):
+    # ---------------------------------------------------------
+    # Projects list helpers
+    # ---------------------------------------------------------
+    def ensure_projects_file():
+        if not os.path.exists(PROJECTS_FILE):
+            pd.DataFrame(columns=[PROJECTS_COL]).to_csv(PROJECTS_FILE, index=False)
+
+    def load_projects() -> list:
+        ensure_projects_file()
         try:
-            csv_filename = str(csv_filename or "").strip()
-            done_desc = str(done_desc or "").strip()
+            d = pd.read_csv(PROJECTS_FILE, keep_default_na=False)
+        except Exception:
+            return []
+        if PROJECTS_COL not in d.columns:
+            return []
+        items = (
+            d[PROJECTS_COL].astype(str)
+            .replace({"nan": "", "None": ""})
+            .fillna("")
+            .map(lambda x: x.strip())
+        )
+        items = [x for x in items.tolist() if x]
+        seen, out = set(), []
+        for x in items:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
 
-            if not csv_filename or not done_desc:
-                return False, "Missing CSV filename or Done Description."
+    def add_project(new_name: str):
+        new_name = str(new_name or "").strip()
+        if not new_name:
+            return False, "Project name is empty."
+        ensure_projects_file()
+        existing = load_projects()
+        if new_name in existing:
+            return False, "Project already exists."
+        dfp = pd.read_csv(PROJECTS_FILE, keep_default_na=False) if os.path.exists(PROJECTS_FILE) else pd.DataFrame()
+        if PROJECTS_COL not in dfp.columns:
+            dfp[PROJECTS_COL] = ""
+        dfp = pd.concat([dfp, pd.DataFrame([{PROJECTS_COL: new_name}])], ignore_index=True)
+        dfp.to_csv(PROJECTS_FILE, index=False)
+        return True, f"Added project: {new_name}"
 
-            csv_path = os.path.join(dataset_dir, csv_filename)
-            if not os.path.exists(csv_path):
-                return False, f"Dataset CSV not found: {csv_filename}"
+    # ---------------------------------------------------------
+    # Project template helpers (includes tolerances)
+    # ---------------------------------------------------------
+    TEMPLATE_FIELDS = [
+        PROJECTS_COL,
+        FIBER_GEOMETRY_COL,
+        TIGER_CUT_COL,
+        OCT_F2F_COL,
+        "Fiber Diameter (µm)",
+        FIBER_D_TOL_COL,
+        "Main Coating Diameter (µm)",
+        MAIN_D_TOL_COL,
+        "Secondary Coating Diameter (µm)",
+        SEC_D_TOL_COL,
+        "Tension (g)",
+        "Draw Speed (m/min)",
+        "Main Coating",
+        "Secondary Coating",
+        MAIN_COAT_TEMP_COL,
+        SEC_COAT_TEMP_COL,
+        "Notes Default",
+    ]
 
-            df_csv = pd.read_csv(csv_path, keep_default_na=False)
-            for c in ["Parameter Name", "Value", "Units"]:
-                if c not in df_csv.columns:
-                    df_csv[c] = ""
+    TEMPLATE_TO_WIDGET_KEY = {
+        FIBER_GEOMETRY_COL: "order_fiber_geometry_required",
+        TIGER_CUT_COL: "order_tiger_cut_pct",
+        OCT_F2F_COL: "order_oct_f2f_mm",
+        "Fiber Diameter (µm)": "order_fiber_diam",
+        FIBER_D_TOL_COL: "order_fiber_diam_tol",
+        "Main Coating Diameter (µm)": "order_main_diam",
+        MAIN_D_TOL_COL: "order_main_diam_tol",
+        "Secondary Coating Diameter (µm)": "order_sec_diam",
+        SEC_D_TOL_COL: "order_sec_diam_tol",
+        "Tension (g)": "order_tension",
+        "Draw Speed (m/min)": "order_speed",
+        "Main Coating": "order_coating_main",
+        "Secondary Coating": "order_coating_secondary",
+        MAIN_COAT_TEMP_COL: "order_main_coat_temp_c",
+        SEC_COAT_TEMP_COL: "order_sec_coat_temp_c",
+        "Notes Default": "order_notes",
+    }
 
-            new_rows = pd.DataFrame([
-                {"Parameter Name": "Done Description", "Value": done_desc, "Units": ""},
-                {"Parameter Name": "Done Timestamp", "Value": pd.Timestamp.now(), "Units": ""},
-            ])
+    NUMERIC_WIDGET_KEYS = {
+        "order_fiber_diam",
+        "order_fiber_diam_tol",
+        "order_main_diam",
+        "order_main_diam_tol",
+        "order_sec_diam",
+        "order_sec_diam_tol",
+        "order_tension",
+        "order_speed",
+        "order_main_coat_temp_c",
+        "order_sec_coat_temp_c",
+        "order_tiger_cut_pct",
+        "order_oct_f2f_mm",
+    }
 
-            df_csv = pd.concat([df_csv, new_rows], ignore_index=True)
-            df_csv.to_csv(csv_path, index=False)
-            return True, f"Saved Done Description into {csv_filename}"
-        except Exception as e:
-            return False, f"Failed writing Done Description into dataset CSV: {e}"
+    def ensure_templates_file():
+        if not os.path.exists(PROJECT_TEMPLATES_FILE):
+            pd.DataFrame(columns=TEMPLATE_FIELDS).to_csv(PROJECT_TEMPLATES_FILE, index=False)
 
-    # =========================
-    # 1) TABLE FIRST
-    # =========================
+    def load_templates_df() -> pd.DataFrame:
+        ensure_templates_file()
+        try:
+            d = pd.read_csv(PROJECT_TEMPLATES_FILE, keep_default_na=False)
+        except Exception:
+            d = pd.DataFrame(columns=TEMPLATE_FIELDS)
+        for c in TEMPLATE_FIELDS:
+            if c not in d.columns:
+                d[c] = ""
+        return d[TEMPLATE_FIELDS].copy()
+
+    def get_template_for_project(project_name: str) -> dict:
+        project_name = str(project_name or "").strip()
+        if not project_name:
+            return {}
+        d = load_templates_df()
+        m = d[PROJECTS_COL].astype(str).str.strip() == project_name
+        if not m.any():
+            return {}
+        return d.loc[m].iloc[-1].to_dict()
+
+    def save_or_update_template(project_name: str, template_payload: dict):
+        project_name = str(project_name or "").strip()
+        if not project_name:
+            return False, "No project selected."
+
+        d = load_templates_df()
+        m = d[PROJECTS_COL].astype(str).str.strip() == project_name
+
+        row = {k: "" for k in TEMPLATE_FIELDS}
+        row[PROJECTS_COL] = project_name
+        for k, v in (template_payload or {}).items():
+            if k in row:
+                row[k] = v
+
+        if m.any():
+            d.loc[m, :] = pd.DataFrame([row]).iloc[0].values
+        else:
+            d = pd.concat([d, pd.DataFrame([row])], ignore_index=True)
+
+        d.to_csv(PROJECT_TEMPLATES_FILE, index=False)
+        return True, f"✅ Template saved for project: {project_name}"
+
+    def apply_template_to_form(project_name: str):
+        tpl = get_template_for_project(project_name)
+        if not tpl:
+            return False
+
+        for col, widget_key in TEMPLATE_TO_WIDGET_KEY.items():
+            val = tpl.get(col, "")
+            if widget_key in NUMERIC_WIDGET_KEYS:
+                num = pd.to_numeric(pd.Series([val]), errors="coerce").iloc[0]
+                st.session_state[widget_key] = float(num) if pd.notna(num) else 0.0
+            else:
+                st.session_state[widget_key] = str(val)
+        return True
+
+    # ---------------------------------------------------------
+    # Auto-apply state
+    # ---------------------------------------------------------
+    if "order_last_project_applied" not in st.session_state:
+        st.session_state["order_last_project_applied"] = ""
+
+    # ---------------------------------------------------------
+    # SAP inventory helper (read-only)
+    # ---------------------------------------------------------
+    def get_sap_rods_set_count() -> float:
+        if not os.path.exists(SAP_INVENTORY_FILE):
+            return 0.0
+        try:
+            inv = pd.read_csv(SAP_INVENTORY_FILE, keep_default_na=False)
+        except Exception:
+            return 0.0
+        if inv.empty or "Item" not in inv.columns or "Count" not in inv.columns:
+            return 0.0
+        m = inv["Item"].astype(str).str.strip().str.lower() == "sap rods set"
+        if not m.any():
+            return 0.0
+        val = inv.loc[m, "Count"].iloc[-1]
+        num = pd.to_numeric(pd.Series([val]), errors="coerce").iloc[0]
+        return float(num) if pd.notna(num) else 0.0
+
+    def render_sap_inventory_banner():
+        sap_cnt = get_sap_rods_set_count()
+        if sap_cnt < 1:
+            st.warning(f"⚠️ SAP Rods Set inventory is LOW: **{sap_cnt:g}** sets (under 1).")
+        else:
+            st.success(f"🧪 SAP Rods Set inventory available: **{sap_cnt:g}** sets.")
+
+    # =========================================================
+    # 1) TABLE FIRST (with colors)
+    # =========================================================
     st.subheader("📋 Existing Draw Orders")
 
     if not os.path.exists(orders_file):
@@ -6946,265 +8209,241 @@ elif tab_selection == "📦 Order Draw":
     else:
         df = pd.read_csv(orders_file, keep_default_na=False)
 
-    # ---- Fix types / normalize ----
     if not df.empty:
         if "Timestamp" in df.columns:
             df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
-        for _c in [
-            "Done CSV",
-            "Done Description",
-            "T&M Moved Timestamp",
-            "Notes",
-            "Fiber Project",
-            "Order Opener",
-            "Preform Number",
-            "Active CSV",
-        ]:
-            if _c in df.columns:
-                df[_c] = df[_c].astype(str).replace({"nan": "", "None": ""}).fillna("")
-
-        # ---- Fix missing columns ----
         for col, default in {
             "Status": "Pending",
             "Priority": "Normal",
-            "Fiber Project": "",
+            PROJECTS_COL: "",
             "Order Opener": "",
             "Preform Number": "",
+            FIBER_GEOMETRY_COL: "",
+            TIGER_CUT_COL: "",
+            OCT_F2F_COL: "",
             "Done CSV": "",
             "Done Description": "",
             "Active CSV": "",
             "T&M Moved": False,
             "T&M Moved Timestamp": "",
             "Required Length (m) (for T&M+costumer)": "",
-            GOOD_ZONES_COL: "",  # NEW
+            GOOD_ZONES_COL: "",
+            "Notes": "",
+            "Main Coating": "",
+            "Secondary Coating": "",
+            MAIN_COAT_TEMP_COL: "",
+            SEC_COAT_TEMP_COL: "",
+            "Fiber Diameter (µm)": "",
+            FIBER_D_TOL_COL: "",
+            "Main Coating Diameter (µm)": "",
+            MAIN_D_TOL_COL: "",
+            "Secondary Coating Diameter (µm)": "",
+            SEC_D_TOL_COL: "",
+            "Tension (g)": "",
+            "Draw Speed (m/min)": "",
         }.items():
             if col not in df.columns:
                 df[col] = default
 
-        # Backward-compat: migrate old "Length (m)" -> new required length column (if new empty)
-        if "Length (m)" in df.columns and "Required Length (m) (for T&M+costumer)" in df.columns:
-            _new = "Required Length (m) (for T&M+costumer)"
-            mask = df[_new].astype(str).str.strip().eq("") & df["Length (m)"].astype(str).str.strip().ne("")
-            if mask.any():
-                df.loc[mask, _new] = df.loc[mask, "Length (m)"]
-
-        # Backward-compat: migrate old "Spools" -> GOOD_ZONES_COL (if new empty)
-        if "Spools" in df.columns and GOOD_ZONES_COL in df.columns:
-            mask = df[GOOD_ZONES_COL].astype(str).str.strip().eq("") & df["Spools"].astype(str).str.strip().ne("")
-            if mask.any():
-                df.loc[mask, GOOD_ZONES_COL] = df.loc[mask, "Spools"]
-
-        # ---- Reorder Columns ----
-        desired_order = [
-            "Status",
-            "Priority",
-            "Order Opener",
-            "Preform Number",
-            "Fiber Project",
-            "Timestamp",
-            "Fiber Diameter (µm)",
-            "Main Coating Diameter (µm)",
-            "Secondary Coating Diameter (µm)",
-            "Tension (g)",
-            "Draw Speed (m/min)",
-            "Required Length (m) (for T&M+costumer)",
-            GOOD_ZONES_COL,  # NEW (replaces Spools)
-            "Main Coating",
-            "Secondary Coating",
-            "Notes",
-            "Active CSV",
-            "Done CSV",
-            "Done Description",
-        ]
-        other_cols = [c for c in df.columns if c not in desired_order]
-        df = df[[c for c in desired_order if c in df.columns] + other_cols]
-
-        # ---- Hide items moved to T&M ----
         if "T&M Moved" in df.columns:
             df["T&M Moved"] = df["T&M Moved"].apply(
                 lambda x: str(x).strip().lower() in ("true", "1", "yes", "y", "moved")
             )
+        df_visible = df[~df["T&M Moved"]].copy() if "T&M Moved" in df.columns else df.copy()
 
-        df_visible = df.copy()
-        if "T&M Moved" in df_visible.columns:
-            df_visible = df_visible[~df_visible["T&M Moved"]].copy()
-
-        # ---- Color formatting ----
-        def color_status(val):
-            s = str(val).strip()
-            colors = {
-                "Pending": "orange",
-                "In Progress": "dodgerblue",
-                "Scheduled": "teal",
-                "Failed": "red",
-                "Done": "green",
-            }
-            return f"color: {colors.get(s, 'black')}; font-weight: bold"
-
-        def color_priority(val):
-            p = str(val).strip()
-            colors = {"Low": "gray", "Normal": "black", "High": "crimson"}
-            return f"color: {colors.get(p, 'black')}; font-weight: bold"
 
         styled_df = (
             df_visible.style
             .applymap(color_status, subset=["Status"] if "Status" in df_visible.columns else None)
             .applymap(color_priority, subset=["Priority"] if "Priority" in df_visible.columns else None)
         )
+
         st.dataframe(styled_df, use_container_width=True)
     else:
         df_visible = pd.DataFrame()
 
-    # =========================
-    # 2) PENDING LIST → SCHEDULE
-    # =========================
+    # =========================================================
+    # ✅ Pending → Schedule (quick)
+    # =========================================================
     st.markdown("---")
-    # =====================================================
-    # 🟠 PENDING ORDERS → SCHEDULE
-    #   • Only Pending
-    #   • If Preform Number == 0 → MUST enter real preform
-    #   • Saves real preform back into draw_orders.csv
-    # =====================================================
+    st.subheader("🕒 Pending → Schedule (quick)")
 
-    st.markdown("### 🟠 Pending Orders → Schedule")
-
-    df_pending = df_visible.copy()
-    if "Status" in df_pending.columns:
-        df_pending["Status"] = df_pending["Status"].astype(str).str.strip()
-        df_pending = df_pending[df_pending["Status"].str.lower() == "pending"].copy()
-
-    if df_pending.empty:
-        st.info("No Pending orders to schedule.")
+    if df_visible is None or df_visible.empty:
+        st.info("No orders to schedule.")
     else:
-        for idx in df_pending.index:
-            fiber = str(df.loc[idx, "Fiber Project"]) if "Fiber Project" in df.columns else ""
-            preform = str(df.loc[idx, "Preform Number"]).strip()
-            prio = str(df.loc[idx, "Priority"]).strip()
-            length_m = df.loc[idx, "Length (m)"] if "Length (m)" in df.columns else ""
-            notes_txt = str(df.loc[idx, "Notes"]) if "Notes" in df.columns else ""
+        df_pending = df_visible[df_visible["Status"].astype(str).str.strip() == "Pending"].copy()
 
-            header = f"#{idx} | {fiber} | Priority: {prio} | Preform: {preform}"
-            with st.expander(header, expanded=False):
+        if df_pending.empty:
+            st.info("No Pending orders.")
+        else:
+            pending_indices = df_pending.index.tolist()
 
-                # ---------------------------------
-                # REAL PREFORM ENFORCEMENT
-                # ---------------------------------
-                need_real_preform = (preform == "0" or preform == "")
-                real_preform = preform
+            def _fmt_pending(i: int) -> str:
+                try:
+                    prj = str(df_pending.loc[i, PROJECTS_COL]).strip()
+                    pref = str(df_pending.loc[i, "Preform Number"]).strip()
+                    pri = str(df_pending.loc[i, "Priority"]).strip()
+                    ts = df_pending.loc[i, "Timestamp"] if "Timestamp" in df_pending.columns else ""
+                    return f"#{i} | {prj} | Preform: {pref} | Priority: {pri} | {ts}"
+                except Exception:
+                    return f"#{i}"
 
-                if need_real_preform:
-                    st.warning("⚠️ This order has no real preform yet.")
-                    real_preform = st.text_input(
-                        "Enter REAL Preform Number to continue",
-                        key=f"real_preform_input_{idx}",
-                        placeholder="e.g. P0921",
+            selected_idx = st.selectbox(
+                "Select Pending order",
+                options=pending_indices,
+                format_func=_fmt_pending,
+                key="pending_to_schedule_selectbox",
+            )
+
+            sel_row = df.loc[selected_idx]  # ORIGINAL df row
+
+            with st.expander("📅 Schedule selected Pending order", expanded=True):
+                preform_now = str(sel_row.get("Preform Number", "")).strip()
+                need_preform = (preform_now == "" or preform_now == "0" or preform_now.lower() == "none")
+
+                preform_real = ""
+                if need_preform:
+                    preform_real = st.text_input(
+                        "Preform Number (required for scheduling — cannot be 0)",
+                        placeholder="e.g., P0888",
+                        key="pending_sched_real_preform_input",
                     )
 
-                can_schedule = bool(real_preform.strip())
+                pwd2 = st.text_input("Scheduling password", type="password", key="pending_sched_pwd2")
+                sched_ok2 = (pwd2 == SCHEDULE_PASSWORD)
+                if pwd2.strip():
+                    (st.success if sched_ok2 else st.error)("Password OK ✅" if sched_ok2 else "Wrong password ❌")
 
-                # ---------------------------------
-                # TIME PRESET
-                # ---------------------------------
-                preset = st.radio(
-                    "Time preset",
+                default_date2 = pd.Timestamp.today().date()
+                preset2 = st.radio(
+                    "Preset",
                     ["All day (08:00–16:00)", "Before lunch (08:00–12:00)", "After lunch (12:00–16:00)"],
                     horizontal=True,
-                    key=f"pending_sched_preset_{idx}",
+                    key="pending_sched_preset2",
+                    label_visibility="collapsed",
                 )
 
-                if preset.startswith("All day"):
-                    start_t = dt.time(8, 0)
-                    dur_min = 8 * 60
-                elif preset.startswith("Before"):
-                    start_t = dt.time(8, 0)
-                    dur_min = 4 * 60
+                if preset2.startswith("All day"):
+                    preset_start2 = dt.time(8, 0)
+                    preset_duration2 = 8 * 60
+                elif preset2.startswith("Before lunch"):
+                    preset_start2 = dt.time(8, 0)
+                    preset_duration2 = 4 * 60
                 else:
-                    start_t = dt.time(12, 0)
-                    dur_min = 4 * 60
+                    preset_start2 = dt.time(12, 0)
+                    preset_duration2 = 4 * 60
 
-                c1, c2, c3 = st.columns([1, 1, 1])
-                with c1:
-                    sched_date = st.date_input(
-                        "Schedule Date",
-                        value=pd.Timestamp.today().date(),
-                        key=f"pending_sched_date_{idx}",
-                    )
-                with c2:
-                    sched_start = st.time_input(
-                        "Start Time",
-                        value=start_t,
-                        key=f"pending_sched_start_{idx}",
-                    )
-                with c3:
-                    sched_dur = st.number_input(
+                cA2, cB2, cC2 = st.columns([1, 1, 1], vertical_alignment="bottom")
+                with cA2:
+                    sched_date2 = st.date_input("Schedule Date", value=default_date2, key="pending_sched_date2")
+                with cB2:
+                    sched_start2 = st.time_input("Start Time", value=preset_start2, key="pending_sched_start2")
+                with cC2:
+                    sched_dur2 = st.number_input(
                         "Duration (min)",
                         min_value=1,
                         step=5,
-                        value=int(dur_min),
-                        key=f"pending_sched_dur_{idx}",
+                        value=int(preset_duration2),
+                        key="pending_sched_dur2",
                     )
 
-                start_dt = pd.to_datetime(f"{sched_date} {sched_start}")
-                end_dt = start_dt + pd.to_timedelta(int(sched_dur), unit="m")
+                start_dt2 = pd.to_datetime(f"{sched_date2} {sched_start2}")
+                end_dt2 = start_dt2 + pd.to_timedelta(int(sched_dur2), unit="m")
 
-                # ---------------------------------
-                # PASSWORD
-                # ---------------------------------
-                pwd = st.text_input(
-                    "Scheduling password",
-                    type="password",
-                    key=f"pending_sched_pwd_{idx}",
-                )
-                pwd_ok = (pwd == SCHEDULE_PASSWORD)
+                if st.button("✅ Schedule this Pending Order", key="pending_schedule_confirm_btn"):
+                    if not sched_ok2:
+                        st.error("Not scheduled: password missing/wrong.")
+                        st.stop()
 
-                if pwd and not pwd_ok:
-                    st.error("Wrong password ❌")
+                    if need_preform and not str(preform_real).strip():
+                        st.error("Please enter a real Preform Number (cannot schedule with 0).")
+                        st.stop()
 
-                # ---------------------------------
-                # SCHEDULE BUTTON
-                # ---------------------------------
-                if st.button(
-                        "📅 Schedule Order",
-                        key=f"pending_schedule_btn_{idx}",
-                        disabled=not (can_schedule and pwd_ok),
-                ):
-                    # 1️⃣ Save REAL preform back to orders
-                    df.at[idx, "Preform Number"] = real_preform.strip()
-                    df.at[idx, "Status"] = "Scheduled"
-                    df.to_csv(orders_file, index=False)
-
-                    # 2️⃣ Write schedule event
-                    existing = pd.read_csv(SCHEDULE_FILE) if os.path.exists(SCHEDULE_FILE) else pd.DataFrame()
+                    existing2 = pd.read_csv(SCHEDULE_FILE) if os.path.exists(SCHEDULE_FILE) else pd.DataFrame()
                     for c in schedule_required_cols:
-                        if c not in existing.columns:
-                            existing[c] = ""
-                    existing = existing[schedule_required_cols]
+                        if c not in existing2.columns:
+                            existing2[c] = ""
+                    existing2 = existing2[schedule_required_cols]
 
-                    desc_lines = [
-                        f"ORDER #{idx} | Priority: {prio}",
-                        f"Fiber: {fiber} | Preform: {real_preform.strip()}",
-                        f"Length: {length_m} m",
+                    geom2 = str(sel_row.get(FIBER_GEOMETRY_COL, "")).strip()
+                    prj2 = str(sel_row.get(PROJECTS_COL, "")).strip()
+                    pri2 = str(sel_row.get("Priority", "")).strip()
+                    pref2 = str(preform_real).strip() if need_preform else preform_now
+
+                    length2 = sel_row.get("Required Length (m) (for T&M+costumer)", "")
+                    zones2 = sel_row.get(GOOD_ZONES_COL, "")
+
+                    tiger2 = to_float(sel_row.get(TIGER_CUT_COL, 0.0), 0.0)
+                    oct2 = to_float(sel_row.get(OCT_F2F_COL, 0.0), 0.0)
+
+                    mtemp2 = to_float(sel_row.get(MAIN_COAT_TEMP_COL, 0.0), 0.0)
+                    stemp2 = to_float(sel_row.get(SEC_COAT_TEMP_COL, 0.0), 0.0)
+
+                    notes2 = str(sel_row.get("Notes", "")).strip()
+
+                    fd2 = to_float(sel_row.get("Fiber Diameter (µm)", 0.0), 0.0)
+                    md2 = to_float(sel_row.get("Main Coating Diameter (µm)", 0.0), 0.0)
+                    sd2 = to_float(sel_row.get("Secondary Coating Diameter (µm)", 0.0), 0.0)
+                    fdt2 = to_float(sel_row.get(FIBER_D_TOL_COL, 0.0), 0.0)
+                    mdt2 = to_float(sel_row.get(MAIN_D_TOL_COL, 0.0), 0.0)
+                    sdt2 = to_float(sel_row.get(SEC_D_TOL_COL, 0.0), 0.0)
+
+                    diam_bits2 = []
+                    s_fd2 = _fmt_pm(fd2, fdt2)
+                    s_md2 = _fmt_pm(md2, mdt2)
+                    s_sd2 = _fmt_pm(sd2, sdt2)
+                    if s_fd2:
+                        diam_bits2.append(f"Fiber {s_fd2}")
+                    if s_md2:
+                        diam_bits2.append(f"Coat1 {s_md2}")
+                    if s_sd2:
+                        diam_bits2.append(f"Coat2 {s_sd2}")
+
+                    desc_lines2 = [
+                        f"ORDER #{selected_idx} | Priority: {pri2}",
+                        f"Fiber: {prj2} | Geometry: {geom2} | Preform: {pref2}",
+                        f"Required Length: {length2} m | Good Zones Count: {zones2}",
                     ]
-                    if notes_txt:
-                        desc_lines.append(f"Notes: {notes_txt}")
+                    if diam_bits2:
+                        desc_lines2.append("Diameters: " + " | ".join(diam_bits2))
 
-                    new_event = pd.DataFrame([{
+                    if geom2 == "TIGER - PM" and tiger2 > 0:
+                        desc_lines2.append(f"Tiger Cut: {tiger2:.1f}%")
+                    if geom2 == "Octagonal" and oct2 > 0:
+                        desc_lines2.append(f"Oct F2F: {oct2:.2f} mm")
+
+                    if mtemp2 > 0:
+                        desc_lines2.append(f"Main Coat Temp: {mtemp2:.0f}°C")
+                    if stemp2 > 0:
+                        desc_lines2.append(f"Sec Coat Temp: {stemp2:.0f}°C")
+                    if notes2:
+                        desc_lines2.append(f"Notes: {notes2}")
+
+                    event_description2 = " | ".join([x for x in desc_lines2 if str(x).strip()])
+
+                    new_event2 = pd.DataFrame([{
                         "Event Type": "Drawing",
-                        "Start DateTime": start_dt,
-                        "End DateTime": end_dt,
-                        "Description": " | ".join(desc_lines),
+                        "Start DateTime": start_dt2,
+                        "End DateTime": end_dt2,
+                        "Description": event_description2,
                         "Recurrence": "None",
                     }])
 
-                    pd.concat([existing, new_event], ignore_index=True).to_csv(SCHEDULE_FILE, index=False)
+                    pd.concat([existing2, new_event2], ignore_index=True).to_csv(SCHEDULE_FILE, index=False)
 
-                    st.success(f"✅ Order #{idx} scheduled with Preform {real_preform}")
+                    if need_preform:
+                        df.at[selected_idx, "Preform Number"] = pref2
+                    df.at[selected_idx, "Status"] = "Scheduled"
+                    df.to_csv(orders_file, index=False)
+
+                    st.success("✅ Scheduled + moved Status to Scheduled.")
                     st.rerun()
 
-    # =========================
-    # 3) CREATE NEW ORDER LAST
-    # =========================
+    # =========================================================
+    # 2) CREATE NEW ORDER (UI + tolerances + notes recommended)
+    #   IMPORTANT FIX: Schedule UI is OUTSIDE the form
+    # =========================================================
     st.markdown("---")
     st.markdown("### ➕ Create New Order")
 
@@ -7219,58 +8458,240 @@ elif tab_selection == "📦 Order Draw":
     st.session_state["show_new_order_form"] = bool(show_form)
 
     if st.session_state["show_new_order_form"]:
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stForm"] { padding-top: 0.25rem; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         with st.container(border=True):
-            st.markdown("#### ✅ Required fields")
+            projects = load_projects()
 
-            r1, r2, r3 = st.columns([1.1, 1.1, 1.1])
-            with r1:
-                preform_name = st.text_input("Preform Number (0 for not yet exist) *", key="order_preform_name")
-            with r2:
-                fiber_type = st.text_input("Fiber Project *", key="order_fiber_type")
-            with r3:
-                priority = st.selectbox("Priority *", ["Low", "Normal", "High"], index=1, key="order_priority")
-
-            r4, r5, r6 = st.columns([1.1, 1.1, 1.1])
-            with r4:
-                length_required = st.number_input(
-                    "Required Length (m) (for T&M+costumer) *",
-                    min_value=0.0,
-                    key="order_length_required_required",
+            # Project row (outside form to support template auto-apply)
+            selA, selB = st.columns([2.4, 1.0], vertical_alignment="bottom")
+            with selA:
+                selected_project = st.selectbox(
+                    "Project * (auto-fills if template exists)",
+                    options=[""] + projects,
+                    index=0,
+                    key="order_project_select",
+                    placeholder="Select project...",
                 )
-            with r5:
-                good_zones = st.number_input(
-                    f"{GOOD_ZONES_COL} *",
-                    min_value=1,
-                    step=1,
-                    value=1,
-                    key="order_good_zones_required",
+            with selB:
+                with st.popover("➕ Add project", use_container_width=True):
+                    new_proj = st.text_input("New project name", key="order_new_project_name")
+                    if st.button("Add", key="order_add_project_btn", use_container_width=True):
+                        okp, msgp = add_project(new_proj)
+                        (st.success if okp else st.warning)(msgp)
+                        if okp:
+                            st.rerun()
+
+            # Auto-apply template when project changes
+            if (
+                str(selected_project).strip()
+                and st.session_state.get("order_last_project_applied", "") != str(selected_project).strip()
+            ):
+                applied = apply_template_to_form(selected_project)
+                st.session_state["order_last_project_applied"] = str(selected_project).strip()
+                if applied:
+                    st.toast("Template auto-applied ✅", icon="✅")
+                    st.rerun()
+
+            if str(selected_project).strip():
+                tpl_exists = bool(get_template_for_project(selected_project))
+                st.caption("✅ Template exists for this project." if tpl_exists else "ℹ️ No template yet for this project.")
+
+            # -----------------------------
+            # FORM (single submit)
+            # -----------------------------
+            save_tpl = False
+            submit = False
+            cancel = False
+
+            with st.form("order_create_form", clear_on_submit=False):
+                tab_req, tab_targets, tab_materials, tab_template = st.tabs(
+                    ["✅ Required", "🧪 Targets", "🧴 Materials", "💾 Template"]
                 )
-            with r6:
-                order_opener = st.text_input("Order Opened By *", key="order_opener")
 
-            st.markdown("#### 🧪 Process targets (optional)")
-            p1, p2, p3 = st.columns(3)
-            with p1:
-                fiber_diameter = st.number_input("Fiber Diameter (µm)", min_value=0.0, key="order_fiber_diam")
-                tension = st.number_input("Tension (g)", min_value=0.0, key="order_tension")
-            with p2:
-                diameter_main = st.number_input("Main Coating Diameter (µm)", min_value=0.0, key="order_main_diam")
-                draw_speed = st.number_input("Draw Speed (m/min)", min_value=0.0, key="order_speed")
-            with p3:
-                diameter_secondary = st.number_input("Secondary Coating Diameter (µm)", min_value=0.0, key="order_sec_diam")
+                # ✅ REQUIRED TAB
+                with tab_req:
+                    c1, c2, c3, c4 = st.columns([1.2, 1.6, 1.0, 1.4], vertical_alignment="bottom")
+                    with c1:
+                        st.text_input(
+                            "Preform Number *",
+                            key="order_preform_name",
+                            placeholder="0 (if not exist yet) or P0888",
+                            help="Use 0 if preform does not exist yet.",
+                        )
+                    with c2:
+                        st.text_input(
+                            "Fiber Project *",
+                            value=str(selected_project),
+                            disabled=True,
+                            key="order_fiber_project_disabled",
+                        )
+                    with c3:
+                        st.selectbox("Priority *", ["Low", "Normal", "High"], index=1, key="order_priority")
+                    with c4:
+                        st.selectbox(
+                            f"{FIBER_GEOMETRY_COL} *",
+                            options=FIBER_GEOMETRY_OPTIONS,
+                            index=0,
+                            key="order_fiber_geometry_required",
+                        )
 
-            st.markdown("#### 🧴 Materials (optional)")
-            m1, m2 = st.columns([1.1, 1.1])
-            with m1:
-                coating_main = st.text_input("Main Coating Type", key="order_coating_main")
-            with m2:
-                coating_secondary = st.text_input("Secondary Coating Type", key="order_coating_secondary")
+                    if "order_tiger_cut_pct" not in st.session_state:
+                        st.session_state["order_tiger_cut_pct"] = 0.0
+                    if "order_oct_f2f_mm" not in st.session_state:
+                        st.session_state["order_oct_f2f_mm"] = 0.0
 
-            notes = st.text_area("Additional Notes / Instructions", key="order_notes")
+                    geom = str(st.session_state.get("order_fiber_geometry_required", "")).strip()
+                    g1, g2, g3 = st.columns([1.2, 1.2, 1.6], vertical_alignment="bottom")
 
+                    with g1:
+                        if geom == "TIGER - PM":
+                            st.number_input(
+                                "Tiger Cut (%) *",
+                                min_value=0.0,
+                                max_value=100.0,
+                                step=0.5,
+                                value=__from_state("order_tiger_cut_pct", 0.0),
+                                key="order_tiger_cut_pct",
+                            )
+                        else:
+                            st.caption("Tiger Cut (%) — only for TIGER")
+
+                    with g2:
+                        if geom == "Octagonal":
+                            st.number_input(
+                                "Octagonal F2F (mm) *",
+                                min_value=0.0,
+                                step=0.01,
+                                value=__from_state("order_oct_f2f_mm", 0.0),
+                                format="%.2f",
+                                key="order_oct_f2f_mm",
+                            )
+                        else:
+                            st.caption("Octagonal F2F — only for Octagonal")
+
+                    with g3:
+                        if geom == "PANDA - PM":
+                            st.markdown("**🧪 SAP Inventory**")
+                            render_sap_inventory_banner()
+                        else:
+                            st.caption("SAP inventory — only for PANDA - PM")
+
+                    r5, r6, r7 = st.columns([1.3, 1.1, 1.6], vertical_alignment="bottom")
+                    with r5:
+                        st.number_input(
+                            "Required Length (m) *",
+                            min_value=0.0,
+                            key="order_length_required_required",
+                            help="Required Length (m) (for T&M+costumer)",
+                        )
+                    with r6:
+                        st.number_input(
+                            "Good Zones Count *",
+                            min_value=1,
+                            step=1,
+                            value=int(st.session_state.get("order_good_zones_required", 1) or 1),
+                            key="order_good_zones_required",
+                            help=GOOD_ZONES_COL,
+                        )
+                    with r7:
+                        st.text_input("Order Opened By *", key="order_opener", placeholder="Name / initials")
+
+                    # Notes shown in required, recommended but NOT blocking submit
+                    st.markdown("##### Notes (recommended)")
+                    st.text_area(
+                        "Additional Notes / Instructions",
+                        key="order_notes",
+                        height=120,
+                        placeholder="Optional but recommended (special instructions, customer notes, risks, etc.)",
+                    )
+
+                # 🧪 TARGETS TAB
+                with tab_targets:
+                    st.caption("Optional targets. Leave 0 if unknown.")
+                    d1, d2, d3 = st.columns(3, vertical_alignment="bottom")
+                    with d1:
+                        st.number_input("Fiber Diameter (µm)", min_value=0.0, key="order_fiber_diam")
+                        st.number_input(FIBER_D_TOL_COL, min_value=0.0, step=0.1, format="%.2f", key="order_fiber_diam_tol")
+                    with d2:
+                        st.number_input("Main Coating Diameter (µm)", min_value=0.0, key="order_main_diam")
+                        st.number_input(MAIN_D_TOL_COL, min_value=0.0, step=0.1, format="%.2f", key="order_main_diam_tol")
+                    with d3:
+                        st.number_input("Secondary Coating Diameter (µm)", min_value=0.0, key="order_sec_diam")
+                        st.number_input(SEC_D_TOL_COL, min_value=0.0, step=0.1, format="%.2f", key="order_sec_diam_tol")
+
+                    st.markdown("---")
+                    t1, t2 = st.columns(2, vertical_alignment="bottom")
+                    with t1:
+                        st.number_input("Tension (g)", min_value=0.0, key="order_tension")
+                    with t2:
+                        st.number_input("Draw Speed (m/min)", min_value=0.0, key="order_speed")
+
+                # 🧴 MATERIALS TAB
+                with tab_materials:
+                    st.caption("Coating names are loaded from config_coating.json.")
+                    m1, m2 = st.columns(2, vertical_alignment="bottom")
+                    with m1:
+                        st.selectbox("Main Coating", options=[""] + COATING_OPTIONS, index=0, key="order_coating_main")
+                    with m2:
+                        st.selectbox("Secondary Coating", options=[""] + COATING_OPTIONS, index=0, key="order_coating_secondary")
+
+                    tt1, tt2 = st.columns(2, vertical_alignment="bottom")
+                    with tt1:
+                        st.number_input(
+                            "Main Coating Temperature (°C)",
+                            value=__from_state("order_main_coat_temp_c", 25.0),
+                            step=0.5,
+                            format="%.1f",
+                            key="order_main_coat_temp_c",
+                        )
+                    with tt2:
+                        st.number_input(
+                            "Secondary Coating Temperature (°C)",
+                            value=__from_state("order_sec_coat_temp_c", 25.0),
+                            step=0.5,
+                            format="%.1f",
+                            key="order_sec_coat_temp_c",
+                        )
+
+                # 💾 TEMPLATE TAB (only template save button)
+                with tab_template:
+                    st.markdown("#### 💾 Project Template (auto-fill defaults)")
+                    tA, tB = st.columns([1.2, 2.8], vertical_alignment="center")
+                    with tA:
+                        save_tpl = st.form_submit_button(
+                            "💾 Save / Update Template",
+                            disabled=(not str(selected_project).strip()),
+                            use_container_width=True,
+                        )
+                    with tB:
+                        st.caption("Saves geometry + tiger/f2f + diameters+tolerances + tension + speed + coatings + temps + notes.")
+
+                st.markdown("---")
+                a1, a2 = st.columns([1, 1], vertical_alignment="center")
+                with a1:
+                    submit = st.form_submit_button("📤 Submit Draw Order", use_container_width=True)
+                with a2:
+                    cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+            # =========================================================
+            # ✅ Scheduling UI OUTSIDE the form (so checkbox works instantly)
+            # =========================================================
+            st.markdown("---")
             st.markdown("#### 📅 Optional: schedule immediately (password protected)")
+
             schedule_now = st.checkbox("Schedule now", value=False, key="order_schedule_now_cb")
+
             sched_ok = False
+            start_dt_new = None
+            end_dt_new = None
 
             if schedule_now:
                 pwd = st.text_input("Scheduling password", type="password", key="order_sched_pwd")
@@ -7299,63 +8720,138 @@ elif tab_selection == "📦 Order Draw":
                     preset_start = dt.time(12, 0)
                     preset_duration = 4 * 60
 
-                cA, cB, cC = st.columns([1, 1, 1])
-                with cA:
+                sA, sB, sC = st.columns([1.2, 1.0, 1.0], vertical_alignment="bottom")
+                with sA:
                     sched_date_new = st.date_input("Schedule Date", value=default_date, key="order_create_sched_date")
-                with cB:
+                with sB:
                     sched_start_new = st.time_input("Start Time", value=preset_start, key="order_create_sched_start")
-                with cC:
+                with sC:
                     sched_dur_new = st.number_input(
-                        "Duration (min)", min_value=1, step=5, value=int(preset_duration), key="order_create_sched_dur"
+                        "Duration (min)",
+                        min_value=1,
+                        step=5,
+                        value=int(preset_duration),
+                        key="order_create_sched_dur",
                     )
 
                 start_dt_new = pd.to_datetime(f"{sched_date_new} {sched_start_new}")
                 end_dt_new = start_dt_new + pd.to_timedelta(int(sched_dur_new), unit="m")
 
-            colA, colB = st.columns([1, 1])
-            with colA:
-                submit = st.button("📤 Submit Draw Order", key="order_submit_btn")
-            with colB:
-                cancel = st.button("❌ Cancel", key="order_cancel_btn")
+            # =========================================================
+            # Handle Template Save
+            # =========================================================
+            if save_tpl:
+                payload = {
+                    FIBER_GEOMETRY_COL: safe_str_from_state("order_fiber_geometry_required", ""),
+                    TIGER_CUT_COL: __from_state("order_tiger_cut_pct", 0.0),
+                    OCT_F2F_COL: __from_state("order_oct_f2f_mm", 0.0),
 
-            if cancel:
+                    "Fiber Diameter (µm)": __from_state("order_fiber_diam", 0.0),
+                    FIBER_D_TOL_COL: __from_state("order_fiber_diam_tol", 0.0),
+
+                    "Main Coating Diameter (µm)": __from_state("order_main_diam", 0.0),
+                    MAIN_D_TOL_COL: __from_state("order_main_diam_tol", 0.0),
+
+                    "Secondary Coating Diameter (µm)": __from_state("order_sec_diam", 0.0),
+                    SEC_D_TOL_COL: __from_state("order_sec_diam_tol", 0.0),
+
+                    "Tension (g)": __from_state("order_tension", 0.0),
+                    "Draw Speed (m/min)": __from_state("order_speed", 0.0),
+                    "Main Coating": safe_str_from_state("order_coating_main", ""),
+                    "Secondary Coating": safe_str_from_state("order_coating_secondary", ""),
+                    MAIN_COAT_TEMP_COL: __from_state("order_main_coat_temp_c", 25.0),
+                    SEC_COAT_TEMP_COL: __from_state("order_sec_coat_temp_c", 25.0),
+                    "Notes Default": safe_str_from_state("order_notes", ""),
+                }
+                ok_s, msg_s = save_or_update_template(selected_project, payload)
+                (st.success if ok_s else st.warning)(msg_s)
+
+            # Cancel
+            if cancel and not submit:
                 st.session_state["show_new_order_form"] = False
                 st.rerun()
 
+            # =========================================================
+            # Submit order
+            # =========================================================
             if submit:
                 missing = []
-                if not str(preform_name).strip():
+                geom = str(st.session_state.get("order_fiber_geometry_required", "")).strip()
+
+                if not str(st.session_state.get("order_preform_name", "")).strip():
                     missing.append("Preform Number")
-                if not str(fiber_type).strip():
+                if not str(selected_project).strip():
                     missing.append("Fiber Project")
-                if not str(order_opener).strip():
+                if not str(st.session_state.get("order_opener", "")).strip():
                     missing.append("Order Opened By")
-                if float(length_required) <= 0:
-                    missing.append("Required Length (m) (for T&M+costumer)")
-                if int(good_zones) <= 0:
-                    missing.append(GOOD_ZONES_COL)
+
+                length_required_val = to_float(st.session_state.get("order_length_required_required", 0.0), 0.0)
+                if length_required_val <= 0:
+                    missing.append("Required Length (m)")
+
+                good_zones_val = int(st.session_state.get("order_good_zones_required", 1) or 1)
+                if good_zones_val <= 0:
+                    missing.append("Good Zones Count")
+
+                if not geom:
+                    missing.append(FIBER_GEOMETRY_COL)
+
+                if geom == "TIGER - PM" and __from_state("order_tiger_cut_pct", 0.0) <= 0:
+                    missing.append("Tiger Cut (%)")
+                if geom == "Octagonal" and __from_state("order_oct_f2f_mm", 0.0) <= 0:
+                    missing.append("Octagonal F2F (mm)")
 
                 if missing:
                     st.error("Please fill required fields: " + ", ".join(missing))
                     st.stop()
 
+                # sanitize geometry fields
+                if geom != "TIGER - PM":
+                    st.session_state["order_tiger_cut_pct"] = 0.0
+                if geom != "Octagonal":
+                    st.session_state["order_oct_f2f_mm"] = 0.0
+
+                tiger_cut_val = __from_state("order_tiger_cut_pct", 0.0) if geom == "TIGER - PM" else 0.0
+                oct_f2f_val = __from_state("order_oct_f2f_mm", 0.0) if geom == "Octagonal" else 0.0
+
+                # tolerances
+                fiber_diam_tol = __from_state("order_fiber_diam_tol", 0.0)
+                main_diam_tol = __from_state("order_main_diam_tol", 0.0)
+                sec_diam_tol = __from_state("order_sec_diam_tol", 0.0)
+
                 order_data = {
                     "Status": "Pending",
-                    "Priority": priority,
-                    "Order Opener": order_opener,
-                    "Preform Number": preform_name,
-                    "Fiber Project": fiber_type,
+                    "Priority": str(st.session_state.get("order_priority", "Normal")).strip(),
+                    "Order Opener": str(st.session_state.get("order_opener", "")).strip(),
+                    "Preform Number": str(st.session_state.get("order_preform_name", "")).strip(),
+                    PROJECTS_COL: str(selected_project).strip(),
+                    FIBER_GEOMETRY_COL: geom,
+                    TIGER_CUT_COL: tiger_cut_val,
+                    OCT_F2F_COL: oct_f2f_val,
                     "Timestamp": pd.Timestamp.now(),
-                    "Fiber Diameter (µm)": fiber_diameter,
-                    "Main Coating Diameter (µm)": diameter_main,
-                    "Secondary Coating Diameter (µm)": diameter_secondary,
-                    "Tension (g)": tension,
-                    "Draw Speed (m/min)": draw_speed,
-                    "Required Length (m) (for T&M+costumer)": float(length_required),
-                    GOOD_ZONES_COL: int(good_zones),
-                    "Main Coating": coating_main,
-                    "Secondary Coating": coating_secondary,
-                    "Notes": notes,
+
+                    "Fiber Diameter (µm)": __from_state("order_fiber_diam", 0.0),
+                    FIBER_D_TOL_COL: float(fiber_diam_tol),
+
+                    "Main Coating Diameter (µm)": __from_state("order_main_diam", 0.0),
+                    MAIN_D_TOL_COL: float(main_diam_tol),
+
+                    "Secondary Coating Diameter (µm)": __from_state("order_sec_diam", 0.0),
+                    SEC_D_TOL_COL: float(sec_diam_tol),
+
+                    "Tension (g)": __from_state("order_tension", 0.0),
+                    "Draw Speed (m/min)": __from_state("order_speed", 0.0),
+
+                    "Required Length (m) (for T&M+costumer)": float(length_required_val),
+                    GOOD_ZONES_COL: int(good_zones_val),
+
+                    "Main Coating": safe_str_from_state("order_coating_main", ""),
+                    "Secondary Coating": safe_str_from_state("order_coating_secondary", ""),
+                    MAIN_COAT_TEMP_COL: __from_state("order_main_coat_temp_c", 25.0),
+                    SEC_COAT_TEMP_COL: __from_state("order_sec_coat_temp_c", 25.0),
+
+                    "Notes": safe_str_from_state("order_notes", ""),
+
                     "Active CSV": "",
                     "Done CSV": "",
                     "Done Description": "",
@@ -7368,9 +8864,10 @@ elif tab_selection == "📦 Order Draw":
                 new_df.to_csv(orders_file, index=False)
                 new_idx = int(len(new_df) - 1)
 
-                if schedule_now:
-                    if not sched_ok:
-                        st.error("Order saved, but NOT scheduled (password missing/wrong).")
+                # Optional schedule now
+                if st.session_state.get("order_schedule_now_cb", False):
+                    if not sched_ok or start_dt_new is None or end_dt_new is None:
+                        st.error("Order saved, but NOT scheduled (password missing/wrong or schedule details missing).")
                     else:
                         existing = pd.read_csv(SCHEDULE_FILE) if os.path.exists(SCHEDULE_FILE) else pd.DataFrame()
                         for c in schedule_required_cols:
@@ -7378,14 +8875,49 @@ elif tab_selection == "📦 Order Draw":
                                 existing[c] = ""
                         existing = existing[schedule_required_cols]
 
+                        priority = str(st.session_state.get("order_priority", "Normal")).strip()
+                        preform_name = str(st.session_state.get("order_preform_name", "")).strip()
+
+                        fd = __from_state("order_fiber_diam", 0.0)
+                        md = __from_state("order_main_diam", 0.0)
+                        sd = __from_state("order_sec_diam", 0.0)
+
+                        diam_bits = []
+                        s_fd = _fmt_pm(fd, fiber_diam_tol)
+                        s_md = _fmt_pm(md, main_diam_tol)
+                        s_sd = _fmt_pm(sd, sec_diam_tol)
+                        if s_fd:
+                            diam_bits.append(f"Fiber {s_fd}")
+                        if s_md:
+                            diam_bits.append(f"Coat1 {s_md}")
+                        if s_sd:
+                            diam_bits.append(f"Coat2 {s_sd}")
+
                         desc_lines = [
                             f"ORDER #{new_idx} | Priority: {priority}",
-                            f"Fiber: {fiber_type} | Preform: {preform_name}",
-                            f"Required Length: {length_required} m | Good Zones Count: {int(good_zones)}",
+                            f"Fiber: {selected_project} | Geometry: {geom} | Preform: {preform_name}",
+                            f"Required Length: {length_required_val} m | Good Zones Count: {int(good_zones_val)}",
                         ]
-                        if notes and str(notes).strip():
-                            desc_lines.append(f"Notes: {str(notes).strip()}")
-                        event_description = " | ".join([x for x in desc_lines if str(x).strip() != ""])
+                        if diam_bits:
+                            desc_lines.append("Diameters: " + " | ".join(diam_bits))
+
+                        if geom == "TIGER - PM":
+                            desc_lines.append(f"Tiger Cut: {tiger_cut_val:.1f}%")
+                        if geom == "Octagonal":
+                            desc_lines.append(f"Oct F2F: {oct_f2f_val:.2f} mm")
+
+                        mtemp = __from_state("order_main_coat_temp_c", 0.0)
+                        stemp = __from_state("order_sec_coat_temp_c", 0.0)
+                        if mtemp > 0:
+                            desc_lines.append(f"Main Coat Temp: {mtemp:.0f}°C")
+                        if stemp > 0:
+                            desc_lines.append(f"Sec Coat Temp: {stemp:.0f}°C")
+
+                        notes = safe_str_from_state("order_notes", "")
+                        if notes:
+                            desc_lines.append(f"Notes: {notes}")
+
+                        event_description = " | ".join([x for x in desc_lines if str(x).strip()])
 
                         new_event = pd.DataFrame([{
                             "Event Type": "Drawing",
@@ -7395,268 +8927,26 @@ elif tab_selection == "📦 Order Draw":
                             "Recurrence": "None",
                         }])
 
-                        updated = pd.concat([existing, new_event], ignore_index=True)
-                        updated.to_csv(SCHEDULE_FILE, index=False)
+                        pd.concat([existing, new_event], ignore_index=True).to_csv(SCHEDULE_FILE, index=False)
 
                         new_df.at[new_idx, "Status"] = "Scheduled"
                         new_df.to_csv(orders_file, index=False)
-
-                        st.success("✅ Order saved + scheduled (and status set to Scheduled).")
+                        st.success("✅ Order saved + scheduled (status set to Scheduled).")
 
                 st.session_state["show_new_order_form"] = False
                 st.success("✅ Draw order submitted!")
                 st.rerun()
-# ------------------ Closed Processes Tab ------------------
-elif tab_selection == "✅ Closed Processes":
-    # Define the CLOSED_PROCESSES_FILE path
-    CLOSED_PROCESSES_FILE = "closed_processes.csv"
-    st.title("✅ Closed Processes")
-    st.write("Manage products that are finalized and ready for drawing.")
-
-    # Check if the CSV file exists and if it's empty
-    if not os.path.exists(CLOSED_PROCESSES_FILE) or os.stat(CLOSED_PROCESSES_FILE).st_size == 0:
-        # Define columns for the blank CSV
-        columns = ["Product Name", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
-                   "Coating Type (Main)", "Coating Type (Secondary)", "Entry Die (Main)", "Entry Die (Secondary)",
-                   "Primary Die (Main)", "Primary Die (Secondary)", "Coating Diameter (Main, µm)",
-                   "Coating Diameter (Secondary, µm)", "Coating Temperature (Main, °C)",
-                   "Coating Temperature (Secondary, °C)", "Fiber Diameter (µm)", "P Gain for Diameter Control",
-                   "I Gain for Diameter Control", "Process Description", "Recipe Name", "Process Type", "TF Mode",
-                   "TF Increment (mm)", "Core-Clad Ratio"]
-
-        # Create the CSV with the above columns
-        pd.DataFrame(columns=columns).to_csv(CLOSED_PROCESSES_FILE, index=False)
-        st.warning("CSV file is empty or doesn't exist. A new blank file has been created.")
-
-    # Load the closed processes file
-    closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
-
-    # Load the configuration from the JSON file
-    with open("config_coating.json", "r") as config_file:
-        config = json.load(config_file)
-
-    # Die and coating selections
-    dies = config.get("dies", {})
-    coatings = config.get("coatings", {})
-    process_types = ["PM", "NPM", "Other"]  # List of process types
-
-    # Sidebar options for adding a new or updating an existing process
-    action = st.sidebar.radio("Select Action", ["Add New Process", "Update Existing Process"])
-
-    # **Add New Process**
-    if action == "Add New Process":
-        st.sidebar.subheader("Add New Closed Process")
-        product_name = st.sidebar.text_input("Product Name")
-        process_type = st.sidebar.selectbox("Process Type", process_types)  # Move Process Type here
-        core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio")
-        furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1)
-        tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1)
-        drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1)
-
-        # Coating Type Inputs
-        coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()))
-        coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
-
-        # Die Inputs (Entry and Primary Dies)
-        entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1)
-        entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1)
-        primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
-        primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
-
-        # Coating Diameter Inputs
-        coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1)
-        coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
-                                                             step=0.1)
-
-        # Coating Temperature Inputs
-        coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0, step=0.1)
-        coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)", min_value=0.0,
-                                                                step=0.1)
-
-        # Fiber Diameter and Control Inputs
-        fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
-        p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1)
-        i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1)
-
-        # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
-        tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
-                                       index=["Winder", "Straight Mode"].index("Winder"))
-        tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01, value=0.1)
-
-        # Process Description and Recipe Name
-        process_description = st.sidebar.text_area("Process Description")
-        recipe_name = st.sidebar.text_input("Recipe Name")
-
-        if st.sidebar.button("Add New Process"):
-            new_entry = pd.DataFrame([{
-                "Product Name": product_name,
-                "Process Type": process_type,  # User-selected process type
-                "Furnace Temperature (°C)": furnace_temperature,
-                "Tension (g)": tension,
-                "Drawing Speed (m/min)": drawing_speed,
-                "Coating Type (Main)": coating_type_main,
-                "Coating Type (Secondary)": coating_type_secondary,
-                "Entry Die (Main)": entry_die_main,
-                "Entry Die (Secondary)": entry_die_secondary,
-                "Primary Die (Main)": primary_die_main,
-                "Primary Die (Secondary)": primary_die_secondary,
-                "Coating Diameter (Main, µm)": coating_diameter_main,
-                "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
-                "Coating Temperature (Main, °C)": coating_temperature_main,
-                "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
-                "Fiber Diameter (µm)": fiber_diameter,
-                "P Gain for Diameter Control": p_gain,
-                "I Gain for Diameter Control": i_gain,
-                "Process Description": process_description,
-                "Recipe Name": recipe_name,
-                "TF Mode": tf_mode,
-                "TF Increment (mm)": tf_increment,
-                "Core-Clad Ratio": core_clad_ratio  # New input
-            }])
-
-            # Append the new entry to the closed processes DataFrame and save it
-            closed_df = pd.concat([closed_df, new_entry], ignore_index=True)
-            closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
-            st.sidebar.success(f"New process '{product_name}' added successfully!")
-
-    # **Update Existing Process**
-    elif action == "Update Existing Process":
-        st.sidebar.subheader("Update Existing Closed Process")
-        closed_process_name = st.sidebar.selectbox("Select Process to Update", closed_df["Product Name"].tolist())
-
-        if closed_process_name:
-            matching_process = closed_df[closed_df["Product Name"] == closed_process_name]
-
-            if not matching_process.empty:
-                selected_process = matching_process.iloc[0]
-
-                # Display current values of the closed process
-                st.sidebar.write(f"Updating {closed_process_name}")
-                product_name = st.sidebar.text_input("Product Name", value=selected_process["Product Name"])
-                process_type = st.sidebar.selectbox("Process Type", process_types,
-                                                    index=process_types.index(selected_process["Process Type"]))
-                core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio", value=selected_process["Core-Clad Ratio"])
-                furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1,
-                                                              value=selected_process["Furnace Temperature (°C)"])
-                tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1,
-                                                  value=selected_process["Tension (g)"])
-                drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1,
-                                                        value=selected_process["Drawing Speed (m/min)"])
-
-                # Coating Type Inputs
-                coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()),
-                                                         index=list(coatings.keys()).index(
-                                                             selected_process["Coating Type (Main)"]))
-                coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()),
-                                                              index=list(coatings.keys()).index(
-                                                                  selected_process["Coating Type (Secondary)"]))
-
-                # Die Inputs (Entry and Primary Dies)
-                entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1,
-                                                         value=selected_process["Entry Die (Main)"])
-                entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1,
-                                                              value=selected_process["Entry Die (Secondary)"])
-                primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()),
-                                                        index=list(dies.keys()).index(
-                                                            selected_process["Primary Die (Main)"]))
-                primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()),
-                                                             index=list(dies.keys()).index(
-                                                                 selected_process["Primary Die (Secondary)"]))
-
-                # Coating Diameter Inputs
-                coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1,
-                                                                value=selected_process["Coating Diameter (Main, µm)"])
-                coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
-                                                                     step=0.1, value=selected_process[
-                        "Coating Diameter (Secondary, µm)"])
-
-                # Coating Temperature Inputs
-                coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0,
-                                                                   step=0.1, value=selected_process[
-                        "Coating Temperature (Main, °C)"])
-                coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)",
-                                                                        min_value=0.0, step=0.1, value=selected_process[
-                        "Coating Temperature (Secondary, °C)"])
-
-                # Fiber Diameter and Control Inputs
-                fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1,
-                                                         value=selected_process["Fiber Diameter (µm)"])
-                p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1,
-                                                 value=selected_process["P Gain for Diameter Control"])
-                i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1,
-                                                 value=selected_process["I Gain for Diameter Control"])
-
-                # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
-                tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
-                                               index=["Winder", "Straight Mode"].index(selected_process["TF Mode"]))
-                tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01,
-                                                       value=selected_process["TF Increment (mm)"])
-
-                # Process Description and Recipe Name
-                process_description = st.sidebar.text_area("Process Description",
-                                                           value=selected_process["Process Description"])
-                recipe_name = st.sidebar.text_input("Recipe Name", value=selected_process["Recipe Name"])
-
-                if st.sidebar.button("Update Product"):
-                    # Prepare updated entry with all the values
-                    updated_entry = {
-                        "Product Name": product_name,
-                        "Process Type": process_type,
-                        "Furnace Temperature (°C)": furnace_temperature,
-                        "Tension (g)": tension,
-                        "Drawing Speed (m/min)": drawing_speed,
-                        "Coating Type (Main)": coating_type_main,
-                        "Coating Type (Secondary)": coating_type_secondary,
-                        "Entry Die (Main)": entry_die_main,
-                        "Entry Die (Secondary)": entry_die_secondary,
-                        "Primary Die (Main)": primary_die_main,
-                        "Primary Die (Secondary)": primary_die_secondary,
-                        "Coating Diameter (Main, µm)": coating_diameter_main,
-                        "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
-                        "Coating Temperature (Main, °C)": coating_temperature_main,
-                        "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
-                        "Fiber Diameter (µm)": fiber_diameter,
-                        "P Gain for Diameter Control": p_gain,
-                        "I Gain for Diameter Control": i_gain,
-                        "Process Description": process_description,
-                        "Recipe Name": recipe_name,
-                        "TF Mode": tf_mode,
-                        "TF Increment (mm)": tf_increment,
-                        "Core-Clad Ratio": core_clad_ratio
-                    }
-
-                    # Find the index of the product name and update it
-                    closed_df.loc[closed_df["Product Name"] == closed_process_name, updated_entry.keys()] = list(
-                        updated_entry.values())
-
-                    closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
-                    st.sidebar.success(f"Product '{product_name}' updated successfully!")
-
-            else:
-                st.sidebar.error(f"No process found with the name '{closed_process_name}'.")
-
-        # Remove duplicates and display the cleaned table
-
-    # Remove duplicates and display the cleaned table
-    closed_df_clean = closed_df.drop_duplicates(
-        subset=["Product Name", "Coating Type (Main)", "Coating Type (Secondary)"])
-
-    # Reorganize the columns as requested
-    closed_df_clean = closed_df_clean[[
-        "Product Name", "Process Type", "Core-Clad Ratio", "Fiber Diameter (µm)",
-        "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)", "Drawing Speed (m/min)",
-        "Furnace Temperature (°C)", "Tension (g)", "TF Mode", "TF Increment (mm)"
-    ]]
-
-    st.write("### Cleaned Closed Products Table")
-    st.dataframe(closed_df_clean, height=300, use_container_width=True)
 # ------------------ Tower Parts Tab ------------------
 elif tab_selection == "🛠️ Tower Parts":
-    st.title("🛠️ Tower Parts Management")
-    st.caption("Parts orders + docs (no sidebar forms)")
+    import os
+    import pandas as pd
+    import streamlit as st
 
-    ORDER_FILE = "part_orders.csv"
-    archive_file = "archived_orders.csv"
+    st.title("🛠️ Tower Parts Management")
+
+
+    ORDER_FILE = P.parts_orders_csv
+    archive_file = P.parts_archived_csv
 
     # ✅ Status rename (Needed -> Opened)
     STATUS_ORDER = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
@@ -7672,7 +8962,7 @@ elif tab_selection == "🛠️ Tower Parts":
 
     # ---------------- Load / init ----------------
     if os.path.exists(ORDER_FILE):
-        orders_df = pd.read_csv(ORDER_FILE)
+        orders_df = pd.read_csv(ORDER_FILE, keep_default_na=False)
     else:
         orders_df = pd.DataFrame(columns=BASE_COLUMNS)
 
@@ -7692,12 +8982,24 @@ elif tab_selection == "🛠️ Tower Parts":
     # Unknown / empty -> Opened
     orders_df["Status"] = orders_df["Status"].apply(lambda s: s if s in STATUS_ORDER else "Opened")
 
-    # ---------------- Projects list ----------------
+    # ---------------- Projects list (match 📦 Order Draw) ----------------
+    PROJECTS_FILE = P.projects_fiber_csv
+    PROJECTS_COL = "Fiber Project"
+
     project_options = ["None"]
     try:
-        projects_df = pd.read_csv(DEVELOPMENT_FILE)
-        if "Project Name" in projects_df.columns:
-            project_options += sorted(list(pd.Series(projects_df["Project Name"]).dropna().astype(str).unique()))
+        if os.path.exists(PROJECTS_FILE):
+            projects_df = pd.read_csv(PROJECTS_FILE, keep_default_na=False)
+            projects_df.columns = [str(c).strip() for c in projects_df.columns]
+            if PROJECTS_COL in projects_df.columns:
+                vals = (
+                    projects_df[PROJECTS_COL]
+                    .astype(str)
+                    .fillna("")
+                    .map(lambda x: x.strip())
+                )
+                vals = [v for v in vals.tolist() if v and v.lower() != "nan"]
+                project_options += sorted(list(pd.Series(vals).unique()))
     except Exception:
         pass
 
@@ -7778,7 +9080,7 @@ elif tab_selection == "🛠️ Tower Parts":
 
                 with c2:
                     opened_by = st.text_input("Opened By")
-                    selected_project = st.selectbox("Project", project_options)
+                    selected_project = st.selectbox("Fiber Project", project_options)
                     company = st.text_input("Company (optional)")
 
                 with c3:
@@ -7842,7 +9144,7 @@ elif tab_selection == "🛠️ Tower Parts":
                     with c2:
                         cur_proj = str(cur.get("Project Name", ""))
                         updated_project = st.selectbox(
-                            "Project",
+                            "Fiber Project",
                             project_options,
                             index=project_options.index(cur_proj) if cur_proj in project_options else 0,
                         )
@@ -7910,7 +9212,7 @@ elif tab_selection == "🛠️ Tower Parts":
                 st.info("No installed parts to archive.")
             else:
                 if os.path.exists(archive_file):
-                    archived_df = pd.read_csv(archive_file)
+                    archived_df = pd.read_csv(archive_file, keep_default_na=False)
                     archived_df.columns = archived_df.columns.str.strip()
                     for col in BASE_COLUMNS:
                         if col not in archived_df.columns:
@@ -7929,7 +9231,7 @@ elif tab_selection == "🛠️ Tower Parts":
 
     if show_archive:
         if os.path.exists(archive_file):
-            archived_df = pd.read_csv(archive_file)
+            archived_df = pd.read_csv(archive_file, keep_default_na=False)
             archived_df.columns = archived_df.columns.str.strip()
             for col in BASE_COLUMNS:
                 if col not in archived_df.columns:
@@ -7971,6 +9273,10 @@ elif tab_selection == "🛠️ Tower Parts":
     # =========================
     st.write("### 📚 Parts Datasheet (Hierarchical View)")
 
+    # NOTE: PARTS_DIRECTORY must exist in your app globals/config.
+    # If not, define it above or load from your directory_config.json
+    # Example: PARTS_DIRECTORY = "tower_parts_docs"
+
     def display_directory(current_path, level=0):
         try:
             items = sorted(os.listdir(current_path))
@@ -8001,10 +9307,10 @@ elif tab_selection == "🛠️ Tower Parts":
             if st.button(f"📄 Open {file_name}", key=f"open_{file_path}"):
                 os.system(f"open {file_path}")  # macOS. Linux: xdg-open, Windows: start
 
-    if os.path.exists(PARTS_DIRECTORY) and os.listdir(PARTS_DIRECTORY):
+    if "PARTS_DIRECTORY" in globals() and os.path.exists(PARTS_DIRECTORY) and os.listdir(PARTS_DIRECTORY):
         display_directory(PARTS_DIRECTORY)
     else:
-        st.info("No parts documents found in PARTS_DIRECTORY.")
+        st.info("No parts documents found in PARTS_DIRECTORY (or PARTS_DIRECTORY not set).")
 # ------------------ Development Tab ------------------
 elif tab_selection == "🧪 Development Process":
     import os
@@ -8013,16 +9319,139 @@ elif tab_selection == "🧪 Development Process":
     import streamlit as st
     from datetime import datetime
 
-    st.title("🧪 Development Process")
+    # =========================================================
+    # ✅ Development Process (FULL TAB + Attachments/PDF/Photos)
+    # ✅ Fixed: dev_selected_project session_state crash on delete
+    # =========================================================
+
+    # =========================
+    # CSS (HOME-LIKE POLISH)
+    # =========================
+    st.markdown("""
+    <style>
+    /* ---------- page spacing ---------- */
+    .block-container { padding-top: 2.8rem; padding-bottom: 2.0rem; }
+
+    /* ---------- header / hero card ---------- */
+    .dp-hero{
+      border-radius: 22px;
+      padding: 16px 18px 14px 18px;
+      margin: 6px 0 10px 0;
+      border: 1px solid rgba(255,255,255,0.10);
+      background:
+        radial-gradient(980px 260px at 12% -10%, rgba(0,140,255,0.18), rgba(0,0,0,0) 60%),
+        radial-gradient(680px 240px at 88% 10%, rgba(0,255,180,0.09), rgba(0,0,0,0) 55%),
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+      box-shadow: 0 14px 34px rgba(0,0,0,0.34);
+    }
+    .dp-hero-title{
+      font-size: 1.22rem;
+      font-weight: 900;
+      margin: 0;
+      line-height: 1.15;
+      letter-spacing: -0.2px;
+    }
+    .dp-hero-sub{
+      margin-top: 6px;
+      font-size: 0.93rem;
+      color: rgba(255,255,255,0.72);
+    }
+
+    /* ---------- sticky toolbar ---------- */
+    .dp-sticky{
+      position: sticky;
+      top: 0.25rem;
+      z-index: 50;
+      padding-top: 6px;
+      padding-bottom: 6px;
+      background: linear-gradient(180deg, rgba(10,10,10,0.75), rgba(10,10,10,0.0));
+      backdrop-filter: blur(6px);
+    }
+    .dp-toolbar{
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.26);
+      padding: 10px 12px;
+    }
+    .dp-pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.78);
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+
+    /* ---------- inputs ---------- */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div{
+      border-radius: 14px !important;
+    }
+    textarea, input{
+      border-radius: 14px !important;
+    }
+
+    /* ---------- expanders as cards ---------- */
+    div[data-testid="stExpander"] details{
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(255,255,255,0.02);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+      overflow: hidden;
+    }
+    div[data-testid="stExpander"] details > summary{
+      padding: 12px 14px !important;
+    }
+    div[data-testid="stExpander"] details > div{
+      padding: 6px 14px 14px 14px !important;
+    }
+
+    /* ---------- buttons (clean + consistent) ---------- */
+    .stButton>button{
+      border-radius: 14px !important;
+      height: 44px !important;
+      padding: 8px 14px !important;
+      white-space: nowrap !important;
+    }
+    .stButton>button[kind="primary"]{
+      border-radius: 14px !important;
+      height: 44px !important;
+      padding: 8px 16px !important;
+    }
+
+    /* ---------- dataframe looks like a card ---------- */
+    div[data-testid="stDataFrame"]{
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+
+    /* ---------- nicer dividers ---------- */
+    hr{ border-color: rgba(255,255,255,0.08) !important; }
+
+    /* segmented label tighten */
+    div[data-testid="stSegmentedControl"] label p{
+      font-weight: 700;
+      opacity: 0.85;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     # =========================
     # Files / folders
     # =========================
-    PROJECTS_FILE     = "development_projects.csv"
-    EXPERIMENTS_FILE  = "development_experiments.csv"
-    UPDATES_FILE      = "experiment_updates.csv"
-    DATASET_DIR       = "data_set_csv"
-    MEDIA_ROOT        = "development_media"
+    PROJECTS_FILE = "development_projects.csv"
+    EXPERIMENTS_FILE = "development_experiments.csv"
+    UPDATES_FILE = "experiment_updates.csv"
+    DATASET_DIR = P.dataset_dir  # uses your global paths object
+    MEDIA_ROOT = "development_media"
+
+    IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 
     # =========================
     # Ensure files exist
@@ -8046,8 +9475,8 @@ elif tab_selection == "🧪 Development Process":
                 "Is Drawing",
                 "Drawing Details",
                 "Draw CSV",
-                "Result Images",     # ; separated paths
-                "Image Captions"     # JSON dict: {filename: caption}
+                "Attachments",
+                "Attachment Captions",
             ]).to_csv(EXPERIMENTS_FILE, index=False)
 
         if not os.path.exists(UPDATES_FILE):
@@ -8060,7 +9489,7 @@ elif tab_selection == "🧪 Development Process":
         changed = False
         for c in required_cols:
             if c not in df.columns:
-                df[c] = "" if c not in ["Archived", "Is Drawing"] else False
+                df[c] = False if c in ["Archived", "Is Drawing"] else ""
                 changed = True
         if changed:
             df.to_csv(path, index=False)
@@ -8070,7 +9499,7 @@ elif tab_selection == "🧪 Development Process":
     _ensure_columns(EXPERIMENTS_FILE, [
         "Project Name", "Experiment Title", "Date", "Researcher", "Methods", "Purpose",
         "Observations", "Results", "Is Drawing", "Drawing Details", "Draw CSV",
-        "Result Images", "Image Captions"
+        "Attachments", "Attachment Captions"
     ])
     _ensure_columns(UPDATES_FILE, ["Project Name", "Experiment Title", "Update Date", "Researcher", "Update Notes"])
 
@@ -8090,10 +9519,8 @@ elif tab_selection == "🧪 Development Process":
         df = pd.read_csv(EXPERIMENTS_FILE)
         if "Is Drawing" in df.columns:
             df["Is Drawing"] = df["Is Drawing"].fillna(False).astype(bool)
-        if "Result Images" not in df.columns:
-            df["Result Images"] = ""
-        if "Image Captions" not in df.columns:
-            df["Image Captions"] = ""
+        df["Attachments"] = df.get("Attachments", "").fillna("")
+        df["Attachment Captions"] = df.get("Attachment Captions", "").fillna("")
         return df
 
     def save_experiments(df):
@@ -8120,12 +9547,12 @@ elif tab_selection == "🧪 Development Process":
         os.makedirs(d, exist_ok=True)
         return d
 
-    def parse_img_list(s):
+    def parse_path_list(s):
         if not isinstance(s, str) or not s.strip():
             return []
         return [x for x in s.split(";") if x.strip()]
 
-    def join_img_list(lst):
+    def join_path_list(lst):
         return ";".join(lst)
 
     def parse_captions(s):
@@ -8134,13 +9561,13 @@ elif tab_selection == "🧪 Development Process":
         try:
             d = json.loads(s)
             return d if isinstance(d, dict) else {}
-        except:
+        except Exception:
             return {}
 
     def dump_captions(d):
         try:
             return json.dumps(d, ensure_ascii=False)
-        except:
+        except Exception:
             return ""
 
     def list_dataset_csvs_newest_first():
@@ -8149,118 +9576,373 @@ elif tab_selection == "🧪 Development Process":
         files = [f for f in os.listdir(DATASET_DIR) if f.lower().endswith(".csv")]
         return sorted(files, key=lambda fn: os.path.getmtime(os.path.join(DATASET_DIR, fn)), reverse=True)
 
+    def ext_of(name: str) -> str:
+        return os.path.splitext(str(name).lower())[1]
+
+    def is_image(name: str) -> bool:
+        return ext_of(name) in IMG_EXTS
+
+    def is_pdf(path: str) -> bool:
+        return str(path).lower().endswith(".pdf")
+
+    def _unique_path(path: str) -> str:
+        if not os.path.exists(path):
+            return path
+        base, ext = os.path.splitext(path)
+        i = 2
+        while True:
+            cand = f"{base}__{i}{ext}"
+            if not os.path.exists(cand):
+                return cand
+            i += 1
+
+    @st.cache_data(show_spinner=False)
+    def read_bytes(path: str) -> bytes:
+        with open(path, "rb") as f:
+            return f.read()
+
+    def render_download_file(path: str, label: str, key: str):
+        if not os.path.exists(path):
+            st.warning(f"Missing file: {os.path.basename(path)}")
+            return
+        data = read_bytes(path)
+        st.download_button(
+            label=label,
+            data=data,
+            file_name=os.path.basename(path),
+            mime=None,
+            key=key,
+            use_container_width=True
+        )
+
+    # =========================
+    # PDF preview (RENDER ONLY - reliable)
+    # =========================
+    @st.cache_data(show_spinner=False)
+    def pdf_render_pages(path: str, max_pages: int = 1, zoom: float = 1.6):
+        import fitz  # PyMuPDF
+        doc = fitz.open(path)
+        n = min(len(doc), int(max_pages))
+        out = []
+        mat = fitz.Matrix(float(zoom), float(zoom))
+        for i in range(n):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            out.append(pix.tobytes("png"))
+        doc.close()
+        return out
+
+    def render_pdf_preview(path: str):
+        if not os.path.exists(path):
+            st.warning("PDF file not found.")
+            return
+
+        state_key = f"pdf_show_all__{path}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = False
+
+        c1, c2, c3 = st.columns([1.6, 1.0, 1.0])
+        with c1:
+            st.markdown("**PDF preview (rendered)**")
+            st.caption("Default shows page 1. Click to render more pages.")
+        with c2:
+            zoom = st.selectbox("Quality", [1.3, 1.6, 2.0], index=1, key=f"pdf_zoom__{path}")
+        with c3:
+            max_pages = st.number_input("Pages (when expanded)", min_value=1, max_value=200, value=30, step=1, key=f"pdf_pages__{path}")
+
+        b1, b2 = st.columns([1, 1])
+        with b1:
+            if not st.session_state[state_key]:
+                if st.button("📄 Render more pages", use_container_width=True, key=f"pdf_more__{path}"):
+                    st.session_state[state_key] = True
+                    st.rerun()
+            else:
+                if st.button("⬅️ Back to page 1", use_container_width=True, key=f"pdf_less__{path}"):
+                    st.session_state[state_key] = False
+                    st.rerun()
+        with b2:
+            render_download_file(path, "⬇️ Download PDF", key=f"dl_pdf_viewer__{path}")
+
+        try:
+            if st.session_state[state_key]:
+                imgs = pdf_render_pages(path, max_pages=int(max_pages), zoom=float(zoom))
+                st.caption(f"Showing **{len(imgs)}** page(s).")
+                for i, b in enumerate(imgs, start=1):
+                    st.image(b, caption=f"Page {i}", use_container_width=True)
+            else:
+                imgs = pdf_render_pages(path, max_pages=1, zoom=float(zoom))
+                if imgs:
+                    st.image(imgs[0], caption="Page 1", use_container_width=True)
+        except Exception as e:
+            st.error(f"PDF render failed. Install PyMuPDF: `pip install pymupdf`  |  Error: {e}")
+
+    # =========================
+    # Attachments render (saved)
+    # =========================
+    def show_saved_attachments(paths, caps: dict, expander_key: str):
+        if not paths:
+            st.info("No attachments yet. Use **➕ Add attachments** below.")
+            return
+
+        st.caption("Images are shown inline. PDFs can be previewed. All files are downloadable.")
+
+        imgs = [p for p in paths if is_image(os.path.basename(p))]
+        others = [p for p in paths if p not in imgs]
+
+        if imgs:
+            st.markdown("**🖼️ Images**")
+            captions_list = []
+            for p in imgs:
+                fn = os.path.basename(p)
+                captions_list.append((caps.get(fn, "") or "").strip() or fn)
+            st.image(imgs, caption=captions_list, use_container_width=True)
+
+        if others:
+            st.markdown("**📄 Files**")
+            for i, p in enumerate(others):
+                fn = os.path.basename(p)
+                cap = (caps.get(fn, "") or "").strip()
+
+                r1, r2, r3 = st.columns([3, 1.0, 1.2])
+                with r1:
+                    st.markdown(f"**{fn}**")
+                    st.caption(cap if cap else "")
+
+                with r2:
+                    if is_pdf(p) and os.path.exists(p):
+                        if st.button("👁️ Preview", key=f"pdf_prev__{expander_key}__{i}__{fn}", use_container_width=True):
+                            st.session_state[f"pdf_preview_path__{expander_key}"] = p
+
+                with r3:
+                    if is_pdf(p):
+                        render_download_file(p, "⬇️ Download PDF", key=f"dl_pdf__{expander_key}__{i}__{fn}")
+                    else:
+                        render_download_file(p, "⬇️ Download", key=f"dl_file__{expander_key}__{i}__{fn}")
+
+            prev_path = st.session_state.get(f"pdf_preview_path__{expander_key}", "")
+            if prev_path and os.path.exists(prev_path) and is_pdf(prev_path):
+                st.markdown("---")
+                st.markdown("### 📄 PDF Preview")
+                st.caption(os.path.basename(prev_path))
+                render_pdf_preview(prev_path)
+
+                if st.button("✖ Close preview", key=f"pdf_close__{expander_key}", use_container_width=True):
+                    st.session_state.pop(f"pdf_preview_path__{expander_key}", None)
+                    st.rerun()
+
     # =========================
     # Session defaults
     # =========================
-    if "dev_view_mode_main" not in st.session_state:
-        st.session_state["dev_view_mode_main"] = "Active"
-    if "dev_selected_project" not in st.session_state:
-        st.session_state["dev_selected_project"] = ""
-    if "dev_show_add_experiment" not in st.session_state:
-        st.session_state["dev_show_add_experiment"] = False
+    st.session_state.setdefault("dev_view_mode_main", "Active")
+
+    st.session_state.setdefault("dev_show_add_experiment", False)
+    st.session_state.setdefault("dev_show_new_project", False)
+    st.session_state.setdefault("dev_show_manage_project", False)
+
+    # ✅ FIX: keep selection in non-widget key + versioned widget key
+    st.session_state.setdefault("dev_selected_project", "")
+    st.session_state.setdefault("dev_project_select_ver", 0)
 
     # =========================
-    # Top bar UI
+    # Header card
+    # =========================
+    st.markdown("""
+    <div class="dp-hero">
+      <div class="dp-hero-title">🧪 Development Process</div>
+      <div class="dp-hero-sub">Plan experiments • Attach files • Track updates • Link draws to datasets</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # =========================
+    # Toolbar (STICKY + 2-ROW)
     # =========================
     projects_df = load_projects()
-    top1, top2, top3, top4 = st.columns([1.15, 1.15, 1.25, 2.8])
+    view_mode = st.session_state.get("dev_view_mode_main", "Active")
 
-    # ---- Add Project ----
-    with top1.popover("➕ Add New Project"):
-        with st.form("add_project_pop_form", clear_on_submit=True):
-            new_project_name = st.text_input("Project Name")
-            new_project_purpose = st.text_area("Project Purpose", height=110)
-            new_project_target = st.text_area("Target", height=90)
-            create_project = st.form_submit_button("Create Project")
+    filtered = projects_df[projects_df["Archived"] == (view_mode == "Archived")]
+    project_options = [""] + filtered["Project Name"].dropna().astype(str).unique().tolist()
 
-        if create_project:
-            projects_df = load_projects()
-            if not new_project_name.strip():
-                st.error("Project Name is required!")
-            elif (projects_df["Project Name"].astype(str).str.strip() == new_project_name.strip()).any():
-                st.error("A project with this name already exists.")
-            else:
-                new_row = pd.DataFrame([{
-                    "Project Name": new_project_name.strip(),
-                    "Project Purpose": new_project_purpose.strip(),
-                    "Target": new_project_target.strip(),
-                    "Created At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Archived": False
-                }])
-                projects_df = pd.concat([projects_df, new_row], ignore_index=True)
-                save_projects(projects_df)
-                st.success("Project created!")
-                st.rerun()
+    st.markdown('<div class="dp-sticky"><div class="dp-toolbar">', unsafe_allow_html=True)
 
-    # ---- Select Project ----
-    with top2.popover("📂 Select Project"):
-        view_mode = st.radio("View", ["Active", "Archived"], horizontal=True, key="dev_view_mode_main")
+    # Row 1: View + Project + Add Experiment
+    r1a, r1b, r1c = st.columns([1.10, 1.90, 1.20], gap="medium")
+
+    with r1a:
+        vm = st.segmented_control(
+            "View",
+            options=["Active", "Archived"],
+            default=view_mode,
+            key="dev_view_mode_main_sc",
+        )
+        st.session_state["dev_view_mode_main"] = vm
+
+    with r1b:
+        view_mode = st.session_state["dev_view_mode_main"]
         projects_df = load_projects()
         filtered = projects_df[projects_df["Archived"] == (view_mode == "Archived")]
-        options = [""] + filtered["Project Name"].dropna().unique().tolist()
+        project_options = [""] + filtered["Project Name"].dropna().astype(str).unique().tolist()
 
-        st.selectbox("Choose a Project", options, key="dev_selected_project")
-        if st.session_state.get("dev_selected_project"):
-            st.success(f"Selected: {st.session_state['dev_selected_project']}")
+        # --- SAFE select: versioned widget key ---
+        cur_sel = st.session_state.get("dev_selected_project", "")
+        if cur_sel and (cur_sel not in project_options):
+            st.session_state["dev_selected_project"] = ""
+            st.session_state["dev_project_select_ver"] += 1
+            cur_sel = ""
 
-    selected_project = st.session_state.get("dev_selected_project", "")
+        proj_widget_key = f"dev_selected_project_widget__v{st.session_state['dev_project_select_ver']}"
+        default_idx = project_options.index(cur_sel) if cur_sel in project_options else 0
 
-    # ---- Manage Project ----
-    with top3.popover("📦 Manage Project"):
-        if not selected_project:
-            st.info("Select a project first.")
-        else:
-            projects_df = load_projects()
-            row = projects_df[projects_df["Project Name"] == selected_project]
-            if row.empty:
-                st.warning("Project not found (maybe deleted).")
-            else:
-                is_archived = bool(row.iloc[0].get("Archived", False))
-                cA, cB = st.columns(2)
+        picked = st.selectbox(
+            "Project",
+            options=project_options,
+            index=default_idx,
+            key=proj_widget_key,
+        )
 
-                if not is_archived:
-                    if cA.button("🗄️ Archive", use_container_width=True):
-                        projects_df.loc[projects_df["Project Name"] == selected_project, "Archived"] = True
-                        save_projects(projects_df)
-                        st.success("Archived.")
-                        st.rerun()
-                else:
-                    if cA.button("♻️ Restore", use_container_width=True):
-                        projects_df.loc[projects_df["Project Name"] == selected_project, "Archived"] = False
-                        save_projects(projects_df)
-                        st.success("Restored.")
-                        st.rerun()
+        # store selection in non-widget key (safe to modify anytime)
+        st.session_state["dev_selected_project"] = picked
+        selected_project = picked
 
-                if cB.button("🗑️ Delete", use_container_width=True):
-                    exp_df = load_experiments()
-                    upd_df = load_updates()
-
-                    projects_df = projects_df[projects_df["Project Name"] != selected_project]
-                    exp_df = exp_df[exp_df["Project Name"] != selected_project]
-                    upd_df = upd_df[upd_df["Project Name"] != selected_project]
-
-                    save_projects(projects_df)
-                    save_experiments(exp_df)
-                    save_updates(upd_df)
-
-                    st.session_state["dev_selected_project"] = ""
-                    st.warning("Deleted permanently.")
-                    st.rerun()
-
-    # ---- Fold / open Add Experiment ----
-    with top4:
+    with r1c:
+        selected_project = st.session_state.get("dev_selected_project", "")
         if selected_project:
-            label = "➖ Hide Add Experiment" if st.session_state["dev_show_add_experiment"] else "➕ Add Experiment"
-            if st.button(label, use_container_width=True):
+            label = "➕ Add Experiment" if not st.session_state["dev_show_add_experiment"] else "➖ Hide"
+            if st.button(label, use_container_width=True, type="primary", key="dp_btn_add_exp_toggle"):
                 st.session_state["dev_show_add_experiment"] = not st.session_state["dev_show_add_experiment"]
         else:
-            st.caption("Select a project to add experiments")
+            st.button("➕ Add Experiment", use_container_width=True, disabled=True, key="dp_btn_add_exp_disabled")
+
+    # Row 2: New Project + Manage + Status pill
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    r2a, r2b, r2c = st.columns([1.05, 1.25, 2.70], gap="medium")
+
+    with r2a:
+        if st.button("➕ New Project", use_container_width=True, key="dp_btn_new_project"):
+            st.session_state["dev_show_new_project"] = not st.session_state["dev_show_new_project"]
+            if st.session_state["dev_show_new_project"]:
+                st.session_state["dev_show_manage_project"] = False
+
+    with r2b:
+        selected_project = st.session_state.get("dev_selected_project", "")
+        if st.button("📦 Manage Project", use_container_width=True, disabled=not bool(selected_project), key="dp_btn_manage"):
+            st.session_state["dev_show_manage_project"] = not st.session_state["dev_show_manage_project"]
+            if st.session_state["dev_show_manage_project"]:
+                st.session_state["dev_show_new_project"] = False
+
+    with r2c:
+        selected_project = st.session_state.get("dev_selected_project", "")
+        mode = st.session_state.get("dev_view_mode_main", "Active")
+        if selected_project:
+            st.markdown(
+                f'<span class="dp-pill">🟢 <b>{selected_project}</b> &nbsp;•&nbsp; <b>{mode}</b> &nbsp;•&nbsp; Ready</span>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f'<span class="dp-pill">⚪ No project selected &nbsp;•&nbsp; <b>{mode}</b></span>',
+                unsafe_allow_html=True
+            )
+
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+    # =========================
+    # New Project panel
+    # =========================
+    if st.session_state.get("dev_show_new_project", False):
+        with st.expander("➕ Create a new project", expanded=True):
+            with st.form("dp_create_project_form", clear_on_submit=True):
+                new_project_name = st.text_input("Project Name")
+                new_project_purpose = st.text_area("Project Purpose", height=110)
+                new_project_target = st.text_area("Target", height=90)
+                create_project = st.form_submit_button("Create Project")
+
+            if create_project:
+                projects_df = load_projects()
+                if not new_project_name.strip():
+                    st.error("Project Name is required!")
+                elif (projects_df["Project Name"].astype(str).str.strip() == new_project_name.strip()).any():
+                    st.error("A project with this name already exists.")
+                else:
+                    new_row = pd.DataFrame([{
+                        "Project Name": new_project_name.strip(),
+                        "Project Purpose": new_project_purpose.strip(),
+                        "Target": new_project_target.strip(),
+                        "Created At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Archived": False
+                    }])
+                    projects_df = pd.concat([projects_df, new_row], ignore_index=True)
+                    save_projects(projects_df)
+
+                    st.success("Project created!")
+                    st.session_state["dev_show_new_project"] = False
+                    st.session_state["dev_selected_project"] = new_project_name.strip()
+                    st.session_state["dev_project_select_ver"] += 1  # force selectbox refresh
+                    st.rerun()
+
+    # =========================
+    # Manage Project panel
+    # =========================
+    selected_project = st.session_state.get("dev_selected_project", "")
+    if st.session_state.get("dev_show_manage_project", False):
+        with st.expander("📦 Manage selected project", expanded=True):
+            if not selected_project:
+                st.info("Select a project first.")
+            else:
+                projects_df = load_projects()
+                row = projects_df[projects_df["Project Name"] == selected_project]
+                if row.empty:
+                    st.warning("Project not found.")
+                else:
+                    is_archived = bool(row.iloc[0].get("Archived", False))
+
+                    cA, cB, cC = st.columns([1, 1, 1.2])
+                    with cA:
+                        if not is_archived:
+                            if st.button("🗄️ Archive", use_container_width=True, key="dp_arch"):
+                                projects_df.loc[projects_df["Project Name"] == selected_project, "Archived"] = True
+                                save_projects(projects_df)
+                                st.success("Archived.")
+                                st.rerun()
+                        else:
+                            if st.button("♻️ Restore", use_container_width=True, key="dp_restore"):
+                                projects_df.loc[projects_df["Project Name"] == selected_project, "Archived"] = False
+                                save_projects(projects_df)
+                                st.success("Restored.")
+                                st.rerun()
+
+                    with cB:
+                        if st.button("🧾 Close panel", use_container_width=True, key="dp_close_manage"):
+                            st.session_state["dev_show_manage_project"] = False
+                            st.rerun()
+
+                    with cC:
+                        st.markdown("**Danger zone**")
+                        if st.button("🗑️ Delete project (permanent)", use_container_width=True, key="dp_delete"):
+                            exp_df_del = load_experiments()
+                            upd_df_del = load_updates()
+
+                            projects_df = projects_df[projects_df["Project Name"] != selected_project]
+                            exp_df_del = exp_df_del[exp_df_del["Project Name"] != selected_project]
+                            upd_df_del = upd_df_del[upd_df_del["Project Name"] != selected_project]
+
+                            save_projects(projects_df)
+                            save_experiments(exp_df_del)
+                            save_updates(upd_df_del)
+
+                            st.session_state["dev_selected_project"] = ""
+                            st.session_state["dev_show_manage_project"] = False
+                            st.session_state["dev_project_select_ver"] += 1  # recreate selectbox with a new key
+                            st.warning("Deleted permanently.")
+                            st.rerun()
+
+    st.divider()
 
     # =========================
     # Main content
     # =========================
+    selected_project = st.session_state.get("dev_selected_project", "")
     if not selected_project:
-        st.info("Use **📂 Select Project** to start.")
+        st.info("Use **Project** selector above to start.")
         st.stop()
 
     projects_df = load_projects()
@@ -8270,23 +9952,19 @@ elif tab_selection == "🧪 Development Process":
         st.stop()
 
     proj = proj_row.iloc[0]
-    st.info(f"📌 Current project: **{selected_project}**")
-    st.subheader("📌 Project Details")
-    st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', 'N/A')}")
-    st.markdown(f"**Target:** {proj.get('Target', 'N/A')}")
-    st.caption(f"Created at: {proj.get('Created At', '')} | Archived: {bool(proj.get('Archived', False))}")
+    with st.expander("📌 Project Details", expanded=True):
+        st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', 'N/A')}")
+        st.markdown(f"**Target:** {proj.get('Target', 'N/A')}")
+        st.caption(f"Created at: {proj.get('Created At', '')} | Archived: {bool(proj.get('Archived', False))}")
 
     st.divider()
 
     # =========================
-    # Add Experiment (LIVE drawing UI + newest CSV first + image descriptions)
+    # Add Experiment
     # =========================
     if st.session_state.get("dev_show_add_experiment", False):
         with st.expander("➕ Add Experiment", expanded=True):
-
-            # ---- Live drawing toggle OUTSIDE the form ----
             is_drawing_live = st.checkbox("Is this a Drawing?", key=f"newexp_is_drawing__{selected_project}")
-
             drawing_details_live = ""
             draw_csv_live = ""
 
@@ -8298,36 +9976,31 @@ elif tab_selection == "🧪 Development Process":
                 )
 
                 dataset_files = list_dataset_csvs_newest_first()
-                if not dataset_files:
-                    st.info("No CSV files found in data_set_csv/")
-                else:
+                if dataset_files:
                     newest = dataset_files[0]
                     st.caption(f"Newest CSV: **{newest}**")
-
-                    # default to newest (index=1 because first option is "")
                     draw_csv_live = st.selectbox(
                         "Select Draw CSV (newest first)",
                         [""] + dataset_files,
                         index=1,
                         key=f"newexp_draw_csv__{selected_project}"
                     )
+                else:
+                    st.info("No CSV files found in data_set_csv/")
 
             st.divider()
-
-            # ---- Upload images + descriptions OUTSIDE the form (so it shows immediately) ----
-            st.markdown("### 📷 Attach photos now (optional)")
-            uploaded_new_imgs = st.file_uploader(
-                "Drag & drop images (png/jpg/webp)",
-                type=["png", "jpg", "jpeg", "webp"],
+            st.markdown("### 📎 Attach files (optional)")
+            uploaded_new_files = st.file_uploader(
+                "Drag & drop files",
+                type=None,
                 accept_multiple_files=True,
-                key=f"newexp_imgs__{selected_project}"
+                key=f"newexp_attachments__{selected_project}"
             )
 
             caption_inputs = {}
-            if uploaded_new_imgs:
-                st.markdown("### 📝 Photo descriptions")
-                st.caption("These descriptions will be shown under each photo.")
-                for f in uploaded_new_imgs:
+            if uploaded_new_files:
+                st.markdown("### 📝 Descriptions (one per file)")
+                for f in uploaded_new_files:
                     caption_inputs[f.name] = st.text_area(
                         f"Description for {f.name}",
                         height=80,
@@ -8336,7 +10009,6 @@ elif tab_selection == "🧪 Development Process":
 
             st.divider()
 
-            # ---- Form for experiment fields + Save button ----
             with st.form(f"add_experiment_form__{selected_project}", clear_on_submit=True):
                 c1, c2 = st.columns([2, 1])
                 experiment_title = c1.text_input("Experiment Title")
@@ -8365,20 +10037,18 @@ elif tab_selection == "🧪 Development Process":
                     if not dup.empty:
                         st.error("This experiment (same title + date) already exists in this project.")
                     else:
-                        saved_img_paths = []
-                        captions_map = {}
+                        saved_paths = []
+                        caps_map = {}
 
-                        if uploaded_new_imgs:
+                        if uploaded_new_files:
                             media_dir = exp_media_dir(selected_project, experiment_title.strip(), exp_date_str)
-                            for f in uploaded_new_imgs:
-                                out_path = os.path.join(media_dir, f.name)
+                            for f in uploaded_new_files:
                                 try:
+                                    out_path = _unique_path(os.path.join(media_dir, f.name))
                                     with open(out_path, "wb") as w:
                                         w.write(f.getbuffer())
-                                    saved_img_paths.append(out_path)
-
-                                    # ✅ captions keyed by filename (robust)
-                                    captions_map[os.path.basename(out_path)] = (caption_inputs.get(f.name, "") or "").strip()
+                                    saved_paths.append(out_path)
+                                    caps_map[os.path.basename(out_path)] = (caption_inputs.get(f.name, "") or "").strip()
                                 except Exception as e:
                                     st.error(f"Failed saving {f.name}: {e}")
 
@@ -8394,14 +10064,14 @@ elif tab_selection == "🧪 Development Process":
                             "Is Drawing": bool(is_drawing_live),
                             "Drawing Details": drawing_details_live.strip() if is_drawing_live else "",
                             "Draw CSV": draw_csv_live.strip() if is_drawing_live else "",
-                            "Result Images": join_img_list(saved_img_paths) if saved_img_paths else "",
-                            "Image Captions": dump_captions(captions_map) if captions_map else ""
+                            "Attachments": join_path_list(saved_paths) if saved_paths else "",
+                            "Attachment Captions": dump_captions(caps_map) if caps_map else "",
                         }])
 
                         exp_df = pd.concat([exp_df, new_exp], ignore_index=True)
                         save_experiments(exp_df)
 
-                        st.success(f"Experiment saved. Images attached: {len(saved_img_paths)}")
+                        st.success(f"Experiment saved. Attachments: {len(saved_paths)}")
                         st.session_state["dev_show_add_experiment"] = False
                         st.rerun()
 
@@ -8417,7 +10087,6 @@ elif tab_selection == "🧪 Development Process":
         st.info("No experiments yet.")
     else:
         st.subheader("🔬 Experiments Conducted")
-
         project_exps["Date_sort"] = pd.to_datetime(project_exps["Date"], errors="coerce")
         project_exps = project_exps.sort_values("Date_sort", ascending=False)
 
@@ -8426,6 +10095,7 @@ elif tab_selection == "🧪 Development Process":
             exp_date = str(exp.get("Date", ""))
 
             expander_key = f"exp_{selected_project}_{exp_title}_{exp_date}_{idx}"
+
             with st.expander(f"🧪 {exp_title} ({exp_date})", expanded=False):
                 st.write(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
                 st.write(f"**Methods:** {exp.get('Methods', 'N/A')}")
@@ -8433,78 +10103,56 @@ elif tab_selection == "🧪 Development Process":
                 st.write(f"**Observations:** {exp.get('Observations', 'N/A')}")
                 st.write(f"**Results:** {exp.get('Results', 'N/A')}")
 
-                # ---- Drawing
                 if bool(exp.get("Is Drawing", False)):
                     st.markdown("#### 🧵 Drawing")
                     st.write(f"**Drawing Details:** {exp.get('Drawing Details', '')}")
-
                     draw_csv_name = str(exp.get("Draw CSV", "")).strip()
                     if draw_csv_name:
                         st.write(f"**Draw CSV:** `{draw_csv_name}`")
                         csv_path = os.path.join(DATASET_DIR, draw_csv_name)
                         if os.path.exists(csv_path):
                             if st.button("📄 Load & View Draw CSV", key=f"load_draw__{expander_key}"):
-                                try:
-                                    df_draw = load_draw_csv(csv_path)
-                                    st.dataframe(df_draw, use_container_width=True, height=320)
-                                except Exception as e:
-                                    st.error(f"Failed to load draw CSV: {e}")
-                        else:
-                            st.warning("Draw CSV file not found in data_set_csv/")
-                    else:
-                        st.info("No draw CSV attached to this drawing experiment.")
+                                df_draw = load_draw_csv(csv_path)
+                                st.dataframe(df_draw, use_container_width=True, height=320)
 
                 st.divider()
 
-                # ---- Images + captions
-                st.markdown("#### 🖼️ Results Images")
+                st.markdown("#### 📎 Attachments (Saved)")
+                saved_paths = parse_path_list(exp.get("Attachments", ""))
+                saved_caps = parse_captions(exp.get("Attachment Captions", ""))
+                show_saved_attachments(saved_paths, saved_caps, expander_key)
 
-                existing_imgs = parse_img_list(exp.get("Result Images", ""))
-                captions_map = parse_captions(exp.get("Image Captions", ""))
+                st.markdown("#### ➕ Add attachments")
+                st.caption("Add more files after the experiment was created.")
 
-                if existing_imgs:
-                    captions_list = []
-                    for p in existing_imgs:
-                        fn = os.path.basename(p)
-                        cap = (captions_map.get(fn, "") or "").strip()
-                        captions_list.append(cap if cap else fn)
-
-                    st.image(existing_imgs, caption=captions_list, use_container_width=True)
-                else:
-                    st.caption("No images saved yet.")
-
-                # ---- Add more images + descriptions
-                st.markdown("**➕ Add more images**")
-                media_dir = exp_media_dir(selected_project, exp_title, exp_date)
-
-                uploaded_imgs = st.file_uploader(
-                    "Drop more images here (png/jpg/webp)",
-                    type=["png", "jpg", "jpeg", "webp"],
+                add_files = st.file_uploader(
+                    "Drop files here",
+                    type=None,
                     accept_multiple_files=True,
-                    key=f"img_uploader__{expander_key}"
+                    key=f"add_files__{expander_key}"
                 )
 
-                new_caps = {}
-                if uploaded_imgs:
-                    st.markdown("### 📝 Descriptions for new images")
-                    for f in uploaded_imgs:
-                        new_caps[f.name] = st.text_area(
+                add_caps = {}
+                if add_files:
+                    st.markdown("**Descriptions for new files**")
+                    for f in add_files:
+                        add_caps[f.name] = st.text_area(
                             f"Description for {f.name}",
                             height=80,
-                            key=f"more_caption__{expander_key}__{f.name}"
+                            key=f"add_cap__{expander_key}__{f.name}"
                         )
 
-                    if st.button("💾 Save new images", key=f"save_more_imgs__{expander_key}"):
+                    if st.button("💾 Save attachments", use_container_width=True, key=f"save_added__{expander_key}"):
+                        media_dir = exp_media_dir(selected_project, exp_title, exp_date)
+
                         new_paths = []
-                        for f in uploaded_imgs:
-                            out_path = os.path.join(media_dir, f.name)
+                        for f in add_files:
                             try:
+                                out_path = _unique_path(os.path.join(media_dir, f.name))
                                 with open(out_path, "wb") as w:
                                     w.write(f.getbuffer())
                                 new_paths.append(out_path)
-
-                                # ✅ captions keyed by filename
-                                captions_map[os.path.basename(out_path)] = (new_caps.get(f.name, "") or "").strip()
+                                saved_caps[os.path.basename(out_path)] = (add_caps.get(f.name, "") or "").strip()
                             except Exception as e:
                                 st.error(f"Failed saving {f.name}: {e}")
 
@@ -8515,17 +10163,16 @@ elif tab_selection == "🧪 Development Process":
                                 (exp_df2["Experiment Title"].astype(str) == exp_title) &
                                 (exp_df2["Date"].astype(str) == exp_date)
                             )
-                            merged = existing_imgs + new_paths
-                            exp_df2.loc[mask, "Result Images"] = join_img_list(merged)
-                            exp_df2.loc[mask, "Image Captions"] = dump_captions(captions_map)
+                            merged = (saved_paths or []) + new_paths
+                            exp_df2.loc[mask, "Attachments"] = join_path_list(merged)
+                            exp_df2.loc[mask, "Attachment Captions"] = dump_captions(saved_caps)
                             save_experiments(exp_df2)
 
-                            st.success(f"Saved {len(new_paths)} image(s).")
+                            st.success(f"Saved {len(new_paths)} file(s).")
                             st.rerun()
 
                 st.divider()
 
-                # ---- Updates history
                 upd_df = load_updates()
                 exp_updates = upd_df[
                     (upd_df["Project Name"] == selected_project) &
@@ -8539,9 +10186,10 @@ elif tab_selection == "🧪 Development Process":
                     exp_updates["Update_sort"] = pd.to_datetime(exp_updates["Update Date"], errors="coerce")
                     exp_updates = exp_updates.sort_values("Update_sort", ascending=True)
                     for _, u in exp_updates.iterrows():
-                        st.write(f"📅 **{u.get('Update Date','')}** — **{u.get('Researcher','')}**: {u.get('Update Notes','')}")
+                        st.write(
+                            f"📅 **{u.get('Update Date', '')}** — **{u.get('Researcher', '')}**: {u.get('Update Notes', '')}"
+                        )
 
-                # ---- Add update
                 st.markdown("#### 🔄 Add Update")
                 with st.form(f"update_form__{expander_key}"):
                     update_researcher = st.text_input("Your name", key=f"upd_name__{expander_key}")
@@ -8567,9 +10215,6 @@ elif tab_selection == "🧪 Development Process":
 
     st.divider()
 
-    # =========================
-    # Project conclusion
-    # =========================
     st.subheader("📢 Project Conclusion")
     conclusion_file = f"project_conclusion__{selected_project.replace(' ', '_')}.txt"
 
@@ -8577,7 +10222,7 @@ elif tab_selection == "🧪 Development Process":
     if os.path.exists(conclusion_file):
         try:
             existing = open(conclusion_file, "r", encoding="utf-8").read()
-        except:
+        except Exception:
             existing = ""
 
     conclusion = st.text_area("Conclusion / final summary", value=existing, height=170)
@@ -8591,102 +10236,349 @@ elif tab_selection == "🧪 Development Process":
             st.error(f"Failed to save conclusion: {e}")
 # ------------------ Protocols Tab ------------------
 elif tab_selection == "📋 Protocols":
-    st.title("📋 Protocols")
-    st.subheader("Manage Tower Protocols")
+    import os, json, hashlib
+    import streamlit as st
 
+    # ==========================================================
+    # CSS (title lower + wide create form + clean cards)
+    # ==========================================================
+    st.markdown("""
+    <style>
+      .block-container { padding-top: 2.2rem; }
+
+      .proto-topbar {
+        display:flex; align-items:flex-end; justify-content:space-between;
+        gap: 12px; margin-bottom: 10px;
+      }
+      .proto-title h1 { margin: 0; padding: 0; line-height: 1.1; }
+      .proto-sub { opacity: 0.75; margin-top: 4px; font-size: 0.95rem; }
+
+      .chips { display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-start; margin: 10px 0 14px; }
+      .chip {
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.04);
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .section-card {
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.03);
+        padding: 14px 14px;
+        border-radius: 14px;
+        margin-bottom: 14px;
+      }
+
+      .proto-card {
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.03);
+        padding: 12px 12px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+      }
+      .proto-card .row1 {
+        display:flex; align-items:center; justify-content:space-between; gap:10px;
+      }
+      .proto-name {
+        font-weight: 750;
+        font-size: 1.05rem;
+        line-height: 1.2;
+      }
+      .proto-meta {
+        display:flex; gap: 6px; flex-wrap:wrap; justify-content:flex-end;
+        opacity: 0.9;
+      }
+      .pill {
+        font-size: 0.78rem;
+        border: 1px solid rgba(255,255,255,0.12);
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.03);
+      }
+      .hr-lite { height: 1px; background: rgba(255,255,255,0.08); margin: 10px 0; border-radius: 2px; }
+      .muted { opacity: 0.75; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .small-note { font-size: 0.85rem; opacity: 0.75; }
+
+      /* Expander as big panel */
+      details[data-testid="stExpander"] {
+        border-radius: 14px !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+        background: rgba(255,255,255,0.03) !important;
+        padding: 6px 10px !important;
+      }
+
+      /* ✅ Make text areas feel bigger */
+      textarea {
+        min-height: 420px !important; /* fallback */
+        font-size: 0.98rem !important;
+        line-height: 1.35 !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ==========================================================
+    # Header
+    # ==========================================================
+    st.markdown("""
+    <div class="proto-topbar">
+      <div class="proto-title">
+        <h1>📋 Protocols</h1>
+        <div class="proto-sub">Browse, run checklists, and manage tower protocols.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ==========================================================
+    # Storage
+    # ==========================================================
     PROTOCOLS_FILE = "protocols.json"
+    protocol_types = ["Drawings", "Maintenance", "Tower Regular Operations"]
+    sub_types = ["Checklist", "Instructions"]
 
-    # Load protocols from file if they exist
-    if os.path.exists(PROTOCOLS_FILE):
-        with open(PROTOCOLS_FILE, "r") as file:
-            st.session_state["protocols"] = json.load(file)
+    def _safe_read_json(path: str, default):
+        if not os.path.exists(path):
+            return default
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return default
+
+    def _safe_write_json(path: str, obj):
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(obj, f, indent=4)
+        os.replace(tmp, path)
 
     if "protocols" not in st.session_state:
-        st.session_state["protocols"] = []
+        st.session_state["protocols"] = _safe_read_json(PROTOCOLS_FILE, [])
 
-    # Ensure each protocol has a 'sub_type' key
-    for protocol in st.session_state["protocols"]:
-        if "sub_type" not in protocol:
-            protocol["sub_type"] = "Instructions"  # Default to "Instructions" if not provided
+    # Ensure schema
+    for p in st.session_state["protocols"]:
+        p.setdefault("type", "Tower Regular Operations")
+        p.setdefault("sub_type", "Instructions")
+        p.setdefault("instructions", "")
+        p.setdefault("name", "Untitled")
 
+    # Checklist progress state (session)
+    if "protocol_check_state" not in st.session_state:
+        st.session_state["protocol_check_state"] = {}  # {protocol_id: {item: bool}}
 
-    # Organize protocols by type and display each type as a subtitle with its protocols listed below
-    protocol_types = ["Drawings", "Maintenance", "Tower Regular Operations"]
-    for protocol_type in protocol_types:
-        st.subheader(f"Protocols for {protocol_type}")
-        filtered_protocols = [p for p in st.session_state["protocols"] if p.get("type") == protocol_type]
-        if filtered_protocols:
-            for protocol in filtered_protocols:
-                with st.expander(protocol["name"]):
-                    st.write(f"Type: {protocol['type']}")
-                    if protocol["sub_type"] == "Checklist":
-                        checklist_items = [item.strip() for item in protocol["instructions"].split("\n") if item.strip()]
-                        if checklist_items:
-                            # Provide a unique key for each checkbox
-                            checkbox_values = [st.checkbox(item, key=f"{protocol['name']}_{item}") for item in checklist_items]
-                            if all(checkbox_values):
-                                st.success(f"All items in {protocol['name']} checklist are completed!")
-                        else:
-                            st.info("No checklist items available.")
+    def _proto_id(p: dict) -> str:
+        s = f"{p.get('name','')}|{p.get('type','')}|{p.get('sub_type','')}"
+        return hashlib.md5(s.encode("utf-8")).hexdigest()[:10]
+
+    def _normalize_lines(text: str):
+        lines = [ln.strip() for ln in (text or "").splitlines()]
+        return [ln for ln in lines if ln]
+
+    def _matches(q: str, p: dict) -> bool:
+        if not q:
+            return True
+        blob = f"{p.get('name','')} {p.get('type','')} {p.get('sub_type','')} {p.get('instructions','')}".lower()
+        return q.lower() in blob
+
+    # ==========================================================
+    # Stats
+    # ==========================================================
+    total_n = len(st.session_state["protocols"])
+    by_type = {t: 0 for t in protocol_types}
+    by_sub = {s: 0 for s in sub_types}
+    for p in st.session_state["protocols"]:
+        if p.get("type") in by_type:
+            by_type[p["type"]] += 1
+        if p.get("sub_type") in by_sub:
+            by_sub[p["sub_type"]] += 1
+
+    st.markdown(
+        f"""
+        <div class="chips">
+          <div class="chip">Total: <b>{total_n}</b></div>
+          <div class="chip">Drawings: <b>{by_type["Drawings"]}</b></div>
+          <div class="chip">Maintenance: <b>{by_type["Maintenance"]}</b></div>
+          <div class="chip">Ops: <b>{by_type["Tower Regular Operations"]}</b></div>
+          <div class="chip">Checklists: <b>{by_sub["Checklist"]}</b></div>
+          <div class="chip">Instructions: <b>{by_sub["Instructions"]}</b></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ==========================================================
+    # 1) BROWSE FIRST (FULL WIDTH)
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("📚 Browse")
+
+    f1, f2, f3, f4 = st.columns([1.7, 1.0, 1.0, 0.8])
+    with f1:
+        q = st.text_input("Search", placeholder="Search name / type / content…", key="proto_search_full")
+    with f2:
+        type_filter = st.selectbox("Type", ["All"] + protocol_types, key="proto_type_filter_full")
+    with f3:
+        sub_filter = st.selectbox("Sub-type", ["All"] + sub_types, key="proto_sub_filter_full")
+    with f4:
+        sort_by = st.selectbox("Sort", ["A→Z", "Z→A"], key="proto_sort_full")
+
+    items = []
+    for p in st.session_state["protocols"]:
+        if type_filter != "All" and p.get("type") != type_filter:
+            continue
+        if sub_filter != "All" and p.get("sub_type") != sub_filter:
+            continue
+        if not _matches(q, p):
+            continue
+        items.append(p)
+
+    items.sort(key=lambda x: (x.get("name", "").lower()))
+    if sort_by == "Z→A":
+        items.reverse()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if not items:
+        st.info("No protocols match your filters.")
+    else:
+        for p in items:
+            pid = _proto_id(p)
+            name = p.get("name", "Untitled")
+            ptype = p.get("type", "")
+            psub = p.get("sub_type", "Instructions")
+            instructions = p.get("instructions", "")
+
+            st.markdown(
+                f"""
+                <div class="proto-card">
+                  <div class="row1">
+                    <div class="proto-name">{name}</div>
+                    <div class="proto-meta">
+                      <span class="pill">{ptype}</span>
+                      <span class="pill">{psub}</span>
+                    </div>
+                  </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            with st.expander("Open", expanded=False):
+                if psub == "Checklist":
+                    lines = _normalize_lines(instructions)
+                    if not lines:
+                        st.warning("Checklist has no items (one item per line).")
                     else:
-                        st.markdown("Instructions:\n" + protocol["instructions"].replace("\n", "  \n"))
+                        if pid not in st.session_state["protocol_check_state"]:
+                            st.session_state["protocol_check_state"][pid] = {ln: False for ln in lines}
 
-                    # Individual delete button for protocol
-                    delete_button = st.button(f"Delete {protocol['name']}", key=f"delete_{protocol['name']}")
-                    if delete_button:
-                        st.session_state["protocols"].remove(protocol)
-                        # Save the updated protocols list to file
-                        with open(PROTOCOLS_FILE, "w") as file:
-                            json.dump(st.session_state["protocols"], file, indent=4)
-                        st.success(f"Protocol '{protocol['name']}' deleted successfully!")
-                        st.rerun()  # Immediately refresh the list
-        else:
-            st.warning(f"No protocols available for {protocol_type}")
+                        existing = st.session_state["protocol_check_state"][pid]
+                        merged = {ln: bool(existing.get(ln, False)) for ln in lines}
+                        st.session_state["protocol_check_state"][pid] = merged
 
-    st.markdown("---")
+                        done_count = sum(1 for v in merged.values() if v)
+                        total_count = len(lines)
 
-    # Protocol creation section
-    create_new = st.checkbox("Create New Protocol", key="create_new_protocol_checkbox")
-    if create_new:
-        with st.form(key="new_protocol_form"):
-            protocol_name = st.text_input("Enter Protocol Name")
-            protocol_type = st.selectbox("Select Protocol Type", protocol_types, key="protocol_type_select_create")
+                        st.caption(f"Progress: **{done_count}/{total_count}**")
+                        st.progress(done_count / total_count if total_count else 0)
 
-            checklist_or_instructions = st.selectbox("Select Protocol Sub-Type", ["Checklist", "Instructions"],
-                                                     key="checklist_or_instructions_create")
+                        for i, item in enumerate(lines):
+                            k = f"proto_chk_{pid}_{i}"
+                            val = st.checkbox(item, value=merged[item], key=k)
+                            st.session_state["protocol_check_state"][pid][item] = val
 
-            protocol_instructions = st.text_area("Enter Protocol Instructions")
-            submit_button = st.form_submit_button(label="Add Protocol")
-            if submit_button:
-                if protocol_name and protocol_instructions:
-                    new_protocol = {"name": protocol_name, "type": protocol_type, "sub_type": checklist_or_instructions,
-                                    "instructions": protocol_instructions}
-                    st.session_state["protocols"].append(new_protocol)
-                    # Save updated protocols list to file
-                    with open(PROTOCOLS_FILE, "w") as file:
-                        json.dump(st.session_state["protocols"], file, indent=4)
-                    # Immediately update the protocols list without page refresh
-                    st.session_state["protocols"] = st.session_state["protocols"]
-                    st.success(f"Protocol '{protocol_name}' added successfully!")
-                    st.rerun()  # Immediately refresh the list
+                        if done_count == total_count and total_count > 0:
+                            st.success("✅ Checklist completed!")
+
+                        if st.button("Reset this checklist", key=f"reset_{pid}", use_container_width=True):
+                            st.session_state["protocol_check_state"][pid] = {ln: False for ln in lines}
+                            st.rerun()
+
                 else:
-                    st.error("Please fill out all fields.")
-    st.markdown("---")
-    # Now display the delete checkbox and delete button at the end of the page
-    delete_mode = st.checkbox("Delete Protocols", key="delete_mode")
-    if delete_mode:
-        protocol_names = [protocol["name"] for protocol in st.session_state["protocols"]]
-        selected_for_deletion = st.multiselect("Select protocols to delete", options=protocol_names, key="protocols_to_delete")
-        if selected_for_deletion:
-            if st.button("Delete Selected Protocols"):
-                st.session_state["protocols"] = [protocol for protocol in st.session_state["protocols"] if protocol["name"] not in selected_for_deletion]
-                with open(PROTOCOLS_FILE, "w") as file:
-                    json.dump(st.session_state["protocols"], file, indent=4)
-                st.success(f"Deleted {len(selected_for_deletion)} protocol(s) successfully!")
+                    pretty = (instructions or "").strip()
+                    if not pretty:
+                        st.info("No instructions found.")
+                    else:
+                        st.markdown(pretty.replace("\n", "  \n"))
+
+                st.markdown('<div class="hr-lite"></div>', unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='small-note muted'>ID: <span class='mono'>{pid}</span></div>",
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================================
+    # 2) CREATE / MANAGE AFTER (FULL WIDTH + HUGE WRITING AREA)
+    # ==========================================================
+    with st.expander("➕ Create / Manage Protocols", expanded=False):
+        st.markdown("<div class='small-note muted'>Create in full width so it’s comfortable to write.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
+
+        # ✅ FULL WIDTH create form (no narrow columns)
+        st.subheader("➕ Create new protocol")
+
+        with st.form("proto_create_form_big", clear_on_submit=True):
+            r1c1, r1c2, r1c3 = st.columns([1.8, 1.0, 1.0])
+            with r1c1:
+                new_name = st.text_input("Protocol name", placeholder="e.g. Pre-Draw Checklist")
+            with r1c2:
+                new_type = st.selectbox("Type", protocol_types, index=0, key="proto_new_type_big")
+            with r1c3:
+                new_sub = st.selectbox("Sub-type", sub_types, index=0, key="proto_new_subtype_big")
+
+            # ✅ BIG writing space
+            new_text = st.text_area(
+                "Instructions",
+                height=520,  # real size (works better than CSS alone)
+                placeholder="Checklist: one item per line.\n\nInstructions: write steps freely.",
+            )
+
+            add = st.form_submit_button("Add protocol", use_container_width=True)
+            if add:
+                if not (new_name and new_text):
+                    st.error("Please fill **name** and **instructions**.")
+                else:
+                    st.session_state["protocols"].append({
+                        "name": new_name.strip(),
+                        "type": new_type,
+                        "sub_type": new_sub,
+                        "instructions": new_text.strip(),
+                    })
+                    _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
+                    st.success(f"Added: {new_name}")
+                    st.rerun()
+
+        st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
+
+        # ✅ Manage block (bulk delete + reset)
+        st.subheader("🧹 Manage")
+        manage_mode = st.toggle("Enable manage mode", key="proto_manage_mode_big", value=False)
+
+        if manage_mode:
+            names = [p.get("name", "") for p in st.session_state["protocols"]]
+            delete_sel = st.multiselect("Select protocols to delete", options=names, key="proto_delete_sel_big")
+
+            if st.button("🗑️ Delete selected", use_container_width=True, disabled=(len(delete_sel) == 0)):
+                st.session_state["protocols"] = [
+                    p for p in st.session_state["protocols"] if p.get("name", "") not in delete_sel
+                ]
+                _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
+                st.success(f"Deleted {len(delete_sel)} protocol(s).")
                 st.rerun()
+
+            st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
+
+        if st.button("🔁 Reset ALL checklist progress (session)", use_container_width=True):
+            st.session_state["protocol_check_state"] = {}
+            st.success("Checklist progress cleared for this session.")
+
+        st.caption("Tip: Keep manage mode OFF for normal use.")
 # ------------------ Maintenance Tab ------------------
 elif tab_selection == "🧰 Maintenance":
-    import os, sys, json, pathlib, subprocess, time, hashlib
+    import os, json, glob, time
     import datetime as dt
 
     import numpy as np
@@ -8694,14 +10586,6 @@ elif tab_selection == "🧰 Maintenance":
     import streamlit as st
     import plotly.graph_objects as go
     import duckdb
-
-    # =========================================================
-    # Persistent DuckDB (shared with SQL Lab)
-    # =========================================================
-    DB_PATH = os.path.join(os.getcwd(), "tower.duckdb")
-    if "tower_con" not in st.session_state:
-        st.session_state.tower_con = duckdb.connect(DB_PATH)
-    con = st.session_state.tower_con
 
     st.title("🧰 Maintenance")
     st.caption(
@@ -8711,16 +10595,85 @@ elif tab_selection == "🧰 Maintenance":
     )
 
     # =========================================================
+    # Small utils
+    # =========================================================
+    def safe_str(x) -> str:
+        try:
+            if x is None:
+                return ""
+            if isinstance(x, float) and np.isnan(x):
+                return ""
+            return str(x)
+        except Exception:
+            return ""
+
+    # =========================================================
     # Paths
     # =========================================================
     BASE_DIR = os.getcwd()
-    MAINT_FOLDER = os.path.join(BASE_DIR, "maintenance")
-    DRAW_FOLDER = os.path.join(BASE_DIR, "data_set_csv")
+    MAINT_FOLDER = P.maintenance_dir
+    DRAW_FOLDER = os.path.join(BASE_DIR, P.dataset_dir)   # dataset CSVs (summary)
+    LOGS_FOLDER = os.path.join(BASE_DIR, P.logs_dir)      # ✅ LOG CSVs (MFC actual)
     STATE_PATH = os.path.join(MAINT_FOLDER, "_app_state.json")
     os.makedirs(MAINT_FOLDER, exist_ok=True)
 
+    # ✅ Append-only CSV logs (for SQL Lab line-search)
+    MAINT_ACTIONS_CSV = os.path.join(MAINT_FOLDER, "maintenance_actions_log.csv")
+    FAULTS_CSV = os.path.join(MAINT_FOLDER, "faults_log.csv")
+    FAULTS_ACTIONS_CSV = os.path.join(MAINT_FOLDER, "faults_actions_log.csv")
+
+    MAINT_ACTIONS_COLS = [
+        "maintenance_id",
+        "maintenance_ts",
+        "maintenance_component",
+        "maintenance_task",
+        "maintenance_task_id",
+        "maintenance_mode",
+        "maintenance_hours_source",
+        "maintenance_done_date",
+        "maintenance_done_hours",
+        "maintenance_done_draw",
+        "maintenance_source_file",
+        "maintenance_actor",
+        "maintenance_note",
+    ]
+
+    FAULTS_COLS = [
+        "fault_id",
+        "fault_ts",
+        "fault_component",
+        "fault_title",
+        "fault_description",
+        "fault_severity",
+        "fault_actor",
+        "fault_source_file",
+        "fault_related_draw",
+    ]
+
+    # ✅ Fault actions (close/reopen/notes) — append-only
+    FAULTS_ACTIONS_COLS = [
+        "fault_action_id",
+        "fault_id",
+        "action_ts",
+        "action_type",     # close / reopen / note
+        "actor",
+        "note",
+        "fix_summary",
+    ]
+
     # =========================================================
-    # Create DB tables (tasks snapshot + actions log)
+    # DuckDB connection (shared with SQL Lab)
+    # =========================================================
+    if "sql_duck_con" not in st.session_state:
+        st.session_state["sql_duck_con"] = duckdb.connect(os.path.join(BASE_DIR, P.duckdb_path))
+    con = st.session_state["sql_duck_con"]
+    try:
+        con.execute("PRAGMA threads=4;")
+    except Exception:
+        pass
+
+    # =========================================================
+    # Create DB tables
     # =========================================================
     con.execute("""
     CREATE TABLE IF NOT EXISTS maintenance_tasks (
@@ -8762,6 +10715,32 @@ elif tab_selection == "🧰 Maintenance":
     );
     """)
 
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS faults_events (
+        fault_id        BIGINT,
+        fault_ts        TIMESTAMP,
+        component       VARCHAR,
+        title           VARCHAR,
+        description     VARCHAR,
+        severity        VARCHAR,
+        actor           VARCHAR,
+        source_file     VARCHAR,
+        related_draw    VARCHAR
+    );
+    """)
+
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS faults_actions (
+        fault_action_id  BIGINT,
+        fault_id         BIGINT,
+        action_ts        TIMESTAMP,
+        action_type      VARCHAR,
+        actor            VARCHAR,
+        note             VARCHAR,
+        fix_summary      VARCHAR
+    );
+    """)
+
     # =========================================================
     # Persistent state helpers
     # =========================================================
@@ -8793,6 +10772,99 @@ elif tab_selection == "🧰 Maintenance":
     state = load_state(STATE_PATH)
 
     # =========================================================
+    # CSV helpers (append-only)
+    # =========================================================
+    def _ensure_csv(path: str, cols: list):
+        if not os.path.isfile(path):
+            pd.DataFrame(columns=cols).to_csv(path, index=False)
+
+    def _append_csv(path: str, cols: list, df_rows: pd.DataFrame):
+        _ensure_csv(path, cols)
+        df = df_rows.copy()
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        df = df[cols]
+
+        # stringify time fields to avoid dtype crash
+        for tcol in [c for c in cols if c.endswith("_ts")]:
+            df[tcol] = pd.to_datetime(df[tcol], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+        for dcol in [c for c in cols if c.endswith("_date")]:
+            df[dcol] = pd.to_datetime(df[dcol], errors="coerce").dt.strftime("%Y-%m-%d")
+
+        df.to_csv(path, mode="a", header=False, index=False)
+
+    def _read_csv_safe(path: str, cols: list) -> pd.DataFrame:
+        if not os.path.isfile(path):
+            return pd.DataFrame(columns=cols)
+        try:
+            df = pd.read_csv(path)
+            if df is None:
+                return pd.DataFrame(columns=cols)
+            for c in cols:
+                if c not in df.columns:
+                    df[c] = ""
+            return df[cols].copy()
+        except Exception:
+            return pd.DataFrame(columns=cols)
+
+    def _latest_fault_state(actions_df: pd.DataFrame) -> dict:
+        """
+        fault_id -> last action (close/reopen/note) ; closed if last action is 'close'
+        """
+        out = {}
+        if actions_df is None or actions_df.empty:
+            return out
+
+        a = actions_df.copy()
+        a["action_ts"] = pd.to_datetime(a["action_ts"], errors="coerce")
+        a["fault_id"] = pd.to_numeric(a["fault_id"], errors="coerce")
+        a = a.dropna(subset=["fault_id"]).copy()
+        a["fault_id"] = a["fault_id"].astype(int)
+
+        a = a.sort_values(["fault_id", "action_ts"], ascending=[True, True])
+        last = a.groupby("fault_id").tail(1)
+
+        for _, r in last.iterrows():
+            fid = int(r["fault_id"])
+            typ = safe_str(r.get("action_type", "")).strip().lower()
+            out[fid] = {
+                "is_closed": (typ == "close"),
+                "last_ts": r.get("action_ts", None),
+                "last_note": safe_str(r.get("note", "")),
+                "last_fix": safe_str(r.get("fix_summary", "")),
+                "last_type": typ,
+                "last_actor": safe_str(r.get("actor", "")),
+            }
+        return out
+
+    def _write_fault_action(con, *, fault_id: int, action_type: str, actor: str, note: str = "", fix_summary: str = ""):
+        now_dt = dt.datetime.now()
+        aid = int(time.time() * 1000)
+
+        # DuckDB
+        try:
+            con.execute("""
+                INSERT INTO faults_actions
+                (fault_action_id, fault_id, action_ts, action_type, actor, note, fix_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [aid, int(fault_id), now_dt, str(action_type), str(actor), str(note), str(fix_summary)])
+        except Exception as e:
+            st.warning(f"Fault action DB insert failed (still saving CSV): {e}")
+
+        # CSV
+        row = pd.DataFrame([{
+            "fault_action_id": aid,
+            "fault_id": int(fault_id),
+            "action_ts": now_dt,
+            "action_type": str(action_type),
+            "actor": str(actor),
+            "note": str(note),
+            "fix_summary": str(fix_summary),
+        }])
+        _append_csv(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS, row)
+
+    # =========================================================
     # Draw count helper
     # =========================================================
     def get_draw_csv_count(folder: str) -> int:
@@ -8804,29 +10876,6 @@ elif tab_selection == "🧰 Maintenance":
         )
 
     current_draw_count = get_draw_csv_count(DRAW_FOLDER)
-
-    # =========================================================
-    # Routine split (Tracking_Mode == event)
-    # =========================================================
-    def pick_pre_post_tasks(maintenance_df: pd.DataFrame):
-        df = maintenance_df.copy()
-        for c in ["Task", "Notes", "Procedure_Summary", "Tracking_Mode", "Component", "Source_File", "Task_ID"]:
-            if c not in df.columns:
-                df[c] = ""
-            df[c] = df[c].fillna("").astype(str)
-
-        routine = df[df["Tracking_Mode"].str.strip().str.lower() == "event"].copy()
-
-        text = (routine["Task"] + " " + routine["Notes"] + " " + routine["Procedure_Summary"]).str.lower()
-        is_pre = text.str.contains(r"\bpre\b|\bbefore\b|\bstartup\b|\bstart up\b|\bstart-up\b")
-        is_post = text.str.contains(r"\bpost\b|\bafter\b|\bshutdown\b|\bshut down\b|\bshut-down\b|\bend\b")
-
-        pre = routine[is_pre].copy()
-        post = routine[is_post].copy()
-        other = routine[~(is_pre | is_post)].copy()
-        pre = pd.concat([pre, other], ignore_index=True)
-
-        return pre, post
 
     # =========================================================
     # Maintenance file loading
@@ -8843,8 +10892,8 @@ elif tab_selection == "🧰 Maintenance":
         "interval type": "Interval_Type",
         "interval value": "Interval_Value",
         "interval unit": "Interval_Unit",
-        "tracking mode": "Tracking_Mode",       # calendar / hours / event / draws
-        "hours source": "Hours_Source",         # FURNACE / UV1 / UV2
+        "tracking mode": "Tracking_Mode",
+        "hours source": "Hours_Source",
         "calendar rule": "Calendar_Rule",
         "due threshold (days)": "Due_Threshold_Days",
         "document name": "Manual_Name",
@@ -8944,7 +10993,6 @@ elif tab_selection == "🧰 Maintenance":
         state["warn_days"] = int(st.session_state.get("maint_warn_days", 14))
         state["warn_hours"] = float(st.session_state.get("maint_warn_hours", 50.0))
         save_state(STATE_PATH, state)
-        # mirror for home tab
         st.session_state["furnace_hours"] = state["furnace_hours"]
         st.session_state["uv1_hours"] = state["uv1_hours"]
         st.session_state["uv2_hours"] = state["uv2_hours"]
@@ -8956,44 +11004,44 @@ elif tab_selection == "🧰 Maintenance":
     default_warn_hours = float(state.get("warn_hours", 50.0) or 50.0)
 
     st.subheader("Current status inputs (saved)")
-    # Only show the disabled date_input for today's date, no "Real today" or "Saved date" UI.
     current_date = dt.date.today()
-    st.date_input(
-        "Today",
-        value=current_date,
-        disabled=True
-    )
+    st.date_input("Today", value=current_date, disabled=True)
+
     c2, c3, c4, c5 = st.columns([1, 1, 1, 1])
     with c2:
-        furnace_hours = st.number_input("Furnace hours", min_value=0.0, value=default_furnace, step=1.0,
-                                        key="maint_furnace_hours", on_change=_persist_inputs)
+        furnace_hours = st.number_input(
+            "Furnace hours", min_value=0.0, value=default_furnace, step=1.0,
+            key="maint_furnace_hours", on_change=_persist_inputs
+        )
     with c3:
-        uv1_hours = st.number_input("UV System 1 hours", min_value=0.0, value=default_uv1, step=1.0,
-                                    key="maint_uv1_hours", on_change=_persist_inputs)
+        uv1_hours = st.number_input(
+            "UV System 1 hours", min_value=0.0, value=default_uv1, step=1.0,
+            key="maint_uv1_hours", on_change=_persist_inputs
+        )
     with c4:
-        uv2_hours = st.number_input("UV System 2 hours", min_value=0.0, value=default_uv2, step=1.0,
-                                    key="maint_uv2_hours", on_change=_persist_inputs)
+        uv2_hours = st.number_input(
+            "UV System 2 hours", min_value=0.0, value=default_uv2, step=1.0,
+            key="maint_uv2_hours", on_change=_persist_inputs
+        )
     with c5:
-        warn_days = st.number_input("Warn if due within (days)", min_value=0, value=default_warn_days, step=1,
-                                    key="maint_warn_days", on_change=_persist_inputs)
+        warn_days = st.number_input(
+            "Warn if due within (days)", min_value=0, value=default_warn_days, step=1,
+            key="maint_warn_days", on_change=_persist_inputs
+        )
 
-    warn_hours = st.number_input("Warn if due within (hours)", min_value=0.0, value=default_warn_hours, step=1.0,
-                                 key="maint_warn_hours", on_change=_persist_inputs)
+    warn_hours = st.number_input(
+        "Warn if due within (hours)", min_value=0.0, value=default_warn_hours, step=1.0,
+        key="maint_warn_hours", on_change=_persist_inputs
+    )
 
     _persist_inputs()
-
     st.caption("Hours-based tasks use **Hours Source**: FURNACE / UV1 / UV2. If empty → defaults to FURNACE.")
 
     # =========================================================
-    # Actor (fixed session_state usage)
+    # Actor
     # =========================================================
-    if "maint_actor" not in st.session_state:
-        st.session_state["maint_actor"] = "operator"
-
-    st.text_input(
-        "Actor / operator name (for DB history)",
-        key="maint_actor"
-    )
+    st.session_state.setdefault("maint_actor", "operator")
+    st.text_input("Actor / operator name (for history)", key="maint_actor")
     actor = st.session_state.get("maint_actor", "operator")
 
     # =========================================================
@@ -9113,7 +11161,6 @@ elif tab_selection == "🧰 Maintenance":
 
     def status_row(row):
         mode = row.get("Tracking_Mode_norm", "")
-
         if mode == "event":
             return "ROUTINE"
 
@@ -9162,39 +11209,1189 @@ elif tab_selection == "🧰 Maintenance":
 
     dfm["Status"] = dfm.apply(status_row, axis=1)
 
-    # Publish quick counts for Home tab
     st.session_state["maint_overdue"] = int((dfm["Status"] == "OVERDUE").sum())
     st.session_state["maint_due_soon"] = int((dfm["Status"] == "DUE SOON").sum())
 
     # =========================================================
-    # Sync "maintenance_tasks" snapshot into DuckDB
+    # Dashboard metrics + Open Critical Faults
     # =========================================================
-    render_maintenance_tasks_snapshot(dfm, con)
+    def get_open_faults_counts():
+        faults_csv = _read_csv_safe(FAULTS_CSV, FAULTS_COLS)
+        actions_csv = _read_csv_safe(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS)
+        smap = _latest_fault_state(actions_csv)
+
+        if faults_csv.empty:
+            return 0, 0
+
+        faults_csv["fault_id"] = pd.to_numeric(faults_csv["fault_id"], errors="coerce")
+        faults_csv = faults_csv.dropna(subset=["fault_id"]).copy()
+        faults_csv["fault_id"] = faults_csv["fault_id"].astype(int)
+
+        faults_csv["_is_closed"] = faults_csv["fault_id"].apply(lambda fid: bool(smap.get(int(fid), {}).get("is_closed", False)))
+        open_df = faults_csv[~faults_csv["_is_closed"]].copy()
+
+        crit_open = int((open_df["fault_severity"].astype(str).str.lower() == "critical").sum()) if not open_df.empty else 0
+        open_total = int(len(open_df))
+        return open_total, crit_open
+
+    def render_maintenance_dashboard_metrics(dfm):
+        st.subheader("Dashboard")
+        overdue = int((dfm["Status"] == "OVERDUE").sum())
+        due_soon = int((dfm["Status"] == "DUE SOON").sum())
+        routine = int((dfm["Status"] == "ROUTINE").sum())
+        ok = int((dfm["Status"] == "OK").sum())
+        open_faults, crit_faults = get_open_faults_counts()
+
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("OVERDUE", overdue)
+        c2.metric("DUE SOON", due_soon)
+        c3.metric("ROUTINE", routine)
+        c4.metric("OK", ok)
+        c5.metric("🚨 Open faults", open_faults)
+        c6.metric("🟥 Critical open", crit_faults)
 
     # =========================================================
-    # INLINE "NEW DRAW DETECTED" PANEL
+    # Horizon selector + roadmaps
     # =========================================================
-    render_new_draw_checklist(
+    def render_maintenance_horizon_selector(current_draw_count: int):
+        st.subheader("📅 Future schedule view")
+
+        st.markdown(
+            """
+            <style>
+            div.stButton > button {
+                width: 100%;
+                height: 44px;
+                border-radius: 12px;
+                font-weight: 600;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.session_state.setdefault("maint_horizon_hours", 10)
+        st.session_state.setdefault("maint_horizon_days", 7)
+        st.session_state.setdefault("maint_horizon_draws", 5)
+
+        def button_group(title, options, value, key):
+            st.caption(title)
+            cols = st.columns(len(options))
+            for col, (label, v) in zip(cols, options):
+                if col.button(label, key=f"{key}_{v}", type="primary" if v == value else "secondary"):
+                    return v
+            return value
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.session_state["maint_horizon_hours"] = button_group(
+                "Hours horizon",
+                [("10", 10), ("50", 50), ("100", 100)],
+                st.session_state["maint_horizon_hours"],
+                "mh"
+            )
+
+        with c2:
+            st.session_state["maint_horizon_days"] = button_group(
+                "Calendar horizon",
+                [("Week", 7), ("Month", 30), ("3 Months", 90)],
+                st.session_state["maint_horizon_days"],
+                "md"
+            )
+
+        with c3:
+            st.session_state["maint_horizon_draws"] = button_group(
+                "Draw horizon",
+                [("5", 5), ("10", 10), ("50", 50)],
+                st.session_state["maint_horizon_draws"],
+                "mD"
+            )
+
+        st.caption(
+            f"📦 Now: **{current_draw_count}** → "
+            f"Horizon: **{st.session_state['maint_horizon_draws']}** → "
+            f"Up to draw **#{current_draw_count + st.session_state['maint_horizon_draws']}**"
+        )
+
+        return (
+            st.session_state["maint_horizon_hours"],
+            st.session_state["maint_horizon_days"],
+            st.session_state["maint_horizon_draws"],
+        )
+
+    def render_maintenance_roadmaps(
+        dfm: pd.DataFrame,
+        current_date,
+        current_draw_count: int,
+        furnace_hours: float,
+        uv1_hours: float,
+        uv2_hours: float,
+        horizon_hours: int,
+        horizon_days: int,
+        horizon_draws: int,
+    ):
+        def status_color(s):
+            s = str(s).upper()
+            if s == "OVERDUE":
+                return "#ff4d4d"
+            if s == "DUE SOON":
+                return "#ffcc00"
+            return "#66ff99"
+
+        def roadmap(x0, x1, title, xlabel, df, xcol, hover):
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=[x0, x1], y=[0, 0], mode="lines",
+                line=dict(width=6, color="rgba(180,180,180,0.2)"),
+                hoverinfo="skip"
+            ))
+            fig.add_vline(x=x0, line_dash="dash")
+
+            if df is not None and not df.empty:
+                fig.add_trace(go.Scatter(
+                    x=df[xcol],
+                    y=[0] * len(df),
+                    mode="markers",
+                    marker=dict(
+                        size=13,
+                        color=[status_color(s) for s in df["Status"]],
+                        line=dict(width=1, color="rgba(255,255,255,0.5)")
+                    ),
+                    text=df[hover],
+                    hovertemplate="%{text}<extra></extra>",
+                ))
+            else:
+                mid = x0 + (x1 - x0) / 2
+                fig.add_annotation(x=mid, y=0, text="No tasks in horizon", showarrow=False)
+
+            fig.update_layout(
+                title=title,
+                height=220,
+                yaxis=dict(visible=False),
+                xaxis=dict(title=xlabel),
+                margin=dict(l=10, r=10, t=40, b=10),
+            )
+            return fig
+
+        def norm_group(src):
+            s = str(src).lower()
+            if "uv1" in s:
+                return "UV1"
+            if "uv2" in s:
+                return "UV2"
+            return "FURNACE"
+
+        hours_df = dfm[dfm["Tracking_Mode_norm"] == "hours"].copy()
+        hours_df["Due"] = pd.to_numeric(hours_df["Next_Due_Hours"], errors="coerce")
+        hours_df = hours_df.dropna(subset=["Due"])
+        hours_df["Group"] = hours_df["Hours_Source"].apply(norm_group)
+        hours_df["Hover"] = hours_df["Component"] + " — " + hours_df["Task"] + "<br>Status: " + hours_df["Status"]
+
+        cal_df = dfm[dfm["Tracking_Mode_norm"] == "calendar"].copy()
+        cal_df["Due"] = pd.to_datetime(cal_df["Next_Due_Date"], errors="coerce")
+        cal_df = cal_df.dropna(subset=["Due"])
+        cal_df["Hover"] = cal_df["Component"] + " — " + cal_df["Task"] + "<br>Status: " + cal_df["Status"]
+
+        draw_df = dfm[dfm["Tracking_Mode_norm"] == "draws"].copy()
+        draw_df["Due"] = pd.to_numeric(draw_df["Next_Due_Draw"], errors="coerce")
+        draw_df = draw_df.dropna(subset=["Due"])
+        draw_df["Hover"] = draw_df["Component"] + " — " + draw_df["Task"] + "<br>Status: " + draw_df["Status"]
+
+        st.markdown("### 🔥 Furnace / 💡 UV timelines")
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            x0, x1 = furnace_hours, furnace_hours + horizon_hours
+            st.plotly_chart(
+                roadmap(x0, x1, "FURNACE", "Hours",
+                        hours_df[(hours_df["Group"] == "FURNACE") & hours_df["Due"].between(x0, x1)],
+                        "Due", "Hover"),
+                use_container_width=True
+            )
+
+        with c2:
+            x0, x1 = uv1_hours, uv1_hours + horizon_hours
+            st.plotly_chart(
+                roadmap(x0, x1, "UV1", "Hours",
+                        hours_df[(hours_df["Group"] == "UV1") & hours_df["Due"].between(x0, x1)],
+                        "Due", "Hover"),
+                use_container_width=True
+            )
+
+        with c3:
+            x0, x1 = uv2_hours, uv2_hours + horizon_hours
+            st.plotly_chart(
+                roadmap(x0, x1, "UV2", "Hours",
+                        hours_df[(hours_df["Group"] == "UV2") & hours_df["Due"].between(x0, x1)],
+                        "Due", "Hover"),
+                use_container_width=True
+            )
+
+        st.markdown("### 🧵 Draw timeline")
+        d0, d1 = current_draw_count, current_draw_count + horizon_draws
+        st.plotly_chart(
+            roadmap(d0, d1, "Draw-based tasks", "Draw #",
+                    draw_df[draw_df["Due"].between(d0, d1)],
+                    "Due", "Hover"),
+            use_container_width=True
+        )
+
+        st.markdown("### 🗓️ Calendar timeline")
+        t0 = pd.Timestamp(current_date)
+        t1 = t0 + pd.Timedelta(days=horizon_days)
+        st.plotly_chart(
+            roadmap(t0, t1, "Calendar tasks", "Date",
+                    cal_df[(cal_df["Due"] >= t0) & (cal_df["Due"] <= t1)],
+                    "Due", "Hover"),
+            use_container_width=True
+        )
+
+    # =========================================================
+    # Done editor + apply done (updates + logs DB + CSV)
+    # =========================================================
+    def render_maintenance_done_editor(dfm):
+        st.subheader("Mark tasks as done")
+
+        focus_default = ["OVERDUE", "DUE SOON", "ROUTINE"]
+        focus_status = st.multiselect(
+            "Work on these statuses",
+            ["OVERDUE", "DUE SOON", "ROUTINE", "OK"],
+            default=focus_default,
+            key="maint_focus_status"
+        )
+
+        work = (
+            dfm[dfm["Status"].isin(focus_status)]
+            .copy()
+            .sort_values(["Status", "Component", "Task"])
+        )
+        work["Done_Now"] = False
+
+        cols = [
+            "Done_Now",
+            "Status", "Component", "Task", "Task_ID",
+            "Tracking_Mode", "Hours_Source", "Current_Hours_For_Task",
+            "Last_Done_Date", "Last_Done_Hours", "Last_Done_Draw",
+            "Next_Due_Date", "Next_Due_Hours", "Next_Due_Draw",
+            "Manual_Name", "Page", "Document",
+            "Owner", "Source_File"
+        ]
+        cols = [c for c in cols if c in work.columns]
+
+        edited = st.data_editor(
+            work[cols],
+            use_container_width=True,
+            height=420,
+            column_config={
+                "Done_Now": st.column_config.CheckboxColumn("Done now", help="Tick tasks you completed")
+            },
+            disabled=[c for c in cols if c != "Done_Now"],
+            key="maint_editor"
+        )
+        return edited
+
+    def render_maintenance_apply_done(
+        edited,
+        *,
         dfm,
+        current_date,
         current_draw_count,
-        state,
-        STATE_PATH,
-        save_state,
-    )
+        actor,
+        MAINT_FOLDER,
+        con,
+        read_file,
+        write_file,
+        normalize_df,
+        templateize_df,
+        pick_current_hours,
+        mode_norm,
+    ):
+        if not st.button("✅ Apply 'Done Now' updates", type="primary"):
+            return
+
+        done_rows = edited[edited["Done_Now"] == True].copy()
+        if done_rows.empty:
+            st.info("No tasks selected.")
+            return
+
+        updated = 0
+        problems = []
+
+        # ---- Update source files ----
+        for src, grp in done_rows.groupby("Source_File"):
+            path = os.path.join(MAINT_FOLDER, src)
+            try:
+                raw = read_file(path)
+                df_src = normalize_df(raw)
+
+                for _, r in grp.iterrows():
+                    mode = mode_norm(r.get("Tracking_Mode", ""))
+
+                    mask = (
+                        df_src["Component"].astype(str).eq(str(r.get("Component", ""))) &
+                        df_src["Task"].astype(str).eq(str(r.get("Task", "")))
+                    )
+                    if not mask.any():
+                        continue
+
+                    df_src.loc[mask, "Last_Done_Date"] = current_date.isoformat()
+
+                    if mode == "hours":
+                        df_src.loc[mask, "Last_Done_Hours"] = float(pick_current_hours(r.get("Hours_Source", "")))
+                    elif mode == "draws":
+                        df_src.loc[mask, "Last_Done_Draw"] = int(current_draw_count)
+
+                    updated += int(mask.sum())
+
+                out = templateize_df(df_src, list(raw.columns))
+                write_file(path, out)
+
+            except Exception as e:
+                problems.append((src, str(e)))
+
+        st.success(f"Updated {updated} task(s).")
+
+        # ---- Log to DuckDB + CSV line log ----
+        now_dt = dt.datetime.now()
+        csv_rows = []
+
+        for _, r in done_rows.iterrows():
+            action_id = int(time.time() * 1000)
+            mode = mode_norm(r.get("Tracking_Mode", ""))
+
+            hs_raw = r.get("Hours_Source", "")
+            hs_str = "" if hs_raw is None or (isinstance(hs_raw, float) and np.isnan(hs_raw)) else str(hs_raw).strip()
+            if hs_str == "":
+                hs_str = "FURNACE"
+
+            # ALWAYS snapshot hours (for filtering/search)
+            hours_snapshot = float(pick_current_hours(hs_str))
+
+            done_hours_db = None
+            done_draw = None
+            if mode == "hours":
+                done_hours_db = hours_snapshot
+            elif mode == "draws":
+                done_draw = int(current_draw_count)
+
+            try:
+                con.execute("""
+                    INSERT INTO maintenance_actions
+                    (action_id, action_ts, component, task, task_id, tracking_mode, hours_source,
+                     done_date, done_hours, done_draw, source_file, actor, note)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    action_id,
+                    now_dt,
+                    str(r.get("Component", "")),
+                    str(r.get("Task", "")),
+                    str(r.get("Task_ID", "")),
+                    str(r.get("Tracking_Mode", "")),
+                    hs_str,
+                    current_date,
+                    done_hours_db,
+                    done_draw,
+                    str(r.get("Source_File", "")),
+                    str(actor),
+                    "",
+                ])
+            except Exception as e:
+                st.warning(f"DuckDB insert failed (still saving CSV log): {e}")
+
+            csv_rows.append({
+                "maintenance_id": action_id,
+                "maintenance_ts": now_dt,
+                "maintenance_component": str(r.get("Component", "")),
+                "maintenance_task": str(r.get("Task", "")),
+                "maintenance_task_id": str(r.get("Task_ID", "")),
+                "maintenance_mode": str(r.get("Tracking_Mode", "")),
+                "maintenance_hours_source": hs_str,
+                "maintenance_done_date": current_date,
+                "maintenance_done_hours": hours_snapshot,  # ✅ always filled
+                "maintenance_done_draw": done_draw if done_draw is not None else "",
+                "maintenance_source_file": str(r.get("Source_File", "")),
+                "maintenance_actor": str(actor),
+                "maintenance_note": "",
+            })
+
+        if csv_rows:
+            try:
+                _append_csv(MAINT_ACTIONS_CSV, MAINT_ACTIONS_COLS, pd.DataFrame(csv_rows))
+                st.caption("✅ Logged maintenance lines to maintenance_actions_log.csv")
+            except Exception as e:
+                st.error(f"Failed writing maintenance_actions_log.csv: {e}")
+
+        if problems:
+            st.warning("Some files had issues:")
+            st.dataframe(pd.DataFrame(problems, columns=["File", "Error"]), use_container_width=True)
+
+        st.rerun()
 
     # =========================================================
-    # Dashboard summary
+    # History viewer (DuckDB + CSV)
+    # =========================================================
+    def render_maintenance_history(con, limit: int = 200, height: int = 320):
+        with st.expander("🗃️ Maintenance history (DuckDB)", expanded=False):
+            try:
+                recent = con.execute(f"""
+                    SELECT action_ts, component, task, tracking_mode, hours_source,
+                           done_date, done_hours, done_draw, actor, source_file
+                    FROM maintenance_actions
+                    ORDER BY action_ts DESC
+                    LIMIT {int(limit)}
+                """).fetchdf()
+
+                if not recent.empty:
+                    recent["done_date"] = pd.to_datetime(recent["done_date"], errors="coerce").dt.date
+                    recent["action_ts"] = pd.to_datetime(recent["action_ts"], errors="coerce")
+
+                st.dataframe(recent, use_container_width=True, height=int(height))
+            except Exception as e:
+                st.warning(f"DB read failed: {e}")
+
+        with st.expander("🧾 Maintenance lines (CSV log)", expanded=False):
+            if not os.path.isfile(MAINT_ACTIONS_CSV):
+                st.info("No maintenance_actions_log.csv yet (mark something done first).")
+            else:
+                try:
+                    df = pd.read_csv(MAINT_ACTIONS_CSV)
+                    st.dataframe(df.tail(250), use_container_width=True, height=360)
+                except Exception as e:
+                    st.warning(f"CSV read failed: {e}")
+
+    def render_gas_report(LOGS_FOLDER: str):
+        """
+        Gas usage report (MFC ACTUAL)
+        Assumptions:
+        - MFC columns contain BOTH 'MFC' and 'Actual'
+        - Units are SLM (Standard Liters per Minute)
+        - Integration: SL = Σ(SLM × dt_minutes)
+        """
+
+        st.markdown("---")
+        st.subheader("🧪 Gas usage report (MFC actual, SLM)")
+
+        show = st.toggle("Show gas report", value=False, key="gasrep_show")
+        if not show:
+            st.caption("(Hidden by default to keep UI light)")
+            return
+
+        if not os.path.isdir(LOGS_FOLDER):
+            st.warning(f"Logs folder not found: {LOGS_FOLDER}")
+            return
+
+        # --------------------------------------------------
+        # Collect log files
+        # --------------------------------------------------
+        csv_files = sorted(
+            [os.path.join(LOGS_FOLDER, f)
+             for f in os.listdir(LOGS_FOLDER)
+             if f.lower().endswith(".csv") and not f.startswith("~$")],
+            key=lambda p: os.path.getmtime(p),
+        )
+
+        if not csv_files:
+            st.info("No log CSV files found.")
+            return
+
+        st.caption(f"Found {len(csv_files)} log files.")
+
+        # --------------------------------------------------
+        # Reports folder (auto-save)
+        # --------------------------------------------------
+        BASE_DIR_LOCAL = os.getcwd()
+        REPORT_DIR = os.path.join(BASE_DIR_LOCAL, "reports", "gas")
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        st.caption(f"Reports folder: {REPORT_DIR}")
+
+        # --------------------------------------------------
+        # Time window selector
+        # --------------------------------------------------
+        st.markdown("#### Time window")
+        c1, c2, c3, c4 = st.columns([1,1,1,2])
+
+        st.session_state.setdefault("gasrep_window_days", 30)
+
+        with c1:
+            if st.button("Last 7 days", key="gasrep_btn_7", use_container_width=True):
+                st.session_state["gasrep_window_days"] = 7
+        with c2:
+            if st.button("Last 30 days", key="gasrep_btn_30", use_container_width=True):
+                st.session_state["gasrep_window_days"] = 30
+        with c3:
+            if st.button("Last 90 days", key="gasrep_btn_90", use_container_width=True):
+                st.session_state["gasrep_window_days"] = 90
+        with c4:
+            st.caption(f"Selected: {st.session_state['gasrep_window_days']} days")
+
+        window_days = int(st.session_state.get("gasrep_window_days", 30))
+
+        # --------------------------------------------------
+        # Helpers
+        # --------------------------------------------------
+        def _norm(s):
+            return str(s).strip().lower()
+
+        def _find_time_col(cols):
+            for c in cols:
+                if _norm(c) in {"date/time","datetime","timestamp","date time"}:
+                    return c
+            for c in cols:
+                if "date" in _norm(c) and "time" in _norm(c):
+                    return c
+            return None
+
+        def _is_mfc_actual(c):
+            s = _norm(c)
+            return ("mfc" in s) and ("actual" in s)
+
+        # --------------------------------------------------
+        # Scan logs and integrate usage
+        # --------------------------------------------------
+        rows = []
+
+        for p in csv_files:
+            try:
+                df = pd.read_csv(p)
+                if df is None or df.empty:
+                    continue
+
+                time_col = _find_time_col(df.columns)
+                if not time_col:
+                    continue
+
+                t = pd.to_datetime(df[time_col], errors="coerce", dayfirst=True)
+                if t.isna().all():
+                    continue
+
+                df["__t"] = t
+                df = df.dropna(subset=["__t"]).sort_values("__t").reset_index(drop=True)
+                if len(df) < 2:
+                    continue
+
+                # dt in minutes
+                dt_min = df["__t"].diff().dt.total_seconds() / 60.0
+                dt_min = dt_min.fillna(0.0).clip(lower=0.0)
+
+                mfc_cols = [c for c in df.columns if _is_mfc_actual(c)]
+                if not mfc_cols:
+                    continue
+
+                total_sl = 0.0
+                for c in mfc_cols:
+                    flow_slm = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                    total_sl += float((flow_slm * dt_min).sum())
+
+                rows.append({
+                    "log_file": os.path.basename(p),
+                    "start_time": df["__t"].iloc[0],
+                    "end_time": df["__t"].iloc[-1],
+                    "duration_min": float(dt_min.sum()),
+                    "Total SL": total_sl,
+                })
+            except Exception:
+                continue
+
+        if not rows:
+            st.info("No usable MFC ACTUAL data detected in logs.")
+            return
+
+        usage = pd.DataFrame(rows)
+        usage["start_time"] = pd.to_datetime(usage["start_time"], errors="coerce")
+        usage = usage.sort_values("start_time").reset_index(drop=True)
+
+        # --------------------------------------------------
+        # Apply time window
+        # --------------------------------------------------
+        latest = usage["start_time"].max()
+        if pd.isna(latest):
+            latest = pd.Timestamp.now()
+
+        t0 = latest - pd.Timedelta(days=window_days)
+        usage = usage[usage["start_time"] >= t0]
+
+        if usage.empty:
+            st.warning("No logs in selected window.")
+            return
+
+        # --------------------------------------------------
+        # Summary metrics
+        # --------------------------------------------------
+        total_sl = float(usage["Total SL"].sum())
+        total_hours = float(usage["duration_min"].sum()) / 60.0
+        avg_slm = (total_sl / usage["duration_min"].sum()) if usage["duration_min"].sum() > 0 else 0.0
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Gas Used (SL)", f"{total_sl:,.2f}")
+        m2.metric("Total Duration (hours)", f"{total_hours:,.2f}")
+        m3.metric("Average Flow (SLM)", f"{avg_slm:,.3f}")
+
+        # --------------------------------------------------
+        # Period reports
+        # --------------------------------------------------
+        tmp = usage.copy()
+        tmp["Week"] = tmp["start_time"].dt.to_period("W").astype(str)
+        tmp["Month"] = tmp["start_time"].dt.to_period("M").astype(str)
+        tmp["Quarter"] = tmp["start_time"].dt.to_period("Q").astype(str)
+
+        week_rep = tmp.groupby("Week", as_index=False)["Total SL"].sum().sort_values("Week")
+        month_rep = tmp.groupby("Month", as_index=False)["Total SL"].sum().sort_values("Month")
+        quarter_rep = tmp.groupby("Quarter", as_index=False)["Total SL"].sum().sort_values("Quarter")
+
+        t1, t2, t3 = st.tabs(["Weekly", "Monthly", "3 Months"])
+        with t1:
+            st.dataframe(week_rep, use_container_width=True, hide_index=True)
+        with t2:
+            st.dataframe(month_rep, use_container_width=True, hide_index=True)
+        with t3:
+            st.dataframe(quarter_rep, use_container_width=True, hide_index=True)
+
+        # --------------------------------------------------
+        # Per log breakdown
+        # --------------------------------------------------
+        st.markdown("#### Per log file breakdown")
+        st.dataframe(usage.tail(250), use_container_width=True, height=350)
+
+        # --------------------------------------------------
+        # Auto-save reports (FULL history from folder, not only selected window)
+        # --------------------------------------------------
+        try:
+            full_usage = pd.DataFrame(rows)
+            full_usage["start_time"] = pd.to_datetime(full_usage["start_time"], errors="coerce")
+            full_usage["end_time"] = pd.to_datetime(full_usage["end_time"], errors="coerce")
+            full_usage = full_usage.dropna(subset=["start_time"]).sort_values("start_time").reset_index(drop=True)
+
+            if not full_usage.empty:
+                full_usage["Week"] = full_usage["start_time"].dt.to_period("W").astype(str)
+                full_usage["Month"] = full_usage["start_time"].dt.to_period("M").astype(str)
+                full_usage["Quarter"] = full_usage["start_time"].dt.to_period("Q").astype(str)
+
+                # 1) Per-log summary
+                out_all_logs = full_usage[[
+                    "log_file", "start_time", "end_time", "duration_min", "Total SL", "Week", "Month", "Quarter"
+                ]].copy()
+                p1 = os.path.join(REPORT_DIR, "gas_summary_all_logs.csv")
+                out_all_logs.to_csv(p1, index=False)
+
+                # 2) Weekly totals
+                week_agg = full_usage.groupby("Week", as_index=False).agg(total_sl=("Total SL", "sum"))
+                week_agg = week_agg.sort_values("Week").reset_index(drop=True)
+                p2 = os.path.join(REPORT_DIR, "gas_weekly_totals.csv")
+                week_agg.to_csv(p2, index=False)
+
+                # 3) Monthly totals + avg SLM for month
+                month_agg = full_usage.groupby("Month", as_index=False).agg(
+                    total_sl=("Total SL", "sum"),
+                    total_minutes=("duration_min", "sum"),
+                    n_logs=("log_file", "count"),
+                    first_start=("start_time", "min"),
+                    last_end=("end_time", "max"),
+                )
+                month_agg["avg_slm"] = month_agg.apply(
+                    lambda r: (float(r["total_sl"]) / float(r["total_minutes"])) if float(r["total_minutes"]) > 0 else 0.0,
+                    axis=1,
+                )
+                month_agg = month_agg.sort_values("Month").reset_index(drop=True)
+                p3 = os.path.join(REPORT_DIR, "gas_monthly_totals.csv")
+                month_agg.to_csv(p3, index=False)
+
+                # 4) Quarterly totals
+                q_agg = full_usage.groupby("Quarter", as_index=False).agg(total_sl=("Total SL", "sum"))
+                q_agg = q_agg.sort_values("Quarter").reset_index(drop=True)
+                p4 = os.path.join(REPORT_DIR, "gas_quarterly_totals.csv")
+                q_agg.to_csv(p4, index=False)
+
+                # Missing months detection (between first and last month)
+                first_m = pd.Period(full_usage["start_time"].min(), freq="M")
+                last_m = pd.Period(full_usage["start_time"].max(), freq="M")
+                expected = [str(p) for p in pd.period_range(first_m, last_m, freq="M")]
+                present = set(month_agg["Month"].astype(str).tolist())
+                missing = [m for m in expected if m not in present]
+
+                st.success("✅ Gas reports saved automatically")
+                st.code("\n".join([p1, p2, p3, p4]))
+
+                if missing:
+                    st.warning("Missing months (no logs found): " + ", ".join(missing))
+                else:
+                    st.caption("No missing months detected between first and last log month.")
+            else:
+                st.info("No full-history rows available to save reports.")
+        except Exception as e:
+            st.warning(f"Auto-save failed: {e}")
+
+        st.caption("Units: MFC Actual assumed SLM. Integrated to SL via SLM × dt(minutes).")
+
+    # =========================================================
+    # ✅ Faults section
+    def render_faults_section(con, MAINT_FOLDER, actor):
+        st.subheader("🚨 Faults / Incidents")
+
+        faults_csv = _read_csv_safe(FAULTS_CSV, FAULTS_COLS)
+        actions_csv = _read_csv_safe(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS)
+        state_map = _latest_fault_state(actions_csv)
+
+        if not faults_csv.empty:
+            faults_csv["fault_id"] = pd.to_numeric(faults_csv["fault_id"], errors="coerce")
+            faults_csv = faults_csv.dropna(subset=["fault_id"]).copy()
+            faults_csv["fault_id"] = faults_csv["fault_id"].astype(int)
+            faults_csv["fault_ts"] = pd.to_datetime(faults_csv["fault_ts"], errors="coerce")
+
+            faults_csv["_is_closed"] = faults_csv["fault_id"].apply(
+                lambda fid: bool(state_map.get(int(fid), {}).get("is_closed", False))
+            )
+            faults_csv["_last_action_ts"] = faults_csv["fault_id"].apply(
+                lambda fid: state_map.get(int(fid), {}).get("last_ts", None)
+            )
+            faults_csv["_last_action_type"] = faults_csv["fault_id"].apply(
+                lambda fid: state_map.get(int(fid), {}).get("last_type", "")
+            )
+            faults_csv["_last_action_actor"] = faults_csv["fault_id"].apply(
+                lambda fid: state_map.get(int(fid), {}).get("last_actor", "")
+            )
+            faults_csv["_last_fix"] = faults_csv["fault_id"].apply(
+                lambda fid: state_map.get(int(fid), {}).get("last_fix", "")
+            )
+        else:
+            faults_csv = pd.DataFrame(columns=FAULTS_COLS + ["_is_closed", "_last_action_ts", "_last_action_type", "_last_action_actor", "_last_fix"])
+
+        # ---- Log a new fault ----
+        with st.expander("➕ Log a new fault", expanded=False):
+            c1, c2, c3 = st.columns([1.2, 1, 1])
+            with c1:
+                comp_list = (
+                    dfm["Component"]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .unique()
+                    .tolist()
+                )
+                comp_list = sorted([c for c in comp_list if c])
+                comp_options = comp_list + ["Other (custom)"]
+
+                selected_comp = st.selectbox(
+                    "Fault component",
+                    options=comp_options,
+                    key="fault_component_select"
+                )
+
+                if selected_comp == "Other (custom)":
+                    fault_component = st.text_input(
+                        "Custom component name",
+                        key="fault_component_custom"
+                    )
+                else:
+                    fault_component = selected_comp
+            with c2:
+                severity = st.selectbox("Severity", ["low", "medium", "high", "critical"], index=1, key="fault_sev_in")
+            with c3:
+                related_draw = st.text_input("Related draw (optional)", placeholder="e.g. FP0888_1", key="fault_draw_in")
+
+            title = st.text_input("Fault title", placeholder="Short title", key="fault_title_in")
+            desc = st.text_area("Fault description", placeholder="What happened? what did you do? what to check next time?", height=120, key="fault_desc_in")
+
+            cA, cB = st.columns([1, 1])
+            with cA:
+                src_file = st.text_input("Source file (optional)", placeholder="e.g. faults.xlsx / email.pdf / photo.jpg", key="fault_src_in")
+            with cB:
+                st.caption("Saved as BOTH DuckDB + faults_log.csv")
+
+            if st.button("➕ Log fault", type="primary", use_container_width=True, key="fault_add_btn"):
+                if not str(fault_component).strip():
+                    st.warning("Fault component is required.")
+                    st.stop()
+                if not str(title).strip() and not str(desc).strip():
+                    st.warning("Give at least a title or description.")
+                    st.stop()
+
+                now_dt = dt.datetime.now()
+                fid = int(time.time() * 1000)
+
+                try:
+                    con.execute("""
+                        INSERT INTO faults_events
+                        (fault_id, fault_ts, component, title, description, severity, actor, source_file, related_draw)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        fid, now_dt,
+                        str(fault_component), str(title), str(desc),
+                        str(severity), str(actor), str(src_file), str(related_draw)
+                    ])
+                except Exception as e:
+                    st.warning(f"DuckDB insert failed (still saving CSV log): {e}")
+
+                row = pd.DataFrame([{
+                    "fault_id": fid,
+                    "fault_ts": now_dt,
+                    "fault_component": str(fault_component),
+                    "fault_title": str(title),
+                    "fault_description": str(desc),
+                    "fault_severity": str(severity),
+                    "fault_actor": str(actor),
+                    "fault_source_file": str(src_file),
+                    "fault_related_draw": str(related_draw),
+                }])
+                try:
+                    _append_csv(FAULTS_CSV, FAULTS_COLS, row)
+                    st.success("Fault logged.")
+                except Exception as e:
+                    st.error(f"Failed writing faults_log.csv: {e}")
+
+                st.rerun()
+
+        # ---- Open faults list ----
+        st.markdown("#### 🔓 Open faults")
+        open_df = faults_csv[faults_csv["_is_closed"] == False].copy()
+        open_df = open_df.sort_values("fault_ts", ascending=False)
+
+        if open_df.empty:
+            st.success("No open faults 👍")
+        else:
+            for _, r in open_df.iterrows():
+                fid = int(r["fault_id"])
+                comp = safe_str(r.get("fault_component", ""))
+                sev = safe_str(r.get("fault_severity", ""))
+                title = safe_str(r.get("fault_title", "")) or "Fault"
+                ts = safe_str(r.get("fault_ts", ""))
+
+                c1, c2, c3 = st.columns([3.4, 1.1, 1.1])
+                with c1:
+                    st.markdown(f"**[{sev.upper()}] {comp} — {title}**")
+                    st.caption(f"ID: `{fid}`  |  Time: {ts}")
+
+                with c2:
+                    @st.dialog(f"Close fault: {comp} — {title} (#{fid})")
+                    def _dlg_close():
+                        fix = st.text_input("Fix summary (short)", key=f"fix_sum__{fid}")
+                        note = st.text_area("Closure notes", height=120, key=f"fix_note__{fid}")
+                        if st.button("✅ Close fault", type="primary", use_container_width=True, key=f"close_do__{fid}"):
+                            _write_fault_action(con, fault_id=fid, action_type="close", actor=actor, note=note, fix_summary=fix)
+                            st.success("Closed.")
+                            st.rerun()
+
+                    if st.button("✅ Close", use_container_width=True, key=f"btn_close__{fid}"):
+                        _dlg_close()
+
+                with c3:
+                    @st.dialog(f"Add note: #{fid}")
+                    def _dlg_note():
+                        note = st.text_area("Note", height=120, key=f"note_txt__{fid}")
+                        if st.button("➕ Save note", type="primary", use_container_width=True, key=f"note_do__{fid}"):
+                            _write_fault_action(con, fault_id=fid, action_type="note", actor=actor, note=note, fix_summary="")
+                            st.success("Saved note.")
+                            st.rerun()
+
+                    if st.button("📝 Note", use_container_width=True, key=f"btn_note__{fid}"):
+                        _dlg_note()
+
+                with st.expander("Details", expanded=False):
+                    st.write(safe_str(r.get("fault_description", "")) or "—")
+                    st.caption(f"Source file: {safe_str(r.get('fault_source_file',''))} | Related draw: {safe_str(r.get('fault_related_draw',''))}")
+
+                st.divider()
+
+        # ---- All faults table + reopen ----
+        with st.expander("📜 All faults (table)", expanded=False):
+            df_all = faults_csv.copy()
+            if df_all.empty:
+                st.info("No faults yet.")
+            else:
+                df_all["Status"] = np.where(df_all["_is_closed"], "Closed", "Open")
+                df_all["Last Action"] = df_all["_last_action_type"]
+                df_all["Last Action By"] = df_all["_last_action_actor"]
+                df_all["Last Fix Summary"] = df_all["_last_fix"]
+                show = df_all[[
+                    "fault_ts", "Status", "fault_id", "fault_component", "fault_severity",
+                    "fault_title", "fault_actor", "fault_related_draw",
+                    "Last Action", "Last Action By", "Last Fix Summary"
+                ]].copy()
+                st.dataframe(show, use_container_width=True, height=360, hide_index=True)
+
+                closed_ids = df_all[df_all["_is_closed"] == True]["fault_id"].astype(int).tolist()
+                if closed_ids:
+                    st.markdown("##### Reopen a fault")
+                    pick = st.selectbox("Closed fault ID", options=[""] + [str(x) for x in closed_ids], key="reopen_pick")
+                    if pick and st.button("♻️ Reopen", use_container_width=True, key="reopen_btn"):
+                        _write_fault_action(con, fault_id=int(pick), action_type="reopen", actor=actor, note="Reopened", fix_summary="")
+                        st.success("Reopened.")
+                        st.rerun()
+
+        with st.expander("🧾 Fault actions (CSV log)", expanded=False):
+            if not os.path.isfile(FAULTS_ACTIONS_CSV):
+                st.info("No faults_actions_log.csv yet (close/reopen/note first).")
+            else:
+                try:
+                    df = pd.read_csv(FAULTS_ACTIONS_CSV)
+                    st.dataframe(df.tail(300), use_container_width=True, height=360)
+                except Exception as e:
+                    st.warning(f"Fault actions CSV read failed: {e}")
+
+    # =========================================================
+    # Load report + tasks editor
+    # =========================================================
+    def render_maintenance_load_report(files, load_errors):
+        with st.expander("Load report", expanded=False):
+            try:
+                st.write("Loaded files:", sorted(list(files or [])))
+            except Exception:
+                st.write("Loaded files:", files)
+
+            if load_errors:
+                st.warning("Some files failed to load:")
+                st.dataframe(pd.DataFrame(load_errors, columns=["File", "Error"]), use_container_width=True)
+
+    def render_maintenance_tasks_editor(
+        MAINT_FOLDER,
+        files,
+        read_file,
+        write_file,
+        normalize_df,
+        templateize_df,
+    ):
+        with st.expander("📝 Maintenance tasks editor (source files)", expanded=False):
+            st.caption("Edits the selected maintenance file (Excel/CSV) and saves back.")
+            pick = st.selectbox("Select maintenance file", options=sorted(files), key="maint_edit_file_pick")
+            if not pick:
+                return
+            path = os.path.join(MAINT_FOLDER, pick)
+            try:
+                raw = read_file(path)
+                if raw is None or raw.empty:
+                    st.info("File is empty.")
+                    return
+                df = normalize_df(raw)
+
+                show_cols = [c for c in df.columns if c != "Source_File"]
+                edited = st.data_editor(df[show_cols], use_container_width=True, height=420, key="maint_tasks_editor_grid")
+
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    if st.button("💾 Save file", type="primary", use_container_width=True, key="maint_save_file_btn"):
+                        out = templateize_df(edited, list(raw.columns))
+                        write_file(path, out)
+                        st.success("Saved.")
+                        st.rerun()
+                with c2:
+                    st.caption("Saved back in the original template columns.")
+            except Exception as e:
+                st.warning(f"Tasks editor failed: {e}")
+
+    # =========================================================
+    # Manuals / Documents browser (same preview style)
+    # =========================================================
+    def render_manuals_browser(BASE_DIR):
+        MANUALS_IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+
+        def _ext(p: str) -> str:
+            return os.path.splitext(str(p).lower())[1]
+
+        def _is_pdf(p: str) -> bool:
+            return str(p).lower().endswith(".pdf")
+
+        def _is_img(p: str) -> bool:
+            return _ext(p) in MANUALS_IMG_EXTS
+
+        def _short_name(fn: str, max_len: int = 42) -> str:
+            fn = str(fn)
+            if len(fn) <= max_len:
+                return fn
+            keep_tail = 16
+            head = max_len - keep_tail - 3
+            return fn[:head] + "..." + fn[-keep_tail:]
+
+        @st.cache_data(show_spinner=False)
+        def _read_bytes(path: str) -> bytes:
+            with open(path, "rb") as f:
+                return f.read()
+
+        def _download_btn(path: str, label: str, key: str):
+            if not os.path.exists(path):
+                st.warning(f"Missing file: {os.path.basename(path)}")
+                return
+            data = _read_bytes(path)
+            st.download_button(
+                label=label,
+                data=data,
+                file_name=os.path.basename(path),
+                mime=None,
+                key=key,
+                use_container_width=True,
+            )
+
+        @st.cache_data(show_spinner=False)
+        def _pdf_render_pages(path: str, max_pages: int = 1, zoom: float = 1.6):
+            import fitz  # PyMuPDF
+            doc = fitz.open(path)
+            n = min(len(doc), int(max_pages))
+            out = []
+            mat = fitz.Matrix(float(zoom), float(zoom))
+            for i in range(n):
+                page = doc.load_page(i)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                out.append(pix.tobytes("png"))
+            doc.close()
+            return out
+
+        def _render_pdf_preview(path: str, *, key_prefix: str):
+            if not os.path.exists(path):
+                st.warning("PDF file not found.")
+                return
+
+            state_key = f"{key_prefix}__show_all"
+            st.session_state.setdefault(state_key, False)
+
+            c1, c2, c3 = st.columns([1.6, 1.0, 1.0])
+            with c1:
+                st.markdown("**PDF preview (rendered)**")
+                st.caption("Default shows page 1. Click to render more pages.")
+            with c2:
+                zoom = st.selectbox("Quality", [1.3, 1.6, 2.0], index=1, key=f"{key_prefix}__zoom")
+            with c3:
+                max_pages = st.number_input(
+                    "Pages (when expanded)", min_value=1, max_value=200, value=30, step=1, key=f"{key_prefix}__pages"
+                )
+
+            b1, b2 = st.columns([1, 1])
+            with b1:
+                if not st.session_state[state_key]:
+                    if st.button("📄 Render more pages", use_container_width=True, key=f"{key_prefix}__more"):
+                        st.session_state[state_key] = True
+                        st.rerun()
+                else:
+                    if st.button("⬅️ Back to page 1", use_container_width=True, key=f"{key_prefix}__less"):
+                        st.session_state[state_key] = False
+                        st.rerun()
+            with b2:
+                _download_btn(path, "⬇️ Download PDF", key=f"{key_prefix}__dl")
+
+            try:
+                if st.session_state[state_key]:
+                    imgs = _pdf_render_pages(path, max_pages=int(max_pages), zoom=float(zoom))
+                    st.caption(f"Showing **{len(imgs)}** page(s).")
+                    for i, b in enumerate(imgs, start=1):
+                        st.image(b, caption=f"Page {i}", use_container_width=True)
+                else:
+                    imgs = _pdf_render_pages(path, max_pages=1, zoom=float(zoom))
+                    if imgs:
+                        st.image(imgs[0], caption="Page 1", use_container_width=True)
+            except Exception as e:
+                st.error(f"PDF render failed. Install PyMuPDF: `pip install pymupdf`  |  Error: {e}")
+
+        with st.expander("📚 Manuals / Documents browser", expanded=False):
+            st.caption("Tight checklist view: select manuals, then preview one.")
+
+            candidate_dirs = [
+                os.path.join(BASE_DIR, "manuals"),
+                os.path.join(BASE_DIR, "docs"),
+                os.path.join(BASE_DIR, "maintenance", "manuals"),
+                os.path.join(BASE_DIR, "maintenance", "docs"),
+            ]
+            existing = [d for d in candidate_dirs if os.path.isdir(d)]
+            if not existing:
+                st.info("No manuals/docs folder found. (Create /manuals or /docs).")
+                return
+
+            root = st.selectbox("Folder", existing, key="maint_manuals_root_pick")
+
+            paths = sorted(glob.glob(os.path.join(root, "**", "*.*"), recursive=True))
+            paths = [p for p in paths if os.path.isfile(p)]
+            if not paths:
+                st.info("No files found.")
+                return
+
+            c1, c2, c3 = st.columns([1.6, 1.0, 1.0])
+            with c1:
+                q = st.text_input("Search", placeholder="type filename…", key="maint_manuals_search")
+            with c2:
+                kind = st.selectbox("Type", ["All", "PDF", "Images", "Other"], key="maint_manuals_type")
+            with c3:
+                limit = st.number_input("Show (max)", 10, 500, 120, 10, key="maint_manuals_limit")
+
+            def _match(p):
+                fn = os.path.basename(p).lower()
+                if q and q.lower().strip() not in fn:
+                    return False
+                if kind == "PDF" and not _is_pdf(p):
+                    return False
+                if kind == "Images" and not _is_img(p):
+                    return False
+                if kind == "Other" and (_is_pdf(p) or _is_img(p)):
+                    return False
+                return True
+
+            shown = [p for p in paths if _match(p)]
+            st.caption(f"Files found: **{len(shown)}** (total in folder: {len(paths)})")
+            shown = shown[: int(limit)]
+
+            st.session_state.setdefault("maint_manuals_checked", [])
+            st.session_state.setdefault("maint_manuals_active", "")
+
+            st.markdown("#### ✅ Select manuals")
+            checked = set(st.session_state.get("maint_manuals_checked", []))
+
+            for i, p in enumerate(shown):
+                fn = os.path.basename(p)
+                col0, col1, col2 = st.columns([0.35, 5.0, 1.0], gap="small")
+                with col0:
+                    is_on = st.checkbox("", value=(p in checked), key=f"maint_manuals_chk__{i}")
+                with col1:
+                    st.markdown(f"**{_short_name(fn)}**")
+                with col2:
+                    _download_btn(p, "⬇️", key=f"maint_manuals_dl__{i}__{fn}")
+
+                if is_on:
+                    checked.add(p)
+                else:
+                    checked.discard(p)
+
+            st.session_state["maint_manuals_checked"] = sorted(list(checked))
+
+            st.divider()
+
+            picked_list = st.session_state["maint_manuals_checked"]
+            if not picked_list:
+                st.info("Select at least one manual to preview.")
+                return
+
+            if st.session_state["maint_manuals_active"] not in picked_list:
+                st.session_state["maint_manuals_active"] = picked_list[0]
+
+            labels = {p: os.path.basename(p) for p in picked_list}
+            active = st.selectbox(
+                "👁️ Preview selected manual",
+                options=picked_list,
+                format_func=lambda p: labels.get(p, p),
+                key="maint_manuals_active",
+            )
+
+            st.markdown("### Preview")
+            st.caption(os.path.basename(active))
+
+            if _is_pdf(active):
+                _render_pdf_preview(active, key_prefix=f"maint_manuals_pdf__{os.path.basename(active)}")
+            elif _is_img(active):
+                st.image(active, use_container_width=True)
+            else:
+                st.info("No preview for this file type (use Download).")
+
+            cA, cB = st.columns([1, 1])
+            with cA:
+                if st.button("🧹 Clear selection", use_container_width=True, key="maint_manuals_clear"):
+                    st.session_state["maint_manuals_checked"] = []
+                    st.session_state["maint_manuals_active"] = ""
+                    st.rerun()
+            with cB:
+                _download_btn(active, "⬇️ Download active", key="maint_manuals_dl_active")
+
+    # =========================================================
+    # UI flow
     # =========================================================
     render_maintenance_dashboard_metrics(dfm)
 
-    # =========================================================
-    # FUTURE TIMELINE VIEW (BUTTONS)
-    # =========================================================
     horizon_hours, horizon_days, horizon_draws = render_maintenance_horizon_selector(current_draw_count)
 
-    # =========================================================
-    # Roadmap Plotly helpers
-    # =========================================================
     render_maintenance_roadmaps(
         dfm,
         current_date,
@@ -9207,9 +12404,6 @@ elif tab_selection == "🧰 Maintenance":
         horizon_draws,
     )
 
-    # =========================================================
-    # Mark Done (updates source Excel/CSV) + LOG into DuckDB
-    # =========================================================
     edited = render_maintenance_done_editor(dfm)
 
     render_maintenance_apply_done(
@@ -9219,7 +12413,6 @@ elif tab_selection == "🧰 Maintenance":
         current_draw_count=current_draw_count,
         actor=actor,
         MAINT_FOLDER=MAINT_FOLDER,
-        STATE_PATH=STATE_PATH,
         con=con,
         read_file=read_file,
         write_file=write_file,
@@ -9229,19 +12422,19 @@ elif tab_selection == "🧰 Maintenance":
         mode_norm=mode_norm,
     )
 
-    # =========================================================
-    # DB viewer (dates displayed clean)
-    # =========================================================
     render_maintenance_history(con)
-    # =========================================================
-    # Load report
-    # =========================================================
+
+    # ✅ Gas report from LOGS (MFC actual)
+    render_gas_report(LOGS_FOLDER)
+
     render_faults_section(
         con=con,
         MAINT_FOLDER=MAINT_FOLDER,
         actor=actor,
     )
+
     render_maintenance_load_report(files, load_errors)
+
     render_maintenance_tasks_editor(
         MAINT_FOLDER=MAINT_FOLDER,
         files=files,
@@ -9250,86 +12443,352 @@ elif tab_selection == "🧰 Maintenance":
         normalize_df=normalize_df,
         templateize_df=templateize_df,
     )
+
     render_manuals_browser(BASE_DIR)
 # ------------------ Correlation & Outliers ------------------
 elif tab_selection == "📈 Correlation & Outliers":
     st.title("📈 Correlation & Outliers")
     st.caption(
-        "Auto-computes correlation between numeric columns across logs over time, "
-        "incrementally cached. Flags correlation-break outliers."
+        "Builds a numeric snapshot per log file (time = log file mtime), then plots rolling correlation vs time "
+        "for MANY column pairs."
     )
 
+    # ==========================================================
+    # Imports (local)
+    # ==========================================================
+    import os, re, json, itertools
+    from datetime import datetime
+
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+    import plotly.express as px
+
+    # ==========================================================
+    # Paths
+    # ==========================================================
     BASE_DIR = os.getcwd()
-    LOGS_FOLDER = os.path.join(BASE_DIR, "logs")
-    MAINT_FOLDER = os.path.join(BASE_DIR, "maintenance")
+    LOGS_FOLDER = os.path.join(BASE_DIR, P.logs_dir)
+    MAINT_FOLDER = P.maintenance_dir
     os.makedirs(MAINT_FOLDER, exist_ok=True)
 
+    # ==========================================================
+    # Main renderer
+    # ==========================================================
+    def render_corr_outliers_tab(DRAW_FOLDER: str, MAINT_FOLDER: str):
+        os.makedirs(MAINT_FOLDER, exist_ok=True)
+
+        # ---------------------------
+        # Helpers
+        # ---------------------------
+        def _safe_key(s: str) -> str:
+            return re.sub(r"[^a-zA-Z0-9_]+", "_", str(s))[:90]
+
+        def _to_float(v):
+            try:
+                if v is None:
+                    return np.nan
+                if isinstance(v, (int, float, np.integer, np.floating)):
+                    return float(v)
+                s = str(v).strip()
+                if s == "" or s.lower() in {"nan", "none"}:
+                    return np.nan
+                return float(s)
+            except Exception:
+                return np.nan
+
+        # rolling corr series for a pair
+        def _rolling_corr(df: pd.DataFrame, col_a: str, col_b: str, win: int):
+            s = df[["window_time", "file", col_a, col_b]].copy()
+            s = s.dropna(subset=[col_a, col_b])
+            if len(s) < win:
+                return None
+
+            corrs, times, files = [], [], []
+            for i in range(win - 1, len(s)):
+                w = s.iloc[i - win + 1 : i + 1]
+                c = w[col_a].corr(w[col_b])
+                if pd.notna(c):
+                    corrs.append(float(c))
+                    times.append(s.iloc[i]["window_time"])
+                    files.append(s.iloc[i]["file"])
+
+            if not corrs:
+                return None
+
+            g = pd.DataFrame({"window_time": times, "file": files, "corr": corrs})
+            return g
+
+        # ---------------------------
+        # Scan logs and build base table
+        # ---------------------------
+        st.markdown("---")
+        st.subheader("1) Scan logs → one numeric snapshot per file (time = file mtime)")
+
+        if not os.path.exists(DRAW_FOLDER):
+            st.warning(f"Logs folder not found: {DRAW_FOLDER}")
+            return
+
+        log_files = sorted(
+            [os.path.join(DRAW_FOLDER, f) for f in os.listdir(DRAW_FOLDER) if f.lower().endswith(".csv")],
+            key=lambda p: os.path.getmtime(p)
+        )
+
+        if not log_files:
+            st.info("No log CSVs found.")
+            return
+
+        st.caption(f"Found {len(log_files)} log CSV files.")
+
+        # robust slider bounds for few files
+        n_files = len(log_files)
+        max_cap = min(2000, n_files)
+        if max_cap <= 1:
+            st.info(f"Only {n_files} log file(s) found — need at least 2.")
+            return
+
+        max_files = st.slider(
+            "Max files to process",
+            min_value=2,
+            max_value=max_cap,
+            value=min(300, max_cap),
+            step=1 if max_cap < 25 else 10,
+            key="corr_many_max_files"
+        )
+        log_files = log_files[-max_files:]
+
+        rows = []
+        fail = 0
+
+        # We intentionally use file mtime as the time axis (your request)
+        for p in log_files:
+            try:
+                df = pd.read_csv(p)
+                if df is None or df.empty:
+                    continue
+
+                # use file mtime
+                t = datetime.fromtimestamp(os.path.getmtime(p))
+
+                last = df.iloc[-1].copy()
+                rec = {"window_time": pd.to_datetime(t), "file": os.path.basename(p)}
+
+                # numeric cols: last row values
+                for c in df.columns:
+                    vv = last[c]
+                    num = _to_float(vv)
+                    if np.isfinite(num):
+                        rec[c] = num
+
+                rows.append(rec)
+            except Exception:
+                fail += 1
+
+        if not rows:
+            st.warning("No usable numeric data found in logs.")
+            return
+
+        base = pd.DataFrame(rows)
+        base["window_time"] = pd.to_datetime(base["window_time"], errors="coerce")
+        base = base.sort_values("window_time").reset_index(drop=True)
+
+        st.caption(f"Usable rows: {len(base)} | Failed files: {fail}")
+
+        with st.expander("Preview numeric table", expanded=False):
+            st.dataframe(base.tail(50), use_container_width=True)
+
+        numeric_cols = [c for c in base.columns if c not in {"window_time", "file"}]
+        if len(numeric_cols) < 2:
+            st.info("Need at least 2 numeric columns across logs to compute correlations.")
+            return
+
+        # ==========================================================
+        # Pair settings
+        # ==========================================================
+        st.markdown("---")
+        st.subheader("2) Pair settings")
+
+        c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.0, 1.0])
+
+        with c1:
+            win_max = max(5, min(200, len(base)))
+            win = st.slider(
+                "Rolling window (points)",
+                min_value=3,
+                max_value=win_max,
+                value=min(20, win_max),
+                step=1 if win_max < 25 else 5,
+                key="corr_many_win"
+            )
+
+        with c2:
+            min_points = st.number_input(
+                "Min points for a pair (after NaN drop)",
+                min_value=3,
+                value=max(10, int(win)),
+                step=1,
+                key="corr_many_min_points"
+            )
+
+        with c3:
+            max_pairs = st.number_input(
+                "Max pairs to plot",
+                min_value=1,
+                value=20,
+                step=1,
+                key="corr_many_max_pairs"
+            )
+
+        with c4:
+            pair_sort = st.selectbox(
+                "Sort pairs by",
+                ["|median corr| (strongest)", "corr variability (std)", "alphabetical"],
+                index=0,
+                key="corr_many_sort"
+            )
+
+        # Optional: column include filter
+        col_filter = st.text_input(
+            "Column filter (optional): only include columns containing this text (case-insensitive)",
+            value="",
+            key="corr_many_filter"
+        ).strip().lower()
+
+        cols_use = numeric_cols
+        if col_filter:
+            cols_use = [c for c in numeric_cols if col_filter in str(c).lower()]
+
+        if len(cols_use) < 2:
+            st.warning("Filter left fewer than 2 numeric columns.")
+            return
+
+        # ==========================================================
+        # Generate all pairs + score them
+        # ==========================================================
+        st.markdown("---")
+        st.subheader("3) Compute + plot correlations for MANY pairs")
+
+        # Build pair list
+        pairs = list(itertools.combinations(cols_use, 2))
+        if not pairs:
+            st.info("No pairs available.")
+            return
+
+        st.caption(f"Candidate pairs: {len(pairs)} (from {len(cols_use)} numeric columns)")
+
+        # Score pairs quickly (without building full plot for each)
+        scored = []
+        for a, b in pairs:
+            s = base[[a, b]].dropna()
+            n = len(s)
+            if n < int(min_points):
+                continue
+
+            # quick score: overall corr + variability
+            c = s[a].corr(s[b])
+            if pd.isna(c):
+                continue
+
+            # also estimate variability on rolling corr if enough points
+            # (lightweight: only if n is big enough)
+            var_est = np.nan
+            if n >= max(int(win), 8):
+                # compute corr on a few windows to estimate std cheaply
+                # take up to 30 windows evenly spaced
+                idxs = np.linspace(max(int(win) - 1, 0), n - 1, num=min(30, n - int(win) + 1), dtype=int)
+                cc = []
+                for ii in idxs:
+                    w = s.iloc[ii - int(win) + 1: ii + 1]
+                    if len(w) == int(win):
+                        vv = w[a].corr(w[b])
+                        if pd.notna(vv):
+                            cc.append(float(vv))
+                if cc:
+                    var_est = float(np.nanstd(cc))
+
+            scored.append({
+                "a": a, "b": b,
+                "n": int(n),
+                "corr": float(c),
+                "abs_corr": float(abs(c)),
+                "var_est": var_est,
+            })
+
+        if not scored:
+            st.warning("No pairs passed the Min points requirement.")
+            return
+
+        df_pairs = pd.DataFrame(scored)
+
+        if pair_sort == "|median corr| (strongest)":
+            df_pairs = df_pairs.sort_values(["abs_corr", "n"], ascending=[False, False])
+        elif pair_sort == "corr variability (std)":
+            df_pairs = df_pairs.sort_values(["var_est", "n"], ascending=[False, False])
+        else:
+            df_pairs = df_pairs.sort_values(["a", "b"], ascending=[True, True])
+
+        df_pairs = df_pairs.head(int(max_pairs)).reset_index(drop=True)
+
+        with st.expander("Selected pairs (preview)", expanded=False):
+            st.dataframe(df_pairs, use_container_width=True)
+
+        # ==========================================================
+        # Plot each pair (many plots)
+        # ==========================================================
+        for i, row in df_pairs.iterrows():
+            a = row["a"]
+            b = row["b"]
+
+            g = _rolling_corr(base, a, b, int(win))
+            if g is None or g.empty:
+                continue
+
+            title = f"{a}  vs  {b}  | rolling corr (win={int(win)})"
+            fig = px.line(g, x="window_time", y="corr", markers=True, title=title)
+
+            # ✅ Unique key prevents StreamlitDuplicateElementId
+            k = f"corr_pair_{i}_{_safe_key(a)}__{_safe_key(b)}__w{int(win)}"
+            with st.expander(f"📌 Pair {i+1}: {a} ↔ {b}", expanded=(i == 0)):
+                st.caption(f"Points used (after NaN drop): {len(base[[a,b]].dropna())} | Rolling points: {len(g)}")
+                st.plotly_chart(fig, use_container_width=True, key=k)
+
+    # ==========================================================
+    # Run it
+    # ==========================================================
     render_corr_outliers_tab(DRAW_FOLDER=LOGS_FOLDER, MAINT_FOLDER=MAINT_FOLDER)
 # ------------------ SQL Lab ------------------
 elif tab_selection == "🧪 SQL Lab":
-    import os, glob, re
-    import duckdb
+    import os, glob, re, json
     import pandas as pd
     import numpy as np
     import streamlit as st
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
+    import duckdb
+    import plotly.graph_objects as go
 
-    # =========================================================
-    # 🧪 SQL Lab – Draws + DONE Maintenance (refactored)
-    # =========================================================
-    st.title("🧪 SQL Lab – One filter for Draws + DONE Maintenance")
+    st.title("🧪 SQL Lab")
     st.caption(
-        "Maintenance shows ONLY DONE events, searchable by the **maintenance Excel/CSV file name**. "
-        "Filter → Run → Visual Lab → Math Lab."
+        "Filter **draw CSVs** with AND/OR/NOT, then optionally overlay **Maintenance** and **Faults** "
+        "on the same timeline. Click any event to inspect."
     )
 
     BASE_DIR = os.getcwd()
-    DATASET_DIR = os.path.join(BASE_DIR, "data_set_csv")
-    DB_PATH = os.path.join(BASE_DIR, "tower.duckdb")
+    DATASET_DIR = os.path.join(BASE_DIR, P.dataset_dir)
+    DB_PATH = os.path.join(BASE_DIR, P.duckdb_path)
 
     # =========================================================
-    # Persistent DuckDB
+    # Persistent DuckDB connection
     # =========================================================
-    if "tower_con" not in st.session_state:
-        st.session_state.tower_con = duckdb.connect(DB_PATH)
-    con = st.session_state.tower_con
+    if "sql_duck_con" not in st.session_state:
+        st.session_state["sql_duck_con"] = duckdb.connect(DB_PATH)
+    con = st.session_state["sql_duck_con"]
 
-    # =========================================================
-    # Helpers
-    # =========================================================
-    def esc(s): return (s or "").replace("'", "''")
-    def lit(s): return "'" + esc(str(s)) + "'"
-
-    def is_num(x):
-        try:
-            float(str(x))
-            return True
-        except Exception:
-            return False
-
-    def fmt_num(x, nd=3):
-        if x is None or (isinstance(x, float) and np.isnan(x)):
-            return "—"
-        try:
-            xf = float(x)
-            if abs(xf) >= 1000: return f"{xf:,.0f}"
-            if abs(xf) >= 100:  return f"{xf:,.1f}"
-            if abs(xf) >= 10:   return f"{xf:,.2f}"
-            return f"{xf:,.{nd}f}"
-        except Exception:
-            return str(x)
-
-    def _mtime(path):
-        try:
-            if isinstance(path, str) and path.strip():
-                return pd.to_datetime(os.path.getmtime(path), unit="s")
-        except Exception:
-            pass
-        return pd.NaT
+    try:
+        con.execute("PRAGMA threads=4;")
+    except Exception:
+        pass
 
     # =========================================================
-    # Ensure maintenance_actions exists
+    # Ensure required DB tables exist
     # =========================================================
     con.execute("""
     CREATE TABLE IF NOT EXISTS maintenance_actions (
@@ -9349,19 +12808,97 @@ elif tab_selection == "🧪 SQL Lab":
     );
     """)
 
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS faults_events (
+        fault_id        BIGINT,
+        fault_ts        TIMESTAMP,
+        component       VARCHAR,
+        title           VARCHAR,
+        description     VARCHAR,
+        severity        VARCHAR,
+        actor           VARCHAR,
+        source_file     VARCHAR,
+        related_draw    VARCHAR
+    );
+    """)
+
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS maintenance_tasks (
+        task_key            VARCHAR,
+        task_id             VARCHAR,
+        component           VARCHAR,
+        task                VARCHAR,
+        tracking_mode       VARCHAR,
+        hours_source        VARCHAR,
+        interval_value      VARCHAR,
+        interval_unit       VARCHAR,
+        due_threshold_days  VARCHAR,
+        manual_name         VARCHAR,
+        page                VARCHAR,
+        document            VARCHAR,
+        procedure_summary   VARCHAR,
+        notes               VARCHAR,
+        owner               VARCHAR,
+        source_file         VARCHAR,
+        loaded_at           TIMESTAMP
+    );
+    """)
+
     # =========================================================
-    # Views builder (keep your schema: datasets_kv has _draw/_file etc.)
+    # Helpers
     # =========================================================
-    def build_datasets_view_from_disk():
+    def _esc(s: str) -> str:
+        return (s or "").replace("'", "''")
+
+    def _lit(s) -> str:
+        return "'" + _esc(str(s)) + "'"
+
+    def _is_num(x) -> bool:
+        try:
+            float(str(x))
+            return True
+        except Exception:
+            return False
+
+    def _dedupe_keep_order(seq):
+        out, seen = [], set()
+        for x in seq or []:
+            s = str(x).strip() if x is not None else ""
+            if not s:
+                continue
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    def _mtime_ts(path: str):
+        try:
+            return pd.to_datetime(os.path.getmtime(path), unit="s")
+        except Exception:
+            return pd.NaT
+
+    def _filters_summary_for_draws(used_params_list, human_lines_list) -> str:
+        used_params_list = _dedupe_keep_order(used_params_list or [])
+        parts = []
+        if used_params_list:
+            parts.append("Params: " + ", ".join(used_params_list))
+        if human_lines_list:
+            hl = [str(x).strip() for x in (human_lines_list or []) if str(x).strip()]
+            if hl:
+                parts.append(" | ".join(hl[:6]) + (" …" if len(hl) > 6 else ""))
+        return " || ".join(parts).strip()
+
+    # =========================================================
+    # Build DuckDB view for dataset CSVs (KV)
+    # =========================================================
+    def build_datasets_kv_view_from_disk() -> int:
         files = glob.glob(os.path.join(DATASET_DIR, "**", "*.csv"), recursive=True)
         files = [f for f in files if os.path.isfile(f)]
-
         if not files:
             con.execute("""
                 CREATE OR REPLACE VIEW datasets_kv AS
                 SELECT
                     'dataset'::VARCHAR AS source_kind,
-                    NULL::VARCHAR AS source_file,
                     NULL::TIMESTAMP AS event_ts,
                     NULL::VARCHAR AS event_id,
                     NULL::VARCHAR AS _draw,
@@ -9375,7 +12912,7 @@ elif tab_selection == "🧪 SQL Lab":
             return 0
 
         files = [f.replace("\\", "/") for f in files]
-        files_sql = "[" + ",".join(lit(f) for f in files) + "]"
+        files_sql = "[" + ",".join(_lit(f) for f in files) + "]"
 
         con.execute(f"""
             CREATE OR REPLACE VIEW datasets_kv AS
@@ -9407,7 +12944,6 @@ elif tab_selection == "🧪 SQL Lab":
             )
             SELECT
                 'dataset'::VARCHAR AS source_kind,
-                NULL::VARCHAR AS source_file,
                 ts.draw_ts AS event_ts,
                 raw._draw::VARCHAR AS event_id,
                 raw._draw,
@@ -9421,390 +12957,728 @@ elif tab_selection == "🧪 SQL Lab":
         """)
         return len(files)
 
-    def build_maintenance_kv_view():
-        con.execute("""
-            CREATE OR REPLACE VIEW maintenance_kv AS
-            SELECT
-                'maintenance'::VARCHAR AS source_kind,
-                COALESCE(source_file,'')::VARCHAR AS source_file,
-                action_ts AS event_ts,
-                CAST(action_id AS VARCHAR) AS event_id,
-                NULL::VARCHAR AS _draw,
-                NULL::VARCHAR AS _file,
-                NULL::VARCHAR AS filename,
-                COALESCE(source_file,'')::VARCHAR AS "Parameter Name",
-                (
-                    trim(COALESCE(component,'') || ' — ' || COALESCE(task,'')) ||
-                    CASE WHEN COALESCE(note,'') <> '' THEN (' | ' || note) ELSE '' END
-                )::VARCHAR AS "Value",
-                ''::VARCHAR AS "Units"
-            FROM maintenance_actions
-            WHERE action_ts IS NOT NULL
-              AND source_file IS NOT NULL
-              AND trim(source_file) <> '';
-        """)
-
-    def build_all_kv_views():
-        n = build_datasets_view_from_disk()
-        build_maintenance_kv_view()
-        con.execute("""
-            CREATE OR REPLACE VIEW all_kv AS
-            SELECT
-                source_kind, source_file, event_ts, event_id, _draw, _file, filename, "Parameter Name", "Value", "Units"
-            FROM datasets_kv
-            UNION ALL
-            SELECT
-                source_kind, source_file, event_ts, event_id, _draw, _file, filename, "Parameter Name", "Value", "Units"
-            FROM maintenance_kv;
-        """)
-        return n
-
-    # =========================================================
-    # Render: indexing controls
-    # =========================================================
-    def render_indexing_controls():
-        st.subheader("📁 Source indexing")
-        cA, cB = st.columns(2)
-
-        if cA.button("🔄 Rebuild views", use_container_width=True, key="sql_rebuild_all"):
-            for k in ["sql_df_all", "sql_events_wide", "ds_conditions"]:
-                st.session_state.pop(k, None)
-            n = build_all_kv_views()
-            st.success(f"Rebuilt. Loaded {n} dataset CSV(s). Maintenance DONE events available if logged.")
-
-        if cB.button("🧹 Reset DB connection", use_container_width=True, key="sql_reset_con"):
-            try:
-                con.close()
-            except Exception:
-                pass
-            st.session_state.tower_con = duckdb.connect(DB_PATH)
-            for k in list(st.session_state.keys()):
-                if k.startswith("sql_") or k.startswith("math_") or k.startswith("param_") or k.startswith("time_"):
-                    st.session_state.pop(k, None)
-            st.success("DB connection reset.")
-            st.stop()
-
-        # Ensure views exist
+    def ensure_views():
         try:
-            con.execute("SELECT COUNT(*) FROM all_kv").fetchone()
+            con.execute("SELECT COUNT(*) FROM datasets_kv").fetchone()
         except Exception:
-            n = build_all_kv_views()
-            st.info(f"Auto-built views. Loaded {n} dataset CSV(s).")
+            n = build_datasets_kv_view_from_disk()
+            st.caption(f"Indexed dataset CSVs: {n}")
 
     # =========================================================
-    # Render: filter builder
+    # Indexing controls
     # =========================================================
-    def render_filter_builder():
-        params_df = con.execute("""
-            SELECT DISTINCT "Parameter Name"
-            FROM all_kv
-            WHERE "Parameter Name" IS NOT NULL AND trim("Parameter Name") <> ''
-            ORDER BY 1
-        """).fetchdf()
-
-        all_params = params_df["Parameter Name"].astype(str).tolist() if not params_df.empty else []
-        if not all_params:
-            st.warning("No parameters found.")
+    with st.expander("📁 Indexing", expanded=False):
+        c1, c2 = st.columns([1, 1])
+        if c1.button("🔄 Rebuild dataset index", use_container_width=True, key="sql_rebuild_kv"):
+            for k in [
+                "sql_df_all", "sql_matched_draws", "sql_selected_event_key", "math_selected_event_key",
+                "ds_conditions", "ds_conditions_human", "sql_filter_params_seq",
+                "sql_values_found_long", "sql_values_found_wide", "sql_last_filters_summary"
+            ]:
+                st.session_state.pop(k, None)
+            n = build_datasets_kv_view_from_disk()
+            st.success(f"Rebuilt dataset index. Files: {n}")
+        if c2.button("🧹 Reset SQL state", use_container_width=True, key="sql_reset_state"):
+            for k in list(st.session_state.keys()):
+                if k.startswith(("sql_", "math_", "ds_")):
+                    st.session_state.pop(k, None)
+            st.success("Reset done.")
             st.stop()
 
-        st.subheader("🧱 Filter conditions")
+    ensure_views()
 
-        if "ds_conditions" not in st.session_state:
-            st.session_state.ds_conditions = []
+    # =========================================================
+    # Filter builder state
+    # =========================================================
+    if "ds_conditions" not in st.session_state:
+        st.session_state.ds_conditions = []
+    if "ds_conditions_human" not in st.session_state:
+        st.session_state.ds_conditions_human = []
+    if "sql_filter_params_seq" not in st.session_state:
+        st.session_state.sql_filter_params_seq = []
+    st.session_state.setdefault("sql_last_human_lines", [])
+    st.session_state.setdefault("sql_last_filters_summary", "")
 
-        param_search = st.text_input(
-            "Search parameter (live filter)",
-            placeholder="Type… e.g. diameter, tension, Capstan, UV, furnace…",
-            key="param_search",
+    # =========================================================
+    # Available params list
+    # =========================================================
+    params_df = con.execute("""
+        SELECT DISTINCT "Parameter Name"
+        FROM datasets_kv
+        WHERE "Parameter Name" IS NOT NULL AND trim("Parameter Name") <> ''
+        ORDER BY 1
+    """).fetchdf()
+    all_params = params_df["Parameter Name"].astype(str).tolist() if not params_df.empty else []
+
+    if not all_params:
+        st.warning("No dataset parameters were found (datasets_kv empty).")
+        st.stop()
+
+    # =========================================================
+    # FILTER UI
+    # =========================================================
+    st.subheader("🧱 Filters")
+
+    param_search = st.text_input(
+        "Search parameter",
+        placeholder="Type… e.g. diameter, tension, project, furnace, speed…",
+        key="sql_param_search",
+    ).strip().lower()
+
+    shown_params = [pp for pp in all_params if param_search in pp.lower()] if param_search else all_params
+    p = st.selectbox("Parameter Name", shown_params, key="sql_param_name")
+
+    # --- Detect numeric vs categorical for selected param ---
+    is_param_numeric = False
+    param_values = []
+    try:
+        df_param_sample = con.execute(f"""
+            SELECT "Value"
+            FROM datasets_kv
+            WHERE "Parameter Name" = {_lit(p)}
+            LIMIT 200
+        """).fetchdf()
+        if not df_param_sample.empty:
+            sample_series = pd.to_numeric(df_param_sample["Value"], errors="coerce")
+            is_param_numeric = sample_series.notna().sum() > 0
+            if not is_param_numeric:
+                df_opts = con.execute(f"""
+                    SELECT DISTINCT trim("Value") AS val
+                    FROM datasets_kv
+                    WHERE "Parameter Name" = {_lit(p)}
+                      AND trim(COALESCE("Value",'')) <> ''
+                    ORDER BY val
+                    LIMIT 200
+                """).fetchdf()
+                param_values = df_opts["val"].astype(str).tolist() if not df_opts.empty else []
+    except Exception:
+        pass
+
+    c_op, c_v1, c_v2 = st.columns([1.2, 2, 2])
+
+    with c_op:
+        op = st.selectbox(
+            "Operator",
+            ["any", "=", "!=", ">", ">=", "<", "<=", "between", "contains"],
+            key="sql_op",
         )
-        filt = (param_search or "").strip().lower()
-        shown_params = [p for p in all_params if filt in p.lower()] if filt else all_params
 
-        c1, c2, c3, c4 = st.columns([2, 1, 2, 2])
-        p = c1.selectbox("Parameter Name", shown_params, key="sql_param_name")
-        op = c2.selectbox("Op", ["any", "=", "!=", ">", ">=", "<", "<=", "between", "contains"], key="sql_op")
-        v1 = c3.text_input("Value 1", key="sql_v1")
-        v2 = c4.text_input("Value 2 (between)", key="sql_v2")
-        joiner = st.selectbox("Join with", ["AND", "OR"], key="sql_joiner")
+    with c_v1:
+        if not is_param_numeric and op not in ["any", "contains"] and param_values:
+            v1 = st.selectbox("Value", options=[""] + param_values, key="sql_v1")
+        else:
+            v1 = st.text_input("Value", key="sql_v1")
 
-        st.markdown("#### 🗓️ Time filter (optional)")
-        time_on = st.checkbox("Enable time filter", value=False, key="time_filter_on")
-        tcol1, tcol2 = st.columns(2)
-        with tcol1:
-            t_start = st.date_input("From", value=None, key="time_filter_start")
-        with tcol2:
-            t_end = st.date_input("To", value=None, key="time_filter_end")
+    with c_v2:
+        if op == "between":
+            if not is_param_numeric and param_values:
+                v2 = st.selectbox("Second value (between)", options=[""] + param_values, key="sql_v2")
+            else:
+                v2 = st.text_input("Second value (between)", key="sql_v2")
+        else:
+            v2 = st.text_input("Second value (between)", key="sql_v2")
 
-        def build_cond(p, op, v1, v2):
-            base = f"\"Parameter Name\"={lit(p)}"
-            v1 = (v1 or "").strip()
-            v2 = (v2 or "").strip()
+    c_join, c_not = st.columns([1, 1])
+    with c_join:
+        joiner = st.radio("Join", ["AND", "OR"], horizontal=True, key="sql_joiner")
+    with c_not:
+        negate = st.checkbox("NOT", value=False, key="sql_negate")
 
-            if op == "any":
-                return f"({base})"
+    st.markdown("#### 🗓️ Time filter (optional)")
+    time_on = st.checkbox("Enable time filter", value=False, key="sql_time_on")
+    t1, t2 = st.columns(2)
+    with t1:
+        d_from = st.date_input("From", value=None, key="sql_time_from")
+    with t2:
+        d_to = st.date_input("To", value=None, key="sql_time_to")
 
-            if op == "contains":
-                if not v1:
-                    return None
-                return f"({base} AND CAST(\"Value\" AS VARCHAR) ILIKE '%{esc(v1)}%')"
+    st.markdown("#### 🧩 Include")
+    inc1, inc2, inc3 = st.columns(3)
+    with inc1:
+        include_draws = st.checkbox("Draws", value=True, key="sql_inc_draws")
+    with inc2:
+        include_maint = st.checkbox("Maintenance", value=False, key="sql_inc_maint")
+    with inc3:
+        include_faults = st.checkbox("Faults", value=False, key="sql_inc_faults")
 
-            if op == "between":
-                if not v1 or not v2:
-                    return None
-                if is_num(v1) and is_num(v2):
-                    return f"({base} AND TRY_CAST(\"Value\" AS DOUBLE) BETWEEN {v1} AND {v2})"
-                return f"({base} AND \"Value\" BETWEEN {lit(v1)} AND {lit(v2)})"
+    if not (include_draws or include_maint or include_faults):
+        st.warning("Pick at least one: Draws / Maintenance / Faults.")
+        st.stop()
 
+    # =========================================================
+    # Maintenance + Fault filters (collapsed by default)
+    # =========================================================
+    with st.expander("🛠 Maintenance & Fault Filters (optional)", expanded=False):
+        if include_maint or include_faults:
+            st.markdown("#### ⏱️ Event scope")
+            event_scope = st.radio(
+                "How to constrain Maintenance/Faults relative to your draw filter?",
+                [
+                    "All events (respect only Maintenance/Fault filters)",
+                    "Only within time filter window",
+                    "Only within matched draws window",
+                ],
+                index=2,
+                horizontal=False,
+                key="sql_event_scope",
+                help="Matched draws window = min/max timestamp of the draws you matched (after timestamp fallback).",
+            )
+            st.markdown("---")
+        else:
+            event_scope = st.session_state.get("sql_event_scope", "Only within matched draws window")
+
+        # ----------------- Maintenance -----------------
+        st.markdown("##### 🛠 Maintenance")
+
+        maint_on = st.checkbox("Enable maintenance filter", value=False, key="sql_maint_on")
+
+        maint_text = ""
+        maint_component = ""
+
+        if maint_on:
+            m1, m2 = st.columns(2)
+            with m1:
+                maint_text = st.text_input(
+                    "Maintenance text contains",
+                    key="sql_maint_text",
+                    placeholder="task / note / source_file",
+                )
+
+            with m2:
+                comps = []
+                try:
+                    comps = (
+                        con.execute("""
+                            SELECT DISTINCT component
+                            FROM maintenance_tasks
+                            WHERE component IS NOT NULL AND TRIM(component) <> ''
+                            ORDER BY component
+                        """).fetchdf()["component"].astype(str).tolist()
+                    )
+                except Exception:
+                    comps = []
+
+                if not comps:
+                    try:
+                        comps = (
+                            con.execute("""
+                                SELECT DISTINCT component
+                                FROM maintenance_actions
+                                WHERE component IS NOT NULL AND TRIM(component) <> ''
+                                ORDER BY component
+                            """).fetchdf()["component"].astype(str).tolist()
+                        )
+                    except Exception:
+                        comps = []
+
+                pick = st.selectbox(
+                    "Maintenance component",
+                    options=["All"] + comps + ["Custom contains…"],
+                    key="sql_maint_comp_pick",
+                )
+                if pick == "All":
+                    maint_component = ""
+                elif pick == "Custom contains…":
+                    maint_component = st.text_input(
+                        "Maintenance component contains",
+                        key="sql_maint_comp",
+                        placeholder="type part of component name…",
+                    )
+                else:
+                    maint_component = pick
+
+        st.markdown("---")
+
+        # ----------------- Faults -----------------
+        st.markdown("##### 🚨 Faults")
+
+        fault_on = st.checkbox("Enable faults filter", value=False, key="sql_fault_on")
+
+        fault_text = ""
+        fault_component = ""
+        fault_sev = ""
+
+        if fault_on:
+            f1, f2, f3 = st.columns([1.2, 1.2, 1])
+            with f1:
+                fault_text = st.text_input(
+                    "Fault text contains",
+                    key="sql_fault_text",
+                    placeholder="title / description / source_file",
+                )
+            with f2:
+                fault_comps = []
+                try:
+                    fault_comps = (
+                        con.execute("""
+                            SELECT DISTINCT component
+                            FROM faults_events
+                            WHERE component IS NOT NULL AND TRIM(component) <> ''
+                            ORDER BY component
+                        """).fetchdf()["component"].astype(str).tolist()
+                    )
+                except Exception:
+                    fault_comps = []
+
+                maint_comps = []
+                try:
+                    maint_comps = (
+                        con.execute("""
+                            SELECT DISTINCT component
+                            FROM maintenance_tasks
+                            WHERE component IS NOT NULL AND TRIM(component) <> ''
+                            ORDER BY component
+                        """).fetchdf()["component"].astype(str).tolist()
+                    )
+                except Exception:
+                    maint_comps = []
+
+                comp_pool = sorted(set([c for c in (fault_comps + maint_comps) if str(c).strip()]))
+
+                pick = st.selectbox(
+                    "Fault component",
+                    options=["All"] + comp_pool + ["Custom contains…"],
+                    key="sql_fault_comp_pick",
+                )
+                if pick == "All":
+                    fault_component = ""
+                elif pick == "Custom contains…":
+                    fault_component = st.text_input(
+                        "Fault component contains",
+                        key="sql_fault_comp",
+                        placeholder="type part of component name…",
+                    )
+                else:
+                    fault_component = pick
+            with f3:
+                fault_sev = st.selectbox(
+                    "Severity",
+                    ["", "low", "medium", "high", "critical"],
+                    index=0,
+                    key="sql_fault_sev",
+                )
+
+    # =========================================================
+    # Condition SQL builder (against draws)
+    # =========================================================
+    def build_cond_sql(p, op, v1, v2):
+        p = (p or "").strip()
+        v1 = (v1 or "").strip()
+        v2 = (v2 or "").strip()
+        if not p:
+            return None
+
+        base = f'kv."Parameter Name" = {_lit(p)} AND kv._draw = d._draw'
+
+        if op == "any":
+            return f"EXISTS (SELECT 1 FROM datasets_kv kv WHERE {base})"
+
+        if op == "contains":
             if not v1:
                 return None
-
-            if is_num(v1):
-                return f"({base} AND TRY_CAST(\"Value\" AS DOUBLE) {op} {v1})"
-            return f"({base} AND \"Value\" {op} {lit(v1)})"
-
-        b1, b2, b3 = st.columns(3)
-        if b1.button("➕ Add condition", use_container_width=True, key="sql_add"):
-            cond = build_cond(p, op, v1, v2)
-            if not cond:
-                st.warning("Condition not complete.")
-            else:
-                if st.session_state.ds_conditions:
-                    st.session_state.ds_conditions.append(f"{joiner} {cond}")
-                else:
-                    st.session_state.ds_conditions.append(cond)
-
-        if b2.button("↩ Remove last", use_container_width=True, key="sql_pop") and st.session_state.ds_conditions:
-            st.session_state.ds_conditions.pop()
-
-        if b3.button("🧹 Clear", use_container_width=True, key="sql_clear"):
-            st.session_state.ds_conditions = []
-
-        where_parts = []
-        if st.session_state.ds_conditions:
-            where_parts.append("\n  ".join(st.session_state.ds_conditions))
-
-        if time_on and t_start and t_end:
-            start_ts = pd.Timestamp(t_start)
-            end_ts = pd.Timestamp(t_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-            where_parts.append(f"(event_ts BETWEEN {lit(start_ts)} AND {lit(end_ts)})")
-
-        where_sql = ""
-        if where_parts:
-            where_sql = "WHERE " + "\n  AND ".join([f"({w})" for w in where_parts])
-
-        st.code(where_sql or "-- no WHERE", language="sql")
-        return where_sql
-
-    # =========================================================
-    # Render: Run filter
-    # =========================================================
-    def render_run_filter(where_sql: str):
-        st.subheader("▶ Run filter")
-
-        sql = f"""
-        SELECT
-            source_kind,
-            source_file,
-            event_ts,
-            event_id,
-            _draw,
-            filename,
-            "Parameter Name",
-            "Value",
-            "Units"
-        FROM all_kv
-        {where_sql}
-        ORDER BY COALESCE(event_ts, TIMESTAMP '1900-01-01') ASC, source_kind, event_id, "Parameter Name";
-        """
-        st.code(sql, language="sql")
-
-        if st.button("▶ Run filter", use_container_width=True, key="sql_run"):
-            df = con.execute(sql).fetchdf()
-            st.session_state.sql_df_all = df
-            st.session_state.pop("sql_events_wide", None)
-            st.success(f"{len(df):,} rows matched")
-            st.dataframe(df, use_container_width=True, height=380)
-
-        if "sql_df_all" not in st.session_state:
-            st.stop()
-
-        df_all = st.session_state.sql_df_all
-        if df_all.empty:
-            st.warning("No rows matched.")
-            st.stop()
-
-        return df_all
-
-    # =========================================================
-    # Render: Visual Lab (FIXED)
-    # - Always pull FULL draw params for matched draw_ids using event_id
-    # - Maintenance plotted as vertical lines (no y=1 dots)
-    # =========================================================
-    # =========================================================
-    # Visual Lab (events over time) + CLICK to inspect
-    # =========================================================
-    import plotly.graph_objects as go
-
-
-    def _mtime(path):
-        try:
-            if isinstance(path, str) and path.strip():
-                return pd.to_datetime(os.path.getmtime(path), unit="s")
-        except Exception:
-            pass
-        return pd.NaT
-
-
-
-    def build_visual_dataset_plus_maint(
-        con,
-        df_all: pd.DataFrame,
-        use_time_fallback: bool = True,
-        include_nearby_draws_when_maintenance_only: bool = True,
-        nearby_pad_days: int = 7,
-    ):
-        """Build a KV + WIDE dataset for plotting.
-
-        - If the filter matched dataset rows, we pull full KV for those matched draw ids.
-        - If the filter matched ONLY maintenance rows, we can (optionally) also pull nearby draws
-          by time window (±pad days around the matched maintenance times, or around the time filter).
-
-        Returns:
-          d_kv: KV rows for plotting (full draw params + matched maintenance events)
-          wide: wide table indexed by event
-        """
-        df_f = df_all.copy()
-        df_f["event_ts"] = pd.to_datetime(df_f.get("event_ts"), errors="coerce")
-
-        # 1) matched draw ids from filter (if any)
-        ds_rows = df_f.loc[df_f.get("source_kind").astype(str).eq("dataset")].copy() if "source_kind" in df_f.columns else pd.DataFrame()
-        matched_draw_ids: list[str] = []
-        if not ds_rows.empty:
-            if "_draw" in ds_rows.columns:
-                matched_draw_ids = ds_rows["_draw"].dropna().astype(str).tolist()
-            if (not matched_draw_ids) and "event_id" in ds_rows.columns:
-                matched_draw_ids = ds_rows["event_id"].dropna().astype(str).tolist()
-            matched_draw_ids = sorted(list(dict.fromkeys([x.strip() for x in matched_draw_ids if str(x).strip()])))
-
-        # 2) matched maintenance rows from filter
-        df_maint_matched = df_f.loc[df_f.get("source_kind").astype(str).eq("maintenance")].copy() if "source_kind" in df_f.columns else pd.DataFrame()
-
-        # 3) If filter matched only maintenance -> optionally pull nearby draws
-        draw_ids_to_pull: list[str] = list(matched_draw_ids)
-        if (not matched_draw_ids) and (not df_maint_matched.empty) and include_nearby_draws_when_maintenance_only:
-            window_start = None
-            window_end = None
-
-            # If user enabled the time filter, use that exact window
-            if st.session_state.get("time_filter_on", False) and st.session_state.get("time_filter_start") and st.session_state.get("time_filter_end"):
-                window_start = pd.Timestamp(st.session_state.get("time_filter_start"))
-                window_end = pd.Timestamp(st.session_state.get("time_filter_end")) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-            else:
-                maint_times = pd.to_datetime(df_maint_matched["event_ts"], errors="coerce").dropna()
-                if not maint_times.empty:
-                    window_start = maint_times.min() - pd.Timedelta(days=int(nearby_pad_days))
-                    window_end = maint_times.max() + pd.Timedelta(days=int(nearby_pad_days))
-
-            if window_start is not None and window_end is not None:
-                try:
-                    cand = con.execute(f"""
-                        SELECT DISTINCT event_id
-                        FROM datasets_kv
-                        WHERE event_ts BETWEEN {lit(window_start)} AND {lit(window_end)}
-                    """).fetchdf()
-                    if cand is not None and not cand.empty:
-                        draw_ids_to_pull = cand["event_id"].dropna().astype(str).unique().tolist()
-                except Exception:
-                    draw_ids_to_pull = []
-
-                # Optional fallback using mtime if event_ts missing in datasets
-                if use_time_fallback:
-                    try:
-                        all_draws = con.execute("""
-                            SELECT DISTINCT event_id, filename, event_ts
-                            FROM datasets_kv
-                        """).fetchdf()
-                        all_draws["event_ts"] = pd.to_datetime(all_draws["event_ts"], errors="coerce")
-                        all_draws["_mtime"] = all_draws["filename"].astype(str).apply(_mtime)
-                        all_draws["_t"] = all_draws["event_ts"].fillna(all_draws["_mtime"])
-                        extra = all_draws[(all_draws["_t"].notna()) & (all_draws["_t"].between(window_start, window_end))].copy()
-                        if not extra.empty:
-                            draw_ids_to_pull = sorted(set(draw_ids_to_pull).union(set(extra["event_id"].dropna().astype(str).tolist())))
-                    except Exception:
-                        pass
-
-        # 4) Pull ALL params for selected draws (full KV)
-        df_draw_full = pd.DataFrame()
-        if draw_ids_to_pull:
-            draws_sql = "(" + ",".join(lit(d) for d in draw_ids_to_pull) + ")"
-
-            # Prefer match by _draw
-            try:
-                df_draw_full = con.execute(f"""
-                    SELECT
-                        source_kind, source_file, event_ts, event_id, _draw, filename,
-                        "Parameter Name", "Value", "Units"
-                    FROM datasets_kv
-                    WHERE CAST(_draw AS VARCHAR) IN {draws_sql}
-                """).fetchdf()
-            except Exception:
-                df_draw_full = pd.DataFrame()
-
-            # Fallback match by event_id
-            if df_draw_full.empty:
-                try:
-                    df_draw_full = con.execute(f"""
-                        SELECT
-                            source_kind, source_file, event_ts, event_id, _draw, filename,
-                            "Parameter Name", "Value", "Units"
-                        FROM datasets_kv
-                        WHERE CAST(event_id AS VARCHAR) IN {draws_sql}
-                """).fetchdf()
-                except Exception:
-                    df_draw_full = pd.DataFrame()
-
-        # 5) Combine full draws + matched maintenance
-        d = pd.concat([df_draw_full, df_maint_matched], ignore_index=True)
-        d["event_ts"] = pd.to_datetime(d.get("event_ts"), errors="coerce")
-
-        # Fill dataset times by mtime if missing
-        mask_ds = d.get("source_kind").astype(str).eq("dataset") if "source_kind" in d.columns else pd.Series([False] * len(d))
-        if "filename" in d.columns and use_time_fallback:
-            d.loc[mask_ds, "event_ts"] = d.loc[mask_ds, "event_ts"].fillna(
-                d.loc[mask_ds, "filename"].astype(str).apply(_mtime)
+            return (
+                "EXISTS (SELECT 1 FROM datasets_kv kv WHERE "
+                f"{base} AND CAST(kv.\"Value\" AS VARCHAR) ILIKE '%{_esc(v1)}%')"
             )
 
-        # IMPORTANT: pivot drops NaN in index cols, so ensure these are not-null
-        if "source_file" in d.columns:
-            d["source_file"] = d["source_file"].fillna("").astype(str)
-
-        d = d[d["event_ts"].notna()].copy()
-        if d.empty:
-            return pd.DataFrame(), pd.DataFrame()
-
-        d["event_key"] = d["source_kind"].astype(str) + ":" + d["event_id"].astype(str)
-
-        wide = (
-            d.pivot_table(
-                index=["event_ts", "event_key", "source_kind", "source_file"],
-                columns="Parameter Name",
-                values="Value",
-                aggfunc="first",
+        if op == "between":
+            if not v1 or not v2:
+                return None
+            if _is_num(v1) and _is_num(v2):
+                return (
+                    "EXISTS (SELECT 1 FROM datasets_kv kv WHERE "
+                    f"{base} AND TRY_CAST(kv.\"Value\" AS DOUBLE) BETWEEN {v1} AND {v2})"
+                )
+            return (
+                "EXISTS (SELECT 1 FROM datasets_kv kv WHERE "
+                f"{base} AND kv.\"Value\" BETWEEN {_lit(v1)} AND {_lit(v2)})"
             )
-            .reset_index()
-            .sort_values("event_ts")
+
+        if not v1:
+            return None
+
+        if _is_num(v1):
+            return (
+                "EXISTS (SELECT 1 FROM datasets_kv kv WHERE "
+                f"{base} AND TRY_CAST(kv.\"Value\" AS DOUBLE) {op} {v1})"
+            )
+
+        return (
+            "EXISTS (SELECT 1 FROM datasets_kv kv WHERE "
+            f"{base} AND kv.\"Value\" {op} {_lit(v1)})"
         )
 
-        return d, wide
+    def build_cond_human(p, op, v1, v2):
+        v1s = (v1 or "").strip()
+        v2s = (v2 or "").strip()
+        if op == "any":
+            return f"{p}: is present"
+        if op == "contains":
+            if not v1s:
+                return None
+            return f"{p}: contains “{v1s}”"
+        if op == "between":
+            if not v1s or not v2s:
+                return None
+            return f"{p}: between {v1s} and {v2s}"
+        if not v1s:
+            return None
+        op_map = {"=": "=", "!=": "≠", ">": ">", ">=": "≥", "<": "<", "<=": "≤"}
+        return f"{p}: {op_map.get(op, op)} {v1s}"
 
+    def wrap_not(sql, human, negate):
+        if not sql or not human:
+            return None, None
+        if negate:
+            return f"(NOT ({sql}))", f"NOT {human}"
+        return f"({sql})", human
 
-    def render_event_details(con, event_key: str):
-        """
-        event_key format: 'dataset:<id>' or 'maintenance:<action_id>'
-        """
+    b1, b2, b3 = st.columns(3)
+    if b1.button("➕ Add condition", use_container_width=True, key="sql_add_cond"):
+        sql_raw = build_cond_sql(p, op, v1, v2)
+        human_raw = build_cond_human(p, op, v1, v2)
+        sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
+
+        if not sql_cond or not human_cond:
+            st.warning("Condition not complete.")
+        else:
+            if st.session_state.ds_conditions:
+                st.session_state.ds_conditions.append(f"{joiner} {sql_cond}")
+            else:
+                st.session_state.ds_conditions.append(sql_cond)
+
+            if st.session_state.ds_conditions_human:
+                st.session_state.ds_conditions_human.append(f"{joiner} {human_cond}")
+            else:
+                st.session_state.ds_conditions_human.append(human_cond)
+
+            st.session_state.sql_filter_params_seq.append(p)
+
+    if b2.button("↩ Remove last", use_container_width=True, key="sql_pop_cond"):
+        if st.session_state.ds_conditions:
+            st.session_state.ds_conditions.pop()
+        if st.session_state.ds_conditions_human:
+            st.session_state.ds_conditions_human.pop()
+        if st.session_state.sql_filter_params_seq:
+            st.session_state.sql_filter_params_seq.pop()
+
+    if b3.button("🧹 Clear", use_container_width=True, key="sql_clear_cond"):
+        st.session_state.ds_conditions = []
+        st.session_state.ds_conditions_human = []
+        st.session_state.sql_filter_params_seq = []
+
+    human_lines = list(st.session_state.ds_conditions_human)
+    if time_on and d_from and d_to:
+        human_lines.append(f"Time: {d_from} → {d_to}")
+    if maint_on and (maint_text.strip() or maint_component.strip()):
+        human_lines.append(f"Maintenance: {maint_component.strip()} {maint_text.strip()}".strip())
+    if fault_on and (fault_text.strip() or fault_component.strip() or fault_sev.strip()):
+        human_lines.append(f"Faults: {fault_component.strip()} {fault_text.strip()} {fault_sev.strip()}".strip())
+
+    if human_lines:
+        st.success("**Active filter:**\n" + "\n".join([f"- {x}" for x in human_lines]))
+    else:
+        st.info("No filter set (will include all selected event types).")
+
+    st.session_state["sql_last_human_lines"] = list(human_lines)
+
+    # =========================================================
+    # Build draw WHERE (conditions only; time applied after fallback)
+    # =========================================================
+    where_sql_draws = ""
+    if st.session_state.ds_conditions:
+        conds = list(st.session_state.ds_conditions)
+        if conds:
+            first = str(conds[0]).lstrip()
+            if first.upper().startswith("OR "):
+                conds[0] = first[3:].lstrip()
+            elif first.upper().startswith("AND "):
+                conds[0] = first[4:].lstrip()
+        where_sql_draws = "WHERE " + "\n  ".join(conds)
+
+    # =========================================================
+    # Build maint/fault WHERE (text/component/sev only; time/scope applied later)
+    # =========================================================
+    maint_where_base = ""
+    if maint_on and (maint_text.strip() or maint_component.strip()):
+        conds = []
+        if maint_text.strip():
+            s = maint_text.strip()
+            conds.append(
+                f"(COALESCE(task,'') ILIKE '%{_esc(s)}%' OR COALESCE(note,'') ILIKE '%{_esc(s)}%' OR COALESCE(source_file,'') ILIKE '%{_esc(s)}%')"
+            )
+        if maint_component.strip():
+            s2 = maint_component.strip()
+            if st.session_state.get("sql_maint_comp_pick", "") not in ("All", "Custom contains…"):
+                conds.append(f"(COALESCE(component,'') = {_lit(s2)})")
+            else:
+                conds.append(f"(COALESCE(component,'') ILIKE '%{_esc(s2)}%')")
+        maint_where_base = "WHERE " + " AND ".join(conds)
+
+    fault_where_base = ""
+    if fault_on and (fault_text.strip() or fault_component.strip() or fault_sev.strip()):
+        conds = []
+        if fault_text.strip():
+            s = fault_text.strip()
+            conds.append(
+                f"(COALESCE(title,'') ILIKE '%{_esc(s)}%' OR COALESCE(description,'') ILIKE '%{_esc(s)}%' OR COALESCE(source_file,'') ILIKE '%{_esc(s)}%')"
+            )
+        if fault_component.strip():
+            s2 = fault_component.strip()
+            if st.session_state.get("sql_fault_comp_pick", "") not in ("All", "Custom contains…"):
+                conds.append(f"(COALESCE(component,'') = {_lit(s2)})")
+            else:
+                conds.append(f"(COALESCE(component,'') ILIKE '%{_esc(s2)}%')")
+        if fault_sev.strip():
+            conds.append(f"(COALESCE(severity,'') = {_lit(fault_sev.strip())})")
+        fault_where_base = "WHERE " + " AND ".join(conds)
+
+    # =========================================================
+    # RUN FILTER
+    # =========================================================
+    st.subheader("▶ Run")
+
+    sql_draws = f"""
+    WITH draws AS (
+        SELECT _draw, MAX(event_ts) AS event_ts
+        FROM datasets_kv
+        GROUP BY _draw
+    )
+    SELECT d._draw, d.event_ts
+    FROM draws d
+    {where_sql_draws}
+    ORDER BY COALESCE(d.event_ts, TIMESTAMP '1900-01-01') ASC, d._draw;
+    """
+
+    if st.button("▶ Run filter", type="primary", use_container_width=True, key="sql_run"):
+        used_params_run = _dedupe_keep_order(st.session_state.get("sql_filter_params_seq", []))
+        human_lines_run = list(st.session_state.get("sql_last_human_lines", []) or [])
+        filters_summary_run = _filters_summary_for_draws(used_params_run, human_lines_run)
+        st.session_state["sql_last_filters_summary"] = filters_summary_run
+
+        # ---- draws ----
+        df_draws = pd.DataFrame(columns=["_draw", "event_ts"])
+        if include_draws:
+            df_draws = con.execute(sql_draws).fetchdf()
+
+            # Fill missing event_ts using file mtime
+            if not df_draws.empty:
+                draw_list = df_draws["_draw"].dropna().astype(str).unique().tolist()
+                draws_sql = "(" + ",".join(_lit(d) for d in draw_list) + ")"
+                df_files = con.execute(f"""
+                    SELECT _draw, ANY_VALUE(filename) AS filename
+                    FROM datasets_kv
+                    WHERE CAST(_draw AS VARCHAR) IN {draws_sql}
+                    GROUP BY _draw
+                """).fetchdf()
+                if not df_files.empty:
+                    df_draws = df_draws.merge(df_files, on="_draw", how="left")
+                    df_draws["event_ts"] = pd.to_datetime(df_draws["event_ts"], errors="coerce")
+                    df_draws["event_ts"] = df_draws["event_ts"].fillna(df_draws["filename"].astype(str).apply(_mtime_ts))
+                    df_draws = df_draws.drop(columns=["filename"], errors="ignore")
+
+            # Apply time filter AFTER fallback
+            if time_on and d_from and d_to and not df_draws.empty:
+                start_ts = pd.Timestamp(d_from)
+                end_ts = pd.Timestamp(d_to) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                df_draws["event_ts"] = pd.to_datetime(df_draws["event_ts"], errors="coerce")
+                df_draws = df_draws[df_draws["event_ts"].between(start_ts, end_ts)]
+
+            if not df_draws.empty:
+                df_draws = df_draws.sort_values(["event_ts", "_draw"], na_position="last")
+
+        # ---- attach "matched_by" + values found ----
+        if df_draws is not None and not df_draws.empty:
+            df_draws = df_draws.copy()
+            df_draws["matched_by"] = filters_summary_run if filters_summary_run else (
+                ", ".join(used_params_run) if used_params_run else "(no draw filter)"
+            )
+
+            values_long = pd.DataFrame()
+            values_wide = pd.DataFrame()
+
+            if used_params_run:
+                draw_list = df_draws["_draw"].dropna().astype(str).unique().tolist()
+                draws_sql = "(" + ",".join(_lit(d) for d in draw_list) + ")"
+                params_sql = "(" + ",".join(_lit(pp) for pp in used_params_run) + ")"
+
+                values_long = con.execute(f"""
+                    SELECT
+                        CAST(_draw AS VARCHAR) AS _draw,
+                        CAST("Parameter Name" AS VARCHAR) AS "Parameter Name",
+                        CAST("Value" AS VARCHAR) AS "Value",
+                        CAST(COALESCE("Units",'') AS VARCHAR) AS "Units"
+                    FROM datasets_kv
+                    WHERE CAST(_draw AS VARCHAR) IN {draws_sql}
+                      AND CAST("Parameter Name" AS VARCHAR) IN {params_sql}
+                      AND TRIM(COALESCE(CAST("Value" AS VARCHAR),'')) <> ''
+                """).fetchdf()
+
+                if values_long is None:
+                    values_long = pd.DataFrame()
+
+                if not values_long.empty:
+                    values_long = (
+                        values_long.drop_duplicates(subset=["_draw", "Parameter Name"], keep="first")
+                        .sort_values(["_draw", "Parameter Name"])
+                        .reset_index(drop=True)
+                    )
+
+                    values_wide = (
+                        values_long.pivot_table(
+                            index="_draw",
+                            columns="Parameter Name",
+                            values="Value",
+                            aggfunc="first",
+                        )
+                        .reset_index()
+                    )
+
+                    join_cols = [c for c in values_wide.columns if c != "_draw"][:12]
+                    if join_cols:
+                        df_draws = df_draws.merge(values_wide[["_draw"] + join_cols], on="_draw", how="left")
+
+            st.session_state["sql_values_found_long"] = values_long
+            st.session_state["sql_values_found_wide"] = values_wide
+            st.session_state["sql_matched_draws"] = df_draws
+        else:
+            st.session_state["sql_values_found_long"] = pd.DataFrame()
+            st.session_state["sql_values_found_wide"] = pd.DataFrame()
+            st.session_state["sql_matched_draws"] = df_draws
+
+        # ---- scope window (for maint/fault overlay) ----
+        scope_start = None
+        scope_end = None
+
+        if (include_maint or include_faults) and event_scope == "Only within time filter window" and time_on and d_from and d_to:
+            scope_start = pd.Timestamp(d_from)
+            scope_end = pd.Timestamp(d_to) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
+        if (include_maint or include_faults) and event_scope == "Only within matched draws window" and include_draws and df_draws is not None and not df_draws.empty:
+            tmin = pd.to_datetime(df_draws["event_ts"], errors="coerce").min()
+            tmax = pd.to_datetime(df_draws["event_ts"], errors="coerce").max()
+            if pd.notna(tmin) and pd.notna(tmax):
+                scope_start = tmin
+                scope_end = tmax
+
+        def _add_scope(where_base: str, ts_col: str):
+            if scope_start is None or scope_end is None:
+                return where_base
+            add = f"({ts_col} BETWEEN {_lit(scope_start)} AND {_lit(scope_end)})"
+            return (where_base + " AND " if where_base else "WHERE ") + add
+
+        maint_where = _add_scope(maint_where_base, "action_ts")
+        fault_where = _add_scope(fault_where_base, "fault_ts")
+
+        # ---- Load draw KV rows for matched draws ----
+        df_kv = pd.DataFrame()
+        if include_draws and df_draws is not None and not df_draws.empty:
+            draw_list = df_draws["_draw"].dropna().astype(str).unique().tolist()
+            draws_sql = "(" + ",".join(_lit(d) for d in draw_list) + ")"
+            df_kv = con.execute(f"""
+                SELECT
+                    'dataset'::VARCHAR AS source_kind,
+                    NULL::VARCHAR AS source_file,
+                    event_ts,
+                    event_id,
+                    _draw,
+                    filename,
+                    "Parameter Name",
+                    "Value",
+                    "Units"
+                FROM datasets_kv
+                WHERE CAST(_draw AS VARCHAR) IN {draws_sql}
+            """).fetchdf()
+
+        # ---- Maintenance events ----
+        df_m = pd.DataFrame()
+        if include_maint:
+            df_m = con.execute(f"""
+                SELECT
+                    'maintenance'::VARCHAR AS source_kind,
+                    COALESCE(source_file,'')::VARCHAR AS source_file,
+                    action_ts AS event_ts,
+                    CAST(action_id AS VARCHAR) AS event_id,
+                    NULL::VARCHAR AS _draw,
+                    NULL::VARCHAR AS filename,
+                    COALESCE(component,'')::VARCHAR AS "Parameter Name",
+                    (trim(COALESCE(task,'')) || CASE WHEN COALESCE(note,'') <> '' THEN (' | ' || note) ELSE '' END)::VARCHAR AS "Value",
+                    ''::VARCHAR AS "Units"
+                FROM maintenance_actions
+                {maint_where}
+            """).fetchdf()
+
+        # ---- Fault events ----
+        df_f = pd.DataFrame()
+        if include_faults:
+            df_f = con.execute(f"""
+                SELECT
+                    'fault'::VARCHAR AS source_kind,
+                    COALESCE(source_file,'')::VARCHAR AS source_file,
+                    fault_ts AS event_ts,
+                    CAST(fault_id AS VARCHAR) AS event_id,
+                    NULL::VARCHAR AS _draw,
+                    NULL::VARCHAR AS filename,
+                    COALESCE(component,'')::VARCHAR AS "Parameter Name",
+                    (trim(COALESCE(title,'')) || CASE WHEN COALESCE(severity,'') <> '' THEN (' | severity=' || severity) ELSE '' END ||
+                     CASE WHEN COALESCE(description,'') <> '' THEN (' | ' || description) ELSE '' END)::VARCHAR AS "Value",
+                    ''::VARCHAR AS "Units"
+                FROM faults_events
+                {fault_where}
+            """).fetchdf()
+
+        df_all = pd.concat([df_kv, df_m, df_f], ignore_index=True)
+        st.session_state["sql_df_all"] = df_all
+        st.session_state.pop("sql_selected_event_key", None)
+        st.session_state.pop("math_selected_event_key", None)
+
+        # ---- show results ----
+        if include_draws:
+            st.success(f"Matched draws: {len(st.session_state['sql_matched_draws']):,}")
+
+            if st.session_state.get("sql_last_filters_summary"):
+                with st.expander("🔎 Filters used to match these draws", expanded=False):
+                    st.write(st.session_state.get("sql_last_filters_summary"))
+
+            used_params_run = _dedupe_keep_order(st.session_state.get("sql_filter_params_seq", []))
+            if used_params_run:
+                with st.expander("📌 Values found for the searched parameters", expanded=True):
+                    values_long = st.session_state.get("sql_values_found_long", pd.DataFrame())
+                    values_wide = st.session_state.get("sql_values_found_wide", pd.DataFrame())
+                    if values_long is None or values_long.empty:
+                        st.info("No values found for those parameters (maybe missing/blank in those CSVs).")
+                    else:
+                        st.caption("Long view: draw + parameter + value (+ units)")
+                        st.dataframe(values_long, use_container_width=True, height=260)
+                        if values_wide is not None and not values_wide.empty:
+                            st.caption("Wide view: one row per draw (columns = parameters)")
+                            st.dataframe(values_wide, use_container_width=True, height=260)
+
+            st.dataframe(st.session_state["sql_matched_draws"], use_container_width=True, height=260)
+        else:
+            st.info("Draws excluded (timeline can show only Maintenance/Faults).")
+
+        with st.expander("Loaded KV preview", expanded=False):
+            st.caption(f"Rows loaded: {len(df_all):,}")
+            st.dataframe(df_all.head(300), use_container_width=True, height=320)
+
+    # =========================================================
+    # Results
+    # =========================================================
+    if "sql_df_all" not in st.session_state:
+        st.stop()
+
+    df_all = st.session_state["sql_df_all"]
+    if df_all is None or df_all.empty:
+        st.warning("No results loaded. Run filter.")
+        st.stop()
+
+    # =========================================================
+    # Event details
+    # =========================================================
+    def render_event_details(event_key: str):
         if not event_key or ":" not in event_key:
             return
-
         kind, eid = event_key.split(":", 1)
         kind = (kind or "").strip()
 
@@ -9812,8 +13686,7 @@ elif tab_selection == "🧪 SQL Lab":
         st.caption(f"Selected: **{event_key}**")
 
         if kind == "dataset":
-            # Show full draw KV (Parameter Name / Value / Units)
-            df_kv = con.execute(f"""
+            df_kv2 = con.execute(f"""
                 SELECT
                     event_ts,
                     event_id,
@@ -9823,393 +13696,451 @@ elif tab_selection == "🧪 SQL Lab":
                     "Value",
                     "Units"
                 FROM datasets_kv
-                WHERE CAST(_draw AS VARCHAR) = {lit(eid)}
-                   OR CAST(event_id AS VARCHAR) = {lit(eid)}
+                WHERE CAST(_draw AS VARCHAR) = {_lit(eid)}
+                   OR CAST(event_id AS VARCHAR) = {_lit(eid)}
                 ORDER BY "Parameter Name"
             """).fetchdf()
-
-            if df_kv.empty:
-                st.warning("No KV rows found for this draw id.")
+            if df_kv2.empty:
+                st.warning("No KV rows found for this draw.")
                 return
-
-            # Nice header
-            top = df_kv.head(1)
-            draw_name = top["event_id"].iloc[0] if "event_id" in top.columns else eid
-            ts = top["event_ts"].iloc[0] if "event_ts" in top.columns else None
-            st.markdown(f"**Draw:** `{draw_name}`")
-            if ts is not None:
-                st.caption(f"Time: {ts}")
-
-            st.dataframe(
-                df_kv[["Parameter Name", "Value", "Units"]],
-                use_container_width=True,
-                height=420
-            )
+            top = df_kv2.head(1)
+            st.markdown(f"**Draw:** `{top['event_id'].iloc[0]}`")
+            if "event_ts" in top.columns:
+                st.caption(f"Time: {top['event_ts'].iloc[0]}")
+            st.dataframe(df_kv2[["Parameter Name", "Value", "Units"]], use_container_width=True, height=460)
 
         elif kind == "maintenance":
-            # Show maintenance action row
-            try:
-                df_act = con.execute(f"""
-                    SELECT
-                        action_ts,
-                        component,
-                        task,
-                        task_id,
-                        tracking_mode,
-                        hours_source,
-                        done_date,
-                        done_hours,
-                        done_draw,
-                        actor,
-                        note,
-                        source_file
-                    FROM maintenance_actions
-                    WHERE CAST(action_id AS VARCHAR) = {lit(eid)}
-                    LIMIT 1
-                """).fetchdf()
-            except Exception as e:
-                st.error(f"Failed to read maintenance action: {e}")
-                return
-
+            df_act = con.execute(f"""
+                SELECT
+                    action_ts,
+                    component,
+                    task,
+                    task_id,
+                    tracking_mode,
+                    hours_source,
+                    done_date,
+                    done_hours,
+                    done_draw,
+                    actor,
+                    note,
+                    source_file
+                FROM maintenance_actions
+                WHERE CAST(action_id AS VARCHAR) = {_lit(eid)}
+                LIMIT 1
+            """).fetchdf()
             if df_act.empty:
                 st.warning("Maintenance action not found.")
                 return
+            st.dataframe(df_act, use_container_width=True, height=180)
 
-            st.markdown("**Maintenance action**")
-            st.dataframe(df_act, use_container_width=True, height=140)
-
-            # Also show KV-style view (same parameter name = source_file)
-            try:
-                df_kv = con.execute(f"""
-                    SELECT
-                        action_ts AS event_ts,
-                        source_file AS "Parameter Name",
-                        (trim(COALESCE(component,'') || ' — ' || COALESCE(task,'')) ||
-                         CASE WHEN COALESCE(note,'') <> '' THEN (' | ' || note) ELSE '' END
-                        ) AS "Value",
-                        '' AS "Units"
-                    FROM maintenance_actions
-                    WHERE CAST(action_id AS VARCHAR) = {lit(eid)}
-                """).fetchdf()
-                st.markdown("**KV view**")
-                st.dataframe(df_kv[["Parameter Name", "Value", "Units"]], use_container_width=True, height=120)
-            except Exception:
-                pass
-
+        elif kind == "fault":
+            df_fault = con.execute(f"""
+                SELECT
+                    fault_ts,
+                    component,
+                    severity,
+                    title,
+                    description,
+                    actor,
+                    source_file,
+                    related_draw
+                FROM faults_events
+                WHERE CAST(fault_id AS VARCHAR) = {_lit(eid)}
+                LIMIT 1
+            """).fetchdf()
+            if df_fault.empty:
+                st.warning("Fault not found.")
+                return
+            st.dataframe(df_fault, use_container_width=True, height=180)
         else:
             st.info("Unknown event type.")
 
+    # =========================================================
+    # VISUAL LAB
+    # =========================================================
+    st.subheader("📈 Visual Lab")
 
-    def render_visual_lab_clickable(con, df_all):
-        st.subheader("📈 Visual Lab (events over time)")
-        wide_out = pd.DataFrame()
-        numeric_out = []
+    show_draw_traces = st.toggle(
+        "Show Draw traces",
+        value=True,
+        key="sql_show_draw_traces",
+        disabled=not con,
+        help="Turn OFF if you want to filter by draws but display only Maintenance/Faults on the timeline.",
+    )
 
-        # If the filter matched only maintenance, optionally include nearby draws so that
-        # numeric parameters are available in Visual Lab + Math Lab.
-        has_dataset_match = False
-        try:
-            has_dataset_match = df_all["source_kind"].astype(str).eq("dataset").any()
-        except Exception:
-            has_dataset_match = False
+    df = df_all.copy()
+    df["event_ts"] = pd.to_datetime(df.get("event_ts"), errors="coerce")
 
-        include_nearby = True
-        pad_days = 7
-        if not has_dataset_match:
-            st.caption("Filter matched maintenance only. You can optionally include nearby draws to plot numeric parameters.")
-            c_near1, c_near2 = st.columns([1, 1])
-            with c_near1:
-                include_nearby = st.checkbox(
-                    "Include nearby draws",
-                    value=bool(st.session_state.get("sql_include_nearby_draws", True)),
-                    key="sql_include_nearby_draws",
+    ds_kv = df[df["source_kind"].astype(str).eq("dataset")].copy() if "source_kind" in df.columns else pd.DataFrame()
+    maint_kv = df[df["source_kind"].astype(str).eq("maintenance")].copy() if "source_kind" in df.columns else pd.DataFrame()
+    fault_kv = df[df["source_kind"].astype(str).eq("fault")].copy() if "source_kind" in df.columns else pd.DataFrame()
+
+    wide = pd.DataFrame()
+    numeric_all = []
+
+    if not ds_kv.empty:
+        if "filename" in ds_kv.columns:
+            ds_kv["event_ts"] = ds_kv["event_ts"].fillna(ds_kv["filename"].astype(str).apply(_mtime_ts))
+
+        ds_kv = ds_kv[ds_kv["event_ts"].notna()].copy()
+        ds_kv["event_key"] = "dataset:" + ds_kv["event_id"].astype(str)
+
+        if not ds_kv.empty:
+            wide = (
+                ds_kv.pivot_table(
+                    index=["event_ts", "event_key"],
+                    columns="Parameter Name",
+                    values="Value",
+                    aggfunc="first",
                 )
-            with c_near2:
-                pad_days = st.number_input(
-                    "± pad days",
-                    min_value=0,
-                    max_value=365,
-                    value=int(st.session_state.get("sql_nearby_pad_days", 7)),
-                    step=1,
-                    key="sql_nearby_pad_days",
-                )
+                .reset_index()
+                .sort_values("event_ts")
+            )
 
-        d_kv, wide = build_visual_dataset_plus_maint(
-            con,
-            df_all,
-            use_time_fallback=True,
-            include_nearby_draws_when_maintenance_only=include_nearby,
-            nearby_pad_days=int(pad_days),
-        )
-        if wide is None or wide.empty:
-            st.warning("No events with valid time to plot.")
-            return wide_out, numeric_out
+            META = {"event_ts", "event_key"}
+            all_plot_params = [c for c in wide.columns if c not in META]
+            numeric_all = [c for c in all_plot_params if pd.to_numeric(wide[c], errors="coerce").notna().sum() > 0]
 
-        st.caption(f"Events with valid time: **{len(wide):,}**")
+    numeric_chosen = []
+    cat_chosen = []
+    chosen_all = []
 
-        # Explain what is included (helps keep Math Lab expectations consistent)
-        try:
-            n_ds = int(wide["source_kind"].astype(str).eq("dataset").sum())
-            n_m = int(wide["source_kind"].astype(str).eq("maintenance").sum())
-            st.caption(f"Included events → datasets: **{n_ds}**, maintenance: **{n_m}**")
-        except Exception:
-            pass
-
-        META = {"event_ts", "event_key", "source_kind", "source_file"}
-        all_plot_params = [c for c in wide.columns if c not in META]
-
-        # Filter params used (for your mode toggle)
-        filter_params_used = sorted(df_all["Parameter Name"].dropna().astype(str).unique().tolist())
-        filter_plot_params = [c for c in filter_params_used if c in wide.columns]
-
-        # Numeric candidates (for pooling / math lab)
-        numeric_all = [c for c in all_plot_params if pd.to_numeric(wide[c], errors="coerce").notna().sum() > 0]
-        wide_out = wide
-        numeric_out = numeric_all
-
-        st.markdown("### Choose parameters to plot (raw)")
-
-        mode = st.radio(
-            "Parameter picker mode",
-            ["Only parameters used in the filter", "Any parameter from matched events (after filter)"],
+    if wide is not None and not wide.empty:
+        pick_mode = st.radio(
+            "Parameter picker",
+            ["Only parameters used in the filter", "Any parameter from matched draws"],
             horizontal=True,
             key="sql_pick_mode",
         )
+        used_params2 = _dedupe_keep_order(st.session_state.get("sql_filter_params_seq", []))
+        pool = [pp for pp in used_params2 if pp in wide.columns] if pick_mode.startswith("Only") else \
+            [c for c in wide.columns if c not in ("event_ts", "event_key")]
 
-        if mode == "Only parameters used in the filter":
-            pool = list(filter_plot_params)
-            # enrich pool so you can still plot real draw numeric signals
-            if len(pool) < 3 and len(numeric_all) > 0:
-                pool = sorted(set(pool + numeric_all))
-        else:
-            pool = list(all_plot_params)
+        chosen_all = st.multiselect(
+            "Draw parameters to plot",
+            pool,
+            key="sql_plot_params",
+            help="Pick numeric AND text parameters. Text params become categorical markers.",
+        )
 
-        chosen = st.multiselect("Parameters to plot", pool, key="sql_plot_params")
-
-        # --- build plotly fig ---
-        fig = go.Figure()
-
-        # We’ll keep an event selection even if user plots only maintenance markers
-        # Create a hidden “event markers” base trace (clickable)
-        fig.add_trace(go.Scatter(
-            x=wide["event_ts"],
-            y=[0] * len(wide),
-            mode="markers",
-            marker=dict(size=10, opacity=0.0),
-            customdata=wide["event_key"],
-            name="events",
-            hoverinfo="skip",
-            showlegend=False
-        ))
-
-        y_min, y_max = None, None
-
-        # Plot numeric series (clickable points with customdata)
-        for col in (chosen or []):
-            s_num = pd.to_numeric(wide[col], errors="coerce")
+        for c in (chosen_all or []):
+            if c in ("event_ts", "event_key"):
+                continue
+            s_num = pd.to_numeric(wide[c], errors="coerce")
             if s_num.notna().sum() > 0:
-                fig.add_trace(go.Scatter(
-                    x=wide["event_ts"],
-                    y=s_num,
-                    mode="lines+markers",
-                    name=col,
-                    customdata=wide["event_key"],
-                    hovertemplate=(
-                        f"<b>{col}</b><br>"
-                        "Time: %{x}<br>"
-                        "Value: %{y}<br>"
-                        "Event: %{customdata}<extra></extra>"
-                    )
-                ))
-                _mn = float(s_num.min())
-                _mx = float(s_num.max())
-                y_min = _mn if y_min is None else min(y_min, _mn)
-                y_max = _mx if y_max is None else max(y_max, _mx)
+                numeric_chosen.append(c)
+            else:
+                if wide[c].astype(str).replace("nan", "").str.strip().ne("").any():
+                    cat_chosen.append(c)
 
-        # Maintenance/non-numeric markers: dashed vlines + a bottom marker trace (clickable)
-        for col in (chosen or []):
-            s_raw = wide[col]
-            s_num = pd.to_numeric(s_raw, errors="coerce")
-            if s_num.notna().sum() == 0:
-                mask = s_raw.notna() & (s_raw.astype(str).str.strip() != "")
-                if mask.any():
-                    times = wide.loc[mask, "event_ts"]
-                    keys = wide.loc[mask, "event_key"]
+        if chosen_all and (not numeric_chosen) and cat_chosen:
+            st.caption("ℹ️ Only categorical parameters selected → timeline markers only (no numeric y-scale).")
+    else:
+        st.info("No draw timestamps available. Maintenance/Faults can still show.")
 
-                    # vlines (not clickable)
-                    for t in times.tolist():
-                        fig.add_vline(x=t, line_width=1, line_dash="dash", opacity=0.35)
+    fig = go.Figure()
+    only_cat_mode = (show_draw_traces and (not numeric_chosen) and (len(cat_chosen) == 1))
 
-                    # clickable markers at bottom
-                    base_y = 0.0
-                    if y_min is not None and y_max is not None and y_max > y_min:
-                        base_y = y_min - 0.05 * (y_max - y_min)
+    if show_draw_traces and wide is not None and not wide.empty and numeric_chosen:
+        for col in numeric_chosen:
+            y = pd.to_numeric(wide[col], errors="coerce")
+            if y.notna().sum() == 0:
+                continue
+            fig.add_trace(go.Scatter(
+                x=wide["event_ts"],
+                y=y,
+                mode="lines+markers",
+                name=f"Draw: {col}",
+                customdata=wide["event_key"],
+                hovertemplate=f"<b>{col}</b><br>%{{x}}<br>%{{y}}<br>%{{customdata}}<extra></extra>"
+            ))
 
+    if show_draw_traces and wide is not None and not wide.empty and cat_chosen:
+        if len(cat_chosen) == 1:
+            pname = cat_chosen[0]
+            vals = wide[pname].astype(str).fillna("")
+            vals = vals.replace("nan", "").str.strip()
+            mask = vals.ne("")
+            if mask.sum() > 0:
+                ordered, seen = [], set()
+                for v in vals[mask].tolist():
+                    if v not in seen:
+                        seen.add(v)
+                        ordered.append(v)
+
+                if only_cat_mode:
                     fig.add_trace(go.Scatter(
-                        x=times,
-                        y=[base_y] * len(times),
+                        x=wide.loc[mask, "event_ts"],
+                        y=vals[mask].tolist(),
                         mode="markers",
-                        marker=dict(size=10, symbol="x"),
-                        name=col,
-                        customdata=keys,
-                        hovertemplate=(
-                            f"<b>{col}</b><br>"
-                            "Time: %{x}<br>"
-                            "Event: %{customdata}<extra></extra>"
-                        )
+                        name=f"{pname}",
+                        customdata=wide.loc[mask, "event_key"],
+                        text=("<b>" + pname + "</b><br>" + vals[mask]),
+                        hovertemplate="%{text}<br>%{x}<br>%{customdata}<extra></extra>",
+                        marker=dict(size=11, symbol="circle"),
                     ))
 
+                    fig.update_yaxes(
+                        title=pname,
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=ordered,
+                        showgrid=True,
+                        zeroline=False,
+                    )
+
+                    fig.update_layout(
+                        yaxis=dict(domain=[0.30, 1.0]),
+                        yaxis2=dict(
+                            domain=[0.0, 0.24],
+                            anchor="x",
+                            showgrid=False,
+                            zeroline=False,
+                            showticklabels=False,
+                            title="",
+                        ),
+                        margin=dict(l=10, r=10, t=40, b=10),
+                    )
+                else:
+                    cat_to_y = {v: i for i, v in enumerate(ordered)}
+                    y_int = [cat_to_y[v] for v in vals[mask].tolist()]
+                    fig.add_trace(go.Scatter(
+                        x=wide.loc[mask, "event_ts"],
+                        y=y_int,
+                        yaxis="y2",
+                        mode="markers",
+                        name=f"{pname}",
+                        customdata=wide.loc[mask, "event_key"],
+                        text=("<b>" + pname + "</b><br>" + vals[mask]),
+                        hovertemplate="%{text}<br>%{x}<br>%{customdata}<extra></extra>",
+                        marker=dict(size=11, symbol="circle"),
+                    ))
+                    fig.update_layout(
+                        yaxis2=dict(
+                            overlaying="y",
+                            side="right",
+                            range=[-0.6, max(0, len(ordered) - 1) + 0.6],
+                            showgrid=False,
+                            zeroline=False,
+                            title=f"{pname}",
+                            tickmode="array",
+                            tickvals=list(range(len(ordered))),
+                            ticktext=ordered,
+                            showticklabels=True,
+                            visible=True,
+                        )
+                    )
+
+    only_cat_mode = (show_draw_traces and (not numeric_chosen) and (len(cat_chosen) == 1))
+    if not only_cat_mode:
         fig.update_layout(
-            height=420,
-            margin=dict(l=10, r=10, t=40, b=10),
-            title="Matched events over time (click a point to inspect)",
-            xaxis_title="Time",
-            yaxis_title="Value",
-            hovermode="closest",
+            yaxis2=dict(
+                overlaying="y",
+                side="right",
+                range=[0, 1],
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                visible=False,
+            )
         )
 
-        # --- render + selection ---
-        sel = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            on_select="rerun",
-            key="sql_vis_plot"
-        )
+    # maintenance overlay
+    show_maint_overlay = st.toggle(
+        "Show Maintenance overlay",
+        value=False,
+        key="sql_show_maint_overlay",
+        disabled=maint_kv.empty,
+        help="Overlay maintenance events on the timeline without changing the draw y-axis scale.",
+    )
+    if show_maint_overlay and not maint_kv.empty:
+        mm = maint_kv.copy()
+        mm["event_ts"] = pd.to_datetime(mm["event_ts"], errors="coerce")
+        mm = mm[mm["event_ts"].notna()].copy()
+        mm["event_key"] = "maintenance:" + mm["event_id"].astype(str)
+        y_lane = 0.5 if only_cat_mode else 0.70
+        fig.add_trace(go.Scatter(
+            x=mm["event_ts"],
+            y=[y_lane] * len(mm),
+            yaxis="y2",
+            mode="markers",
+            name="Maintenance",
+            marker=dict(size=12, symbol="triangle-up"),
+            customdata=mm["event_key"],
+            text=("<b>" + mm["Parameter Name"].astype(str) + "</b><br>" + mm["Value"].astype(str)),
+            hovertemplate="%{text}<br>%{x}<br>%{customdata}<extra></extra>",
+        ))
 
-        # robust extraction of selected event_key
-        selected_key = None
-        try:
-            if isinstance(sel, dict):
-                pts = sel.get("selection", {}).get("points", sel.get("points", []))
-                if pts:
-                    selected_key = pts[0].get("customdata")
+    # faults overlay
+    show_fault_overlay = st.toggle(
+        "Show Faults overlay",
+        value=False,
+        key="sql_show_fault_overlay",
+        disabled=fault_kv.empty,
+        help="Overlay fault events on the timeline without changing the draw y-axis scale.",
+    )
+    if show_fault_overlay and not fault_kv.empty:
+        ff = fault_kv.copy()
+        ff["event_ts"] = pd.to_datetime(ff["event_ts"], errors="coerce")
+        ff = ff[ff["event_ts"].notna()].copy()
+        ff["event_key"] = "fault:" + ff["event_id"].astype(str)
+        y_lane = 0.5 if only_cat_mode else 0.30
+        fig.add_trace(go.Scatter(
+            x=ff["event_ts"],
+            y=[y_lane] * len(ff),
+            yaxis="y2",
+            mode="markers",
+            name="Faults",
+            marker=dict(size=13, symbol="x"),
+            customdata=ff["event_key"],
+            text=("<b>" + ff["Parameter Name"].astype(str) + "</b><br>" + ff["Value"].astype(str)),
+            hovertemplate="%{text}<br>%{x}<br>%{customdata}<extra></extra>",
+        ))
+
+    # x-range padding so edge points are not cropped
+    all_ts = []
+    if show_draw_traces and wide is not None and not wide.empty and "event_ts" in wide.columns:
+        all_ts.append(pd.to_datetime(wide["event_ts"], errors="coerce"))
+    if show_maint_overlay and not maint_kv.empty:
+        all_ts.append(pd.to_datetime(maint_kv["event_ts"], errors="coerce"))
+    if show_fault_overlay and not fault_kv.empty:
+        all_ts.append(pd.to_datetime(fault_kv["event_ts"], errors="coerce"))
+    if all_ts:
+        ts_cat = pd.concat(all_ts, ignore_index=True).dropna()
+        if not ts_cat.empty:
+            xmin, xmax = ts_cat.min(), ts_cat.max()
+            if pd.notna(xmin) and pd.notna(xmax) and xmax > xmin:
+                span = xmax - xmin
+                pad = span * 0.07
+                fig.update_xaxes(range=[xmin - pad, xmax + pad])
             else:
-                # Streamlit sometimes returns an object with .selection
-                pts = getattr(getattr(sel, "selection", None), "points", None)
-                if pts:
-                    selected_key = pts[0].get("customdata")
-        except Exception:
-            selected_key = None
+                fig.update_xaxes(range=[xmin, xmax])
 
-        if selected_key:
-            st.session_state["sql_selected_event_key"] = selected_key
+    fig.update_layout(
+        height=520,
+        margin=dict(l=10, r=10, t=40, b=10),
+        title="Timeline: Draws + Maintenance + Faults (filtered)",
+        xaxis_title="Time",
+        yaxis_title="Value (draw parameters)",
+        hovermode="closest",
+    )
 
-        # show details if we have a selection saved
-        if st.session_state.get("sql_selected_event_key"):
-            with st.expander("📌 Clicked event details", expanded=True):
-                render_event_details(con, st.session_state["sql_selected_event_key"])
+    sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="sql_vis_plot")
 
-        return wide_out, numeric_out
+    selected_key = None
+    try:
+        if isinstance(sel, dict):
+            pts = sel.get("selection", {}).get("points", sel.get("points", []))
+            if pts:
+                selected_key = pts[0].get("customdata")
+    except Exception:
+        selected_key = None
 
+    if selected_key:
+        st.session_state["sql_selected_event_key"] = selected_key
 
-
-    # =========================================================
-    # Render: Math Lab
-    # =========================================================
-    def render_math_lab(wide: pd.DataFrame, numeric_all: list):
-        st.subheader("🧮 Math Lab (derived signals)")
-        try:
-            n_ds = int(wide["source_kind"].astype(str).eq("dataset").sum()) if "source_kind" in wide.columns else 0
-            n_m = int(wide["source_kind"].astype(str).eq("maintenance").sum()) if "source_kind" in wide.columns else 0
-            st.caption(f"Math is computed on the same included events as Visual Lab → datasets: {n_ds}, maintenance: {n_m}")
-        except Exception:
-            pass
-
-        if not numeric_all:
-            st.info("No numeric parameters available for Math Lab.")
-            st.stop()
-
-        st.caption(
-            "Write expressions using **A**, **B**, **C** and **numpy** (**np**). "
-            "Examples: `A`, `A/B`, `np.log10(A)`, `np.abs(A)`, `np.sqrt(A)`."
-        )
-
-        var_count = st.radio("How many parameters?", [1, 2, 3], horizontal=True, key="math_var_count")
-        A_name = st.selectbox("A (parameter)", numeric_all, key="math_A_name")
-
-        B_name = None
-        C_name = None
-        if var_count >= 2:
-            B_name = st.selectbox("B (parameter)", [p for p in numeric_all if p != A_name], key="math_B_name")
-        if var_count >= 3:
-            C_name = st.selectbox("C (parameter)", [p for p in numeric_all if p not in (A_name, B_name)], key="math_C_name")
-
-        if "math_expr" not in st.session_state or not str(st.session_state["math_expr"]).strip():
-            st.session_state["math_expr"] = "A"
-
-        expr = st.text_input("Expression", value=str(st.session_state["math_expr"]), key="math_expr_input")
-        st.session_state["math_expr"] = expr
-        expr = (expr or "").strip()
-
-        if expr == "":
-            st.info("Type an expression to compute, e.g. `A`, `A/B`, `np.log10(A)`.")
-            st.stop()
-
-        if not re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr):
-            st.error("Expression contains unsupported characters.")
-            st.stop()
-
-        def series_of(name):
-            if name is None:
-                return pd.Series([np.nan] * len(wide), index=wide.index)
-            return pd.to_numeric(wide[name], errors="coerce").astype(float)
-
-        A = series_of(A_name)
-        B = series_of(B_name) if var_count >= 2 else pd.Series([np.nan] * len(wide), index=wide.index)
-        C = series_of(C_name) if var_count >= 3 else pd.Series([np.nan] * len(wide), index=wide.index)
-
-        allowed = {"np": np, "A": A, "B": B, "C": C}
-
-        try:
-            Y = eval(expr, {"__builtins__": {}}, allowed)
-            if isinstance(Y, (int, float, np.number)):
-                Y = pd.Series([float(Y)] * len(wide), index=wide.index)
-            elif isinstance(Y, np.ndarray):
-                Y = pd.Series(Y, index=wide.index)
-            elif not isinstance(Y, pd.Series):
-                Y = pd.Series(Y, index=wide.index)
-            Y = pd.to_numeric(Y, errors="coerce")
-        except Exception as e:
-            st.error(f"Expression error: {e}")
-            st.stop()
-
-        out = wide[["event_ts", "event_key", "source_kind", "source_file"]].copy()
-        out["math"] = Y
-        out = out.dropna(subset=["math"]).sort_values("event_ts")
-
-        if out.empty:
-            st.warning("No valid values after applying the math expression.")
-            st.stop()
-
-        fig2, ax2 = plt.subplots(figsize=(9, 4))
-        connect = st.checkbox("Connect points", value=True, key="math_connect_points")
-        ax2.plot(
-            out["event_ts"],
-            out["math"],
-            marker="o",
-            linestyle="-" if connect else "None",
-            label=expr,
-        )
-        locator2 = mdates.AutoDateLocator(minticks=3, maxticks=7)
-        formatter2 = mdates.ConciseDateFormatter(locator2)
-        ax2.xaxis.set_major_locator(locator2)
-        ax2.xaxis.set_major_formatter(formatter2)
-        ax2.tick_params(axis="x", rotation=30)
-        ax2.set_xlabel("Time")
-        ax2.set_ylabel("Value")
-        ax2.set_title("Math Lab")
-        ax2.legend()
-        fig2.tight_layout()
-        st.pyplot(fig2, clear_figure=True)
-
-        with st.expander("Show Math table"):
-            st.dataframe(out, use_container_width=True, height=420)
+    if st.session_state.get("sql_selected_event_key"):
+        with st.expander("📌 Clicked event details", expanded=True):
+            render_event_details(st.session_state["sql_selected_event_key"])
 
     # =========================================================
-    # MAIN FLOW
+    # MATH LAB (draw-only)
     # =========================================================
-    render_indexing_controls()
-    where_sql = render_filter_builder()
-    df_all = render_run_filter(where_sql)
-    wide, numeric_all = render_visual_lab_clickable(con, df_all)
-    render_math_lab(wide, numeric_all)
+    st.subheader("🧮 Math Lab")
+
+    if wide is None or wide.empty:
+        st.info("No draw events available for Math Lab.")
+        st.stop()
+
+    if not numeric_all:
+        st.info("No numeric draw parameters available for Math Lab.")
+        st.stop()
+
+    st.caption("Expressions use **A**, **B**, **C** and **np**. Example: `A/B`, `np.log10(A)`")
+
+    var_count = st.radio("How many parameters?", [1, 2, 3], horizontal=True, key="math_var_count")
+    A_name = st.selectbox("A", numeric_all, key="math_A_name")
+    B_name = None
+    C_name = None
+    if var_count >= 2:
+        B_name = st.selectbox("B", [pp for pp in numeric_all if pp != A_name], key="math_B_name")
+    if var_count >= 3:
+        C_name = st.selectbox("C", [pp for pp in numeric_all if pp not in (A_name, B_name)], key="math_C_name")
+
+    st.session_state.setdefault("math_expr", "A")
+    expr = st.text_input("Expression", value=str(st.session_state["math_expr"]), key="math_expr_input").strip()
+    st.session_state["math_expr"] = expr
+
+    if not re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr or ""):
+        st.error("Expression contains unsupported characters.")
+        st.stop()
+
+    def _series(name):
+        if not name:
+            return pd.Series([np.nan] * len(wide), index=wide.index)
+        return pd.to_numeric(wide[name], errors="coerce").astype(float)
+
+    A = _series(A_name)
+    B = _series(B_name) if var_count >= 2 else pd.Series([np.nan] * len(wide), index=wide.index)
+    C = _series(C_name) if var_count >= 3 else pd.Series([np.nan] * len(wide), index=wide.index)
+
+    try:
+        Y = eval(expr, {"__builtins__": {}}, {"np": np, "A": A, "B": B, "C": C})
+        if isinstance(Y, (int, float, np.number)):
+            Y = pd.Series([float(Y)] * len(wide), index=wide.index)
+        elif isinstance(Y, np.ndarray):
+            Y = pd.Series(Y, index=wide.index)
+        elif not isinstance(Y, pd.Series):
+            Y = pd.Series(Y, index=wide.index)
+        Y = pd.to_numeric(Y, errors="coerce")
+    except Exception as e:
+        st.error(f"Expression error: {e}")
+        st.stop()
+
+    out = wide[["event_ts", "event_key"]].copy()
+    out["math"] = Y
+    out = out.dropna(subset=["math"]).sort_values("event_ts")
+
+    if out.empty:
+        st.warning("No values computed.")
+        st.stop()
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=out["event_ts"],
+        y=out["math"],
+        mode="lines+markers",
+        name=expr,
+        customdata=out["event_key"],
+        hovertemplate=f"<b>{expr}</b><br>%{{x}}<br>%{{y}}<br>%{{customdata}}<extra></extra>"
+    ))
+    fig2.update_layout(
+        height=420,
+        margin=dict(l=10, r=10, t=40, b=10),
+        title="Math Lab result (click a point to inspect draw)",
+        xaxis_title="Time",
+        yaxis_title="Value",
+        hovermode="closest",
+    )
+
+    sel2 = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="math_plot")
+
+    selected_key2 = None
+    try:
+        if isinstance(sel2, dict):
+            pts = sel2.get("selection", {}).get("points", sel2.get("points", []))
+            if pts:
+                selected_key2 = pts[0].get("customdata")
+    except Exception:
+        selected_key2 = None
+
+    if selected_key2:
+        st.session_state["math_selected_event_key"] = selected_key2
+
+    if st.session_state.get("math_selected_event_key"):
+        with st.expander("📌 Clicked event details", expanded=True):
+            render_event_details(st.session_state["math_selected_event_key"])
+
+    with st.expander("Math table"):
+        st.dataframe(out, use_container_width=True, height=420)
+

@@ -16,7 +16,6 @@ def create_folder_from_csv():
     Creates a folder named after the most recent CSV file (without extension),
     using paths specified in the JSON configuration.
     """
-    folder_path = config["logs_directory"]
     base_directory = config["output_folders"]
 
     recent_csv = get_most_recent_csv()

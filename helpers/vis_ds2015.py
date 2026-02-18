@@ -1,6 +1,5 @@
 import numpy as np
 import scipy.optimize as opt
-import matplotlib.pyplot as plt
 
 # Given data points (temperature in °C, viscosity in mPa·s)
 temperature_extended = np.array([25, 30, 35, 40, 45, 50, 55])  # Temperature in °C

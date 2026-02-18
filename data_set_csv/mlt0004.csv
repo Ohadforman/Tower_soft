@@ -1,0 +1,64 @@
+Parameter Name,Value,Units
+Draw Name,mlt0004,
+Draw Date,2025-06-29 09:39:35.786477,
+Entry Fiber Diameter,125.0,µm
+First Coating Diameter (Theoretical),163.34946210402802,µm
+Second Coating Diameter (Theoretical),232.75405749870632,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,300.0,µm
+Second Coating Entry Die,300.0,µm
+Primary Coating Temperature,44.0,°C
+Secondary Coating Temperature,47.0,°C
+Primary Die Diameter,205,µm
+Secondary Die Diameter,310,µm
+Log File Name,MLT0004_29062025_090704.csv,
+Zone 1 Start,2025-06-29 09:00:22.469000,
+Zone 1 End,2025-06-29 09:02:35.469000,
+Zone 1 Fibre Length at Start,0,km
+Zone 1 Fibre Length at End,0,km
+Zone 1 Pf Process Position at Start,-245.773986816406,mm
+Zone 1 Pf Process Position at End,-245.77392578125,mm
+Zone 1 Avg (Bare Fibre Diameter),400.10000610351597,µm
+Zone 1 Min (Bare Fibre Diameter),400.100006103516,µm
+Zone 1 Max (Bare Fibre Diameter),400.100006103516,µm
+Zone 1 Avg (Coated Inner Diameter),0.0,µm
+Zone 1 Min (Coated Inner Diameter),0,µm
+Zone 1 Max (Coated Inner Diameter),0,µm
+Zone 1 Avg (Coated Outer Diameter),0.09259258707364397,µm
+Zone 1 Min (Coated Outer Diameter),0.0,µm
+Zone 1 Max (Coated Outer Diameter),0.0999999940395355,µm
+Zone 1 Avg (Capstan Speed),0.0,m/min
+Zone 1 Min (Capstan Speed),0,m/min
+Zone 1 Max (Capstan Speed),0,m/min
+Zone 1 Avg (Tension N),0.5340036462854455,g
+Zone 1 Min (Tension N),0.522899627685547,g
+Zone 1 Max (Tension N),0.585970878601074,g
+Zone 1 Avg (Furnace DegC Actual),341.73345834237574,C
+Zone 1 Min (Furnace DegC Actual),341.668762207031,C
+Zone 1 Max (Furnace DegC Actual),341.803131103516,C
+Entry Fiber Diameter,125.0,µm
+First Coating Diameter (Theoretical),117.42009857835906,µm
+Second Coating Diameter (Theoretical),113.68986694727046,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,350.0,µm
+Second Coating Entry Die,500.0,µm
+Primary Coating Temperature,28.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,110,µm
+Secondary Die Diameter,110,µm
+Preform Diameter,17.0,mm
+Tiger Cut,0.0,%
+Selected Iris Diameter,23.5,mm
+Entry Fiber Diameter,17.0,µm
+First Coating Diameter (Theoretical),71.41646817404266,µm
+Second Coating Diameter (Theoretical),103.78153604446919,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,200.0,µm
+Second Coating Entry Die,200.0,µm
+Primary Coating Temperature,47.0,°C
+Secondary Coating Temperature,44.0,°C
+Primary Die Diameter,150,µm
+Secondary Die Diameter,140,µm

@@ -1,4 +1,9 @@
 {
-    "main_heater_temp": 44.0,
-    "secondary_heater_temp": 0.0
+    "main_container_heater_temp": 44.0,
+    "secondary_container_heater_temp": 0.0,
+    "main_pipe_heater_temp": 0.0,
+    "secondary_pipe_heater_temp": 0.0,
+    "die_holder_heater_temp_c": 44.0,
+    "die_holder_primary_temp_c": 44.0,
+    "die_holder_secondary_temp_c": 0.0
 }

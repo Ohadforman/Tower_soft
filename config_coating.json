@@ -139,6 +139,11 @@
             "Density": 1.05e3,
             "Refractive Index": 1.4,
             "Description": "High-performance primary coating optimized for optical fiber protection."
+        },
+        "DS-2042": {
+            "Density": 1.05e3,
+            "Refractive Index": 1.4,
+            "Description": "High-performance primary coating optimized for optical fiber protection."
         }
     }
 }

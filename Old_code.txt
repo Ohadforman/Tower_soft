@@ -1,0 +1,544 @@
+# ------------------ History Log Tab ------------------
+'''elif tab_selection == "📝 History Log":
+    st.title("📝 History Log")
+    st.sidebar.title("History Log Management")
+    if os.path.exists(HISTORY_FILE):
+        history_df = pd.read_csv(HISTORY_FILE)
+        history_df["Timestamp"] = pd.to_datetime(history_df["Timestamp"])
+        if 'Status' not in history_df.columns:
+            history_df['Status'] = 'Not Yet Addressed'
+
+        # Define relevant columns for each history type
+        draw_history_fields = ["Draw Name", "Timestamp"]
+
+        problem_history_fields = ["Description", "Status"]
+
+        maintenance_history_fields = ["Part Changed", "Notes"]
+
+        fields_mapping = {
+            "Draw History": draw_history_fields,
+            "Problem History": problem_history_fields,
+            "Maintenance History": maintenance_history_fields
+        }
+
+
+        # Ensure column names are unique
+        def make_column_names_unique(columns):
+            seen = {}
+            new_columns = []
+            for col in columns:
+                if col in seen:
+                    seen[col] += 1
+                    new_columns.append(f"{col}_{seen[col]}")
+                else:
+                    seen[col] = 0
+                    new_columns.append(col)
+            return new_columns
+
+
+        history_df.columns = make_column_names_unique(history_df.columns.tolist())
+
+        # Sidebar Selection for History Type
+        history_type = st.sidebar.radio("Select History Type",
+                                        ["Draw History", "Problem History", "Maintenance History"],
+                                        key="history_type_select")
+
+        if history_type == "All":
+            # Show all history logs with separate tables & plots
+            for log_type, fields in zip(["Draw History", "Problem History", "Maintenance History"],
+                                        [draw_history_fields, problem_history_fields, maintenance_history_fields]):
+                st.write(f"## {log_type}")
+
+                if log_type == "Problem History":
+                    filtered_df = history_df[(history_df["Type"] == log_type) & (history_df["Status"] != "Fixed")]
+                else:
+                    filtered_df = history_df[history_df["Type"] == log_type]
+                if not filtered_df.empty:
+                    st.write(f"### {log_type} Table")
+                    st.data_editor(filtered_df[fields], height=200, use_container_width=True)
+
+
+                else:
+                    st.warning(f"No records found for {log_type}")
+
+        else:
+            # Show only selected history type
+            if history_type == "Problem History":
+                filtered_df = history_df[(history_df["Type"] == history_type) & (history_df["Status"] != "Fixed")]
+            else:
+                filtered_df = history_df[history_df["Type"] == history_type]
+            if not filtered_df.empty:
+                st.write(f"### {history_type} Table")
+                st.data_editor(filtered_df[fields_mapping[history_type]], height=200, use_container_width=True)
+
+
+            else:
+                st.warning(f"No records found for {history_type}")
+
+        # ------------------ Add Event Form ------------------
+        with open(P.coating_config_json, "r") as config_file:
+            config = json.load(config_file)
+        # Extract coatings and dies dictionaries
+        coatings = config.get("coatings", {})
+        dies = config.get("dies", {})
+
+        if history_type == "Draw History":
+            # st.sidebar.subheader("Draw History")
+            # Load all CSV files from the dataset folder and combine them
+            data_set_files = [f for f in os.listdir(P.dataset_dir) if f.endswith('.csv')]
+            folder_data = []
+            for file in data_set_files:
+                csv_data = pd.read_csv(os.path.join(P.dataset_dir, file), header=None)
+                if not csv_data.empty:
+                    csv_data.columns = ['Parameter Name', 'Value', 'Units']
+                    csv_data['Draw Name'] = file.replace('.csv', '')
+                    folder_data.append(csv_data)
+            if folder_data:
+                all_data = pd.concat(folder_data, ignore_index=True)
+                st.write("### Combined Draw History from All CSV Files")
+                # Let the user select parameters to display from the combined data
+                parameters_to_display = st.multiselect("Select Parameters to Display",
+                                                       all_data["Parameter Name"].unique().tolist())
+                if parameters_to_display:
+                    filtered_data = all_data[all_data["Parameter Name"].isin(parameters_to_display)]
+                    st.dataframe(filtered_data, height=300, use_container_width=True)
+                    # Optionally, allow detailed view per draw entry
+                    selected_draw = st.selectbox("Select a Draw Entry", filtered_data["Parameter Name"].tolist())
+                    if selected_draw:
+                        selected_draw_data = filtered_data[filtered_data["Parameter Name"] == selected_draw].iloc[0]
+                        st.write(f"**Selected Data for {selected_draw}:**")
+                        st.write(f"**Value:** {selected_draw_data['Value']} {selected_draw_data['Units']}")
+                else:
+                    st.warning("No parameters selected.")
+            else:
+                st.warning("No CSV files found in the folder.")
+        elif history_type == "Maintenance History":
+            st.sidebar.subheader("Add Maintenance History Entry")
+
+            # Checkbox to indicate if a part was changed
+            part_changed_checkbox = st.sidebar.checkbox("Was a part changed?")
+
+            # Show part name input only if checked
+            part_changed = ""
+
+            if part_changed_checkbox:
+                part_changed = st.sidebar.text_input("Part Changed")
+
+            maintenance_notes = st.sidebar.text_area("Maintenance Details")
+
+            if st.sidebar.button("Save Maintenance History"):
+                new_entry = pd.DataFrame([{
+                    "Timestamp": pd.Timestamp.now(),
+                    "Type": "Maintenance History",
+                    "Part Changed": part_changed if part_changed_checkbox else "N/A",
+                    "Notes": maintenance_notes
+                }])
+
+                history_df = pd.concat([history_df, new_entry], ignore_index=True)
+                history_df.to_csv(HISTORY_FILE, index=False)
+                st.sidebar.success("Maintenance history saved!")
+        elif history_type == "Problem History":
+            st.sidebar.subheader("Add or Update Problem History Entry")
+            problem_action = st.sidebar.radio("Select Action", ["Add New Problem", "Update Existing Problem"], index=0)
+            if problem_action == "Add New Problem":
+                problem_description = st.sidebar.text_area("Describe the Problem")
+                problem_status = st.sidebar.selectbox("Problem Status",
+                                                      ["Not Yet Addressed", "Waiting for Parts", "Fixed"])
+                if st.sidebar.button("Save Problem History"):
+                    new_entry = pd.DataFrame([{
+                        "Timestamp": pd.Timestamp.now(),
+                        "Type": "Problem History",
+                        "Description": problem_description,
+                        "Status": problem_status
+                    }])
+
+                    history_df = pd.concat([history_df, new_entry], ignore_index=True)
+                    history_df.to_csv(HISTORY_FILE, index=False)
+                    # st.rerun()
+            elif problem_action == "Update Existing Problem":
+                filtered_df = history_df[(history_df["Type"] == "Problem History") & (history_df["Status"] != "Fixed")]
+                if not filtered_df.empty:
+                    selected_problem = st.sidebar.selectbox("Select Problem to Update", filtered_df["Description"])
+                    selected_index = filtered_df.index[filtered_df["Description"] == selected_problem].tolist()[0]
+
+                    new_status = st.sidebar.selectbox("Update Problem Status",
+                                                      ["Not Yet Addressed", "Waiting for Parts", "Fixed"],
+                                                      index=["Not Yet Addressed", "Waiting for Parts", "Fixed"].index(
+                                                          filtered_df.at[selected_index, "Status"]))
+
+                    if st.sidebar.button("Update Problem Status"):
+                        history_df.at[selected_index, "Status"] = new_status
+                        history_df.to_csv(HISTORY_FILE, index=False)
+                        # st.rerun()
+                else:
+                    st.sidebar.info("No existing problem entries to update.")
+    else:
+        st.warning(
+            "No history logs found. You can add new records using the form below.")  # Ensure df is only processed if it contains data
+        if not df.empty and "Date/Time" in df.columns:
+            def try_parse_datetime(dt_str):
+                try:
+                    return pd.to_datetime(dt_str)
+                except Exception:
+                    try:
+                        if isinstance(dt_str, str) and len(dt_str.split(":")[-1]) > 2:
+                            parts = dt_str.rsplit(":", 1)
+                            fixed_time = parts[0] + ":" + parts[1][:2] + "." + parts[1][2:]
+                            return pd.to_datetime(fixed_time)
+                    except:
+                        return pd.NaT
+                return pd.NaT
+
+
+            df["Date/Time"] = df["Date/Time"].apply(try_parse_datetime)
+
+        column_options = df.columns.tolist() if not df.empty else []
+
+        # ------------------ Schedule Tab ------------------
+        if tab_selection == "📅 Schedule":
+            st.title("📅 Tower Schedule")
+            st.sidebar.title("Schedule Management")
+
+            SCHEDULE_FILE = P.schedule_csv
+            required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
+            if not os.path.exists(SCHEDULE_FILE):
+                pd.DataFrame(columns=required_columns).to_csv(SCHEDULE_FILE, index=False)
+                st.warning("Schedule file was empty. New file with required columns created.")
+            else:
+                schedule_df = pd.read_csv(SCHEDULE_FILE)
+                missing_columns = [col for col in required_columns if col not in schedule_df.columns]
+                if missing_columns:
+                    st.error(f"Missing columns in schedule file: {missing_columns}")
+                    st.stop()
+                else:
+                    # Clean column names by stripping extra spaces
+                    schedule_df.columns = schedule_df.columns.str.strip()
+
+                    # Parse 'Start DateTime' and 'End DateTime' columns
+                    try:
+                        schedule_df['Start DateTime'] = pd.to_datetime(schedule_df['Start DateTime'], errors='coerce')
+                        schedule_df['End DateTime'] = pd.to_datetime(schedule_df['End DateTime'], errors='coerce')
+                    except Exception as e:
+                        st.error(f"Error parsing datetime columns: {e}")
+                        st.stop()
+
+                    # Check if 'Start DateTime' and 'End DateTime' columns are valid
+                    if schedule_df['Start DateTime'].isna().all() or schedule_df['End DateTime'].isna().all():
+                        st.error(
+                            "One or both datetime columns ('Start DateTime', 'End DateTime') could not be parsed. Please check the data.")
+                        st.stop()
+
+                    # Apply date filtering safely
+                    start_filter = st.sidebar.date_input("Start Date", pd.Timestamp.now().date(),
+                                                         key="schedule_start_date")
+                    end_filter = st.sidebar.date_input("End Date", (pd.Timestamp.now() + pd.DateOffset(weeks=1)).date(),
+                                                       key="schedule_end_date")
+
+                    start_datetime = schedule_df['Start DateTime']
+                    end_datetime = schedule_df['End DateTime']
+
+                    # Apply filtering based on user-selected date range
+                    filtered_schedule = schedule_df[
+                        (start_datetime >= pd.to_datetime(start_filter)) &
+                        (end_datetime <= pd.to_datetime(end_filter))
+                        ]
+
+                    # Display schedule as a timeline
+                    st.write("### Schedule Timeline")
+                    event_colors = {
+                        "Maintenance": "blue",
+                        "Drawing": "green",
+                        "Stop": "red",
+                        "Management Event": "purple"  # New color for the management event
+                    }
+                    if not filtered_schedule.empty:
+                        fig = px.timeline(
+                            filtered_schedule,
+                            x_start="Start DateTime",
+                            x_end="End DateTime",
+                            y="Event Type",
+                            color="Event Type",
+                            title="Tower Schedule",
+                            color_discrete_map=event_colors
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    st.write("### Current Schedule")
+                    st.data_editor(schedule_df, height=300, use_container_width=True)
+                    # Add new event form
+                    st.sidebar.subheader("Add New Event")
+                    event_description = st.sidebar.text_area("Event Description")
+                    event_type = st.sidebar.selectbox("Select Event Type",
+                                                      ["Maintenance", "Drawing", "Stop", "Management Event"])
+                    deadline_date = None
+                    if event_type == "Management Event":
+                        deadline_date = st.sidebar.date_input("Deadline Date")
+                    start_date = st.sidebar.date_input("Start Date", pd.Timestamp.now().date())
+                    start_time = st.sidebar.time_input("Start Time")
+                    end_date = st.sidebar.date_input("End Date", pd.Timestamp.now().date())
+                    end_time = st.sidebar.time_input("End Time")
+                    recurrence = st.sidebar.selectbox("Recurrence", ["None", "Weekly", "Monthly", "Yearly"])
+
+                    start_datetime = pd.to_datetime(f"{start_date} {start_time}")
+                    end_datetime = pd.to_datetime(f"{end_date} {end_time}")
+
+                    if st.sidebar.button("Add Event"):
+                        new_event = pd.DataFrame([{
+                            "Event Type": event_type,
+                            "Start DateTime": start_datetime,
+                            "End DateTime": end_datetime,
+                            "Description": event_description,
+                            "Recurrence": recurrence,
+                            "Deadline Date": deadline_date if event_type == "Management Event" else None
+                            # Add deadline only for Management Event
+                        }])
+
+                        full_schedule_df = pd.read_csv(SCHEDULE_FILE)
+                        full_schedule_df = pd.concat([full_schedule_df, new_event], ignore_index=True)
+                        full_schedule_df.to_csv(SCHEDULE_FILE, index=False)
+
+                        st.sidebar.success("Event added to schedule!")'''
+# ------------------ Closed Processes Tab ------------------
+'''elif tab_selection == "✅ Closed Processes":
+    # Define the CLOSED_PROCESSES_FILE path
+    CLOSED_PROCESSES_FILE = "closed_processes.csv"
+    st.title("✅ Closed Processes")
+    st.write("Manage products that are finalized and ready for drawing.")
+
+    # Check if the CSV file exists and if it's empty
+    if not os.path.exists(CLOSED_PROCESSES_FILE) or os.stat(CLOSED_PROCESSES_FILE).st_size == 0:
+        # Define columns for the blank CSV
+        columns = ["Product Name", "Furnace Temperature (°C)", "Tension (g)", "Drawing Speed (m/min)",
+                   "Coating Type (Main)", "Coating Type (Secondary)", "Entry Die (Main)", "Entry Die (Secondary)",
+                   "Primary Die (Main)", "Primary Die (Secondary)", "Coating Diameter (Main, µm)",
+                   "Coating Diameter (Secondary, µm)", "Coating Temperature (Main, °C)",
+                   "Coating Temperature (Secondary, °C)", "Fiber Diameter (µm)", "P Gain for Diameter Control",
+                   "I Gain for Diameter Control", "Process Description", "Recipe Name", "Process Type", "TF Mode",
+                   "TF Increment (mm)", "Core-Clad Ratio"]
+
+        # Create the CSV with the above columns
+        pd.DataFrame(columns=columns).to_csv(CLOSED_PROCESSES_FILE, index=False)
+        st.warning("CSV file is empty or doesn't exist. A new blank file has been created.")
+
+    # Load the closed processes file
+    closed_df = pd.read_csv(CLOSED_PROCESSES_FILE)
+
+    # Load the configuration from the JSON file
+    with open(P.coating_config_json, "r") as config_file:
+        config = json.load(config_file)
+
+    # Die and coating selections
+    dies = config.get("dies", {})
+    coatings = config.get("coatings", {})
+    process_types = ["PM", "NPM", "Other"]  # List of process types
+
+    # Sidebar options for adding a new or updating an existing process
+    action = st.sidebar.radio("Select Action", ["Add New Process", "Update Existing Process"])
+
+    # **Add New Process**
+    if action == "Add New Process":
+        st.sidebar.subheader("Add New Closed Process")
+        product_name = st.sidebar.text_input("Product Name")
+        process_type = st.sidebar.selectbox("Process Type", process_types)  # Move Process Type here
+        core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio")
+        furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1)
+        tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1)
+        drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1)
+
+        # Coating Type Inputs
+        coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()))
+        coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()))
+
+        # Die Inputs (Entry and Primary Dies)
+        entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1)
+        entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1)
+        primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()))
+        primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()))
+
+        # Coating Diameter Inputs
+        coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1)
+        coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
+                                                             step=0.1)
+
+        # Coating Temperature Inputs
+        coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0, step=0.1)
+        coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)", min_value=0.0,
+                                                                step=0.1)
+
+        # Fiber Diameter and Control Inputs
+        fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1)
+        p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1)
+        i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1)
+
+        # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
+        tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
+                                       index=["Winder", "Straight Mode"].index("Winder"))
+        tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01, value=0.1)
+
+        # Process Description and Recipe Name
+        process_description = st.sidebar.text_area("Process Description")
+        recipe_name = st.sidebar.text_input("Recipe Name")
+
+        if st.sidebar.button("Add New Process"):
+            new_entry = pd.DataFrame([{
+                "Product Name": product_name,
+                "Process Type": process_type,  # User-selected process type
+                "Furnace Temperature (°C)": furnace_temperature,
+                "Tension (g)": tension,
+                "Drawing Speed (m/min)": drawing_speed,
+                "Coating Type (Main)": coating_type_main,
+                "Coating Type (Secondary)": coating_type_secondary,
+                "Entry Die (Main)": entry_die_main,
+                "Entry Die (Secondary)": entry_die_secondary,
+                "Primary Die (Main)": primary_die_main,
+                "Primary Die (Secondary)": primary_die_secondary,
+                "Coating Diameter (Main, µm)": coating_diameter_main,
+                "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
+                "Coating Temperature (Main, °C)": coating_temperature_main,
+                "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
+                "Fiber Diameter (µm)": fiber_diameter,
+                "P Gain for Diameter Control": p_gain,
+                "I Gain for Diameter Control": i_gain,
+                "Process Description": process_description,
+                "Recipe Name": recipe_name,
+                "TF Mode": tf_mode,
+                "TF Increment (mm)": tf_increment,
+                "Core-Clad Ratio": core_clad_ratio  # New input
+            }])
+
+            # Append the new entry to the closed processes DataFrame and save it
+            closed_df = pd.concat([closed_df, new_entry], ignore_index=True)
+            closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
+            st.sidebar.success(f"New process '{product_name}' added successfully!")
+
+    # **Update Existing Process**
+    elif action == "Update Existing Process":
+        st.sidebar.subheader("Update Existing Closed Process")
+        closed_process_name = st.sidebar.selectbox("Select Process to Update", closed_df["Product Name"].tolist())
+
+        if closed_process_name:
+            matching_process = closed_df[closed_df["Product Name"] == closed_process_name]
+
+            if not matching_process.empty:
+                selected_process = matching_process.iloc[0]
+
+                # Display current values of the closed process
+                st.sidebar.write(f"Updating {closed_process_name}")
+                product_name = st.sidebar.text_input("Product Name", value=selected_process["Product Name"])
+                process_type = st.sidebar.selectbox("Process Type", process_types,
+                                                    index=process_types.index(selected_process["Process Type"]))
+                core_clad_ratio = st.sidebar.text_input("Core-Clad Ratio", value=selected_process["Core-Clad Ratio"])
+                furnace_temperature = st.sidebar.number_input("Furnace Temperature (°C)", min_value=0.0, step=0.1,
+                                                              value=selected_process["Furnace Temperature (°C)"])
+                tension = st.sidebar.number_input("Tension (g)", min_value=0.0, step=0.1,
+                                                  value=selected_process["Tension (g)"])
+                drawing_speed = st.sidebar.number_input("Drawing Speed (m/min)", min_value=0.0, step=0.1,
+                                                        value=selected_process["Drawing Speed (m/min)"])
+
+                # Coating Type Inputs
+                coating_type_main = st.sidebar.selectbox("Coating Type (Main)", list(coatings.keys()),
+                                                         index=list(coatings.keys()).index(
+                                                             selected_process["Coating Type (Main)"]))
+                coating_type_secondary = st.sidebar.selectbox("Coating Type (Secondary)", list(coatings.keys()),
+                                                              index=list(coatings.keys()).index(
+                                                                  selected_process["Coating Type (Secondary)"]))
+
+                # Die Inputs (Entry and Primary Dies)
+                entry_die_main = st.sidebar.number_input("Entry Die (Main, µm)", min_value=0.0, step=0.1,
+                                                         value=selected_process["Entry Die (Main)"])
+                entry_die_secondary = st.sidebar.number_input("Entry Die (Secondary, µm)", min_value=0.0, step=0.1,
+                                                              value=selected_process["Entry Die (Secondary)"])
+                primary_die_main = st.sidebar.selectbox("Primary Die (Main)", list(dies.keys()),
+                                                        index=list(dies.keys()).index(
+                                                            selected_process["Primary Die (Main)"]))
+                primary_die_secondary = st.sidebar.selectbox("Primary Die (Secondary)", list(dies.keys()),
+                                                             index=list(dies.keys()).index(
+                                                                 selected_process["Primary Die (Secondary)"]))
+
+                # Coating Diameter Inputs
+                coating_diameter_main = st.sidebar.number_input("Coating Diameter (Main, µm)", min_value=0.0, step=0.1,
+                                                                value=selected_process["Coating Diameter (Main, µm)"])
+                coating_diameter_secondary = st.sidebar.number_input("Coating Diameter (Secondary, µm)", min_value=0.0,
+                                                                     step=0.1, value=selected_process[
+                        "Coating Diameter (Secondary, µm)"])
+
+                # Coating Temperature Inputs
+                coating_temperature_main = st.sidebar.number_input("Coating Temperature (Main, °C)", min_value=0.0,
+                                                                   step=0.1, value=selected_process[
+                        "Coating Temperature (Main, °C)"])
+                coating_temperature_secondary = st.sidebar.number_input("Coating Temperature (Secondary, °C)",
+                                                                        min_value=0.0, step=0.1, value=selected_process[
+                        "Coating Temperature (Secondary, °C)"])
+
+                # Fiber Diameter and Control Inputs
+                fiber_diameter = st.sidebar.number_input("Fiber Diameter (µm)", min_value=0.0, step=0.1,
+                                                         value=selected_process["Fiber Diameter (µm)"])
+                p_gain = st.sidebar.number_input("P Gain for Diameter Control", min_value=0.0, step=0.1,
+                                                 value=selected_process["P Gain for Diameter Control"])
+                i_gain = st.sidebar.number_input("I Gain for Diameter Control", min_value=0.0, step=0.1,
+                                                 value=selected_process["I Gain for Diameter Control"])
+
+                # TF Mode and Increment Inputs (Sidebar - before Description and Recipe)
+                tf_mode = st.sidebar.selectbox("TF Mode", ["Winder", "Straight Mode"],
+                                               index=["Winder", "Straight Mode"].index(selected_process["TF Mode"]))
+                tf_increment = st.sidebar.number_input("TF Increment (mm)", min_value=0.0, step=0.01,
+                                                       value=selected_process["TF Increment (mm)"])
+
+                # Process Description and Recipe Name
+                process_description = st.sidebar.text_area("Process Description",
+                                                           value=selected_process["Process Description"])
+                recipe_name = st.sidebar.text_input("Recipe Name", value=selected_process["Recipe Name"])
+
+                if st.sidebar.button("Update Product"):
+                    # Prepare updated entry with all the values
+                    updated_entry = {
+                        "Product Name": product_name,
+                        "Process Type": process_type,
+                        "Furnace Temperature (°C)": furnace_temperature,
+                        "Tension (g)": tension,
+                        "Drawing Speed (m/min)": drawing_speed,
+                        "Coating Type (Main)": coating_type_main,
+                        "Coating Type (Secondary)": coating_type_secondary,
+                        "Entry Die (Main)": entry_die_main,
+                        "Entry Die (Secondary)": entry_die_secondary,
+                        "Primary Die (Main)": primary_die_main,
+                        "Primary Die (Secondary)": primary_die_secondary,
+                        "Coating Diameter (Main, µm)": coating_diameter_main,
+                        "Coating Diameter (Secondary, µm)": coating_diameter_secondary,
+                        "Coating Temperature (Main, °C)": coating_temperature_main,
+                        "Coating Temperature (Secondary, °C)": coating_temperature_secondary,
+                        "Fiber Diameter (µm)": fiber_diameter,
+                        "P Gain for Diameter Control": p_gain,
+                        "I Gain for Diameter Control": i_gain,
+                        "Process Description": process_description,
+                        "Recipe Name": recipe_name,
+                        "TF Mode": tf_mode,
+                        "TF Increment (mm)": tf_increment,
+                        "Core-Clad Ratio": core_clad_ratio
+                    }
+
+                    # Find the index of the product name and update it
+                    closed_df.loc[closed_df["Product Name"] == closed_process_name, updated_entry.keys()] = list(
+                        updated_entry.values())
+
+                    closed_df.to_csv(CLOSED_PROCESSES_FILE, index=False)
+                    st.sidebar.success(f"Product '{product_name}' updated successfully!")
+
+            else:
+                st.sidebar.error(f"No process found with the name '{closed_process_name}'.")
+
+        # Remove duplicates and display the cleaned table
+
+    # Remove duplicates and display the cleaned table
+    closed_df_clean = closed_df.drop_duplicates(
+        subset=["Product Name", "Coating Type (Main)", "Coating Type (Secondary)"])
+
+    # Reorganize the columns as requested
+    closed_df_clean = closed_df_clean[[
+        "Product Name", "Process Type", "Core-Clad Ratio", "Fiber Diameter (µm)",
+        "Coating Diameter (Main, µm)", "Coating Diameter (Secondary, µm)", "Drawing Speed (m/min)",
+        "Furnace Temperature (°C)", "Tension (g)", "TF Mode", "TF Increment (mm)"
+    ]]
+
+    st.write("### Cleaned Closed Products Table")
+    st.dataframe(closed_df_clean, height=300, use_container_width=True)'''

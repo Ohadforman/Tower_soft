@@ -1,7 +1,5 @@
 import os
 import csv
-import numpy as np
-import pandas as pd
 from fpdf import FPDF
 from pathlib import Path
 from recent_csv import get_most_recent_csv  # Import the function

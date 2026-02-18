@@ -1,0 +1,10 @@
+Parameter Name,Value,Units
+Draw Name,T70_Avsl2,
+Draw Date,2026-01-21 14:01:14.593185,
+Preform Diameter,13.5,mm
+Tiger Cut,0.0,%
+Selected Iris Diameter,25.0,mm
+P Gain (Diameter Control),0.4,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.13,mm
