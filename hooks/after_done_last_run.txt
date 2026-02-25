@@ -1,13 +1,5 @@
-=== AFTER DONE HOOK RUN ===
-Time: 2026-02-09 10:06:10
-OS: Darwin (posix)
-Script: /Users/ohadformanair/PycharmProjects/Tower_work/hooks/after_done.sh
-Args: ['p0999F_1.csv', '0.0', 'fgdfdgfd']
+=== AFTER DONE PRINT ===
+2026-02-25 11:19:23
 
-Exit code: 0
-
----- STDOUT ----
-TXT snapshot created: /Users/ohadformanair/PycharmProjects/Tower_work/hooks/done_csv_snapshots/p0999F_1.txt
-מזהה הבקשה הוא HP_DeskJet_Plus_6400_series-565 ‏(1 קבצים)
-Sent to printer ✔
-
+Wrote file: /Users/ohadformanair/PycharmProjects/Tower_work/hooks/TEST1111F_1_PRINT.txt
+Sent to printer.

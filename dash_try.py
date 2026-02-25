@@ -3567,7 +3567,7 @@ def render_tm_home_section():
         out = []
         i = 1
         while True:
-            k = f"Marked Zone {i} Length"
+            k = f"Zone {i} Length"
             if k not in d:
                 break
             try:
@@ -3940,15 +3940,15 @@ def render_tm_home_section():
 
         project = _pick(
             kv,
-            ["Project", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]
+            ["Order__Fiber Project ", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]
         ) or str(row.get("Project Name") or "").strip()
 
         preform = _pick(
             kv,
-            ["Preform Number", "Preform Name", "Preform", "Draw Name"]
+            ["Order__Preform Number", "Preform Name", "Preform", "Draw Name"]
         ) or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
 
-        fiber = _pick(kv, ["Draw Name"]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
+        fiber = _pick(kv, ["Order__Fiber Geometry Type"]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
         drum = _pick(kv, ["Drum", "Selected Drum"])
 
         project_disp = project if project else "—"
@@ -4378,6 +4378,12 @@ def render_done_home_section():
         return dfx
 
     def _read_dataset_kv(csv_path: str) -> dict:
+        """
+        Reads dataset CSV and returns a dict:
+          key = normalized Parameter Name (lower, stripped)
+          val = Value (string)
+        NOTE: keeps first occurrence only (older files may have duplicates).
+        """
         dfx = _read_dataset_df(csv_path)
         if dfx is None:
             return {}
@@ -4393,6 +4399,10 @@ def render_done_home_section():
         return out
 
     def _pick(kv: dict, aliases: list) -> str:
+        """
+        Tries aliases in order. Aliases must be exact strings as stored in CSV.
+        We normalize to lowercase to match kv keys.
+        """
         for a in aliases:
             k = str(a).strip().lower()
             if k in kv and str(kv[k]).strip() and str(kv[k]).strip().lower() != "nan":
@@ -4407,7 +4417,6 @@ def render_done_home_section():
             x = pd.to_datetime(s, errors="coerce")
             if pd.isna(x):
                 return None
-            # convert to python datetime (naive)
             return x.to_pydatetime().replace(tzinfo=None)
         except Exception:
             return None
@@ -4416,37 +4425,46 @@ def render_done_home_section():
         """
         Priority:
           1) draw_orders.csv "Done Timestamp" (if exists)
-          2) dataset CSV "Draw Date"
-          3) dataset CSV "Process Setup Timestamp"
-          4) None
+          2) dataset CSV "Order__Draw Date" (new order scheme)
+          3) dataset CSV "Draw Date" (legacy)
+          4) dataset CSV "Process__Process Setup Timestamp" / "Process Setup Timestamp"
+          5) None
         """
         dt1 = _to_dt(row.get("Done Timestamp", ""))
         if dt1:
             return dt1
 
-        dt2 = _to_dt(_pick(kv, ["Draw Date"]))
+        dt2 = _to_dt(_pick(kv, ["Order__Draw Date"]))
         if dt2:
             return dt2
 
-        dt3 = _to_dt(_pick(kv, ["Process Setup Timestamp"]))
+        dt3 = _to_dt(_pick(kv, ["Draw Date"]))
         if dt3:
             return dt3
 
+        dt4 = _to_dt(_pick(kv, ["Process__Process Setup Timestamp", "Process Setup Timestamp"]))
+        if dt4:
+            return dt4
+
         return None
 
+    def fmt_float(x, nd=2):
+        try:
+            s = str(x).strip()
+            if not s or s.lower() == "nan":
+                return "—"
+            return f"{float(s):.{nd}f}"
+        except Exception:
+            return "—"
 
-    def _zone_count_from_kv(kv: dict) -> int:
-        # counts "Zone i Start (from end)" present
-        i = 1
-        n = 0
-        while True:
-            k = f"zone {i} start (from end)"
-            if k in kv:
-                n += 1
-                i += 1
-            else:
-                break
-        return n
+    def fmt_int(x):
+        try:
+            s = str(x).strip()
+            if not s or s.lower() == "nan":
+                return "—"
+            return str(int(float(s)))
+        except Exception:
+            return "—"
 
     # -----------------------------
     # Filter "Done and not moved"
@@ -4465,8 +4483,6 @@ def render_done_home_section():
     # -----------------------------
     now = dt.datetime.now()
     changed = False
-
-    # We also build a list of "recent done" (under 4 days)
     recent_rows = []
 
     for idx, row in done_not_moved.iterrows():
@@ -4479,7 +4495,6 @@ def render_done_home_section():
 
         done_dt = _infer_done_dt(row, kv)
 
-        # If we inferred a done_dt and it's missing in file, write it once (nice for future)
         if done_dt and not str(row.get("Done Timestamp", "")).strip():
             df.loc[idx, "Done Timestamp"] = done_dt.strftime("%Y-%m-%d %H:%M:%S")
             changed = True
@@ -4487,7 +4502,6 @@ def render_done_home_section():
         if done_dt:
             age_days = (now - done_dt).total_seconds() / 86400.0
         else:
-            # If unknown time -> treat as "recent" so it doesn't auto-move unexpectedly
             age_days = 0.0
 
         if age_days >= AUTO_MOVE_DAYS:
@@ -4496,11 +4510,9 @@ def render_done_home_section():
                 df.loc[idx, "T&M Moved Timestamp"] = now.strftime("%Y-%m-%d %H:%M:%S")
             changed = True
         else:
-            # keep for display
             recent_rows.append((idx, row, kv, csv_name, csv_path, done_dt, age_days))
 
     if changed:
-        # Save once
         df.to_csv(ORDERS_FILE, index=False)
 
     if not recent_rows:
@@ -4541,26 +4553,64 @@ def render_done_home_section():
     )
 
     # -----------------------------
-    # AREA FOR PLOT IN HOME THIS ONE GOOD
+    # Cards
     # -----------------------------
     for (idx, row, kv, csv_name, csv_path, done_dt, age_days) in recent_rows:
         done_desc = str(row.get("Done Description") or "").strip()
 
-        project = _pick(kv, ["Project", "Project Name", "Fiber Project", "Fiber name and number", "Fiber Name and Number"]) \
-                  or str(row.get("Project Name") or "").strip()
+        # ✅ NEW: Prefer Order__/Process__ names first, then legacy aliases
+        project = _pick(kv, [
+            "Order__Fiber Project",
+            "Fiber Project",
+            "Project",
+            "Project Name",
+            "Fiber name and number",
+            "Fiber Name and Number",
+        ]) or str(row.get("Project Name") or "").strip()
 
-        preform = _pick(kv, ["Preform Number", "Preform Name", "Preform", "Draw Name"]) \
-                  or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
+        preform = _pick(kv, [
+            "Order__Preform Number",
+            "Preform Number",
+            "Preform Name",
+            "Preform",
+        ]) or str(row.get("Preform Name") or row.get("Preform Number") or "").strip()
 
-        fiber = _pick(kv, ["Fiber Geometry Type"]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
-        drum = _pick(kv, ["Drum", "Selected Drum"])
+        fiber = _pick(kv, [
+            "Order__Fiber Geometry Type",
+            "Fiber Geometry Type",
+            "Fiber Type",
+        ]) or str(row.get("Fiber Type") or row.get("Fiber Project") or "").strip()
 
-        total_km = (_pick(kv, ["Fiber Length End (log end)"]))
-        save_km  = (_pick(kv, ["Total Saved Length"]))
-        cut_km   = (_pick(kv, ["Total Cut Length"]))
+        # Drum: prefer dashboard group, then process setup, then legacy
+        drum = _pick(kv, [
+            "Drum | Selected",
+            "Process__Selected Drum",
+            "Selected Drum",
+            "Drum",
+        ])
 
-        zones_n = (_pick(kv, ["Good Zones Count"]))
+        # Lengths: new dashboard name first
+        total_km = _pick(kv, [
+            "Fiber Length | End (log end)",
+            "Fiber Length End (log end)",
+            "Fibre Length End (log end)",
+        ])
 
+        save_km = _pick(kv, [
+            "Total Saved Length",
+            "Total Saved Length (km)",
+        ])
+
+        cut_km = _pick(kv, [
+            "Total Cut Length",
+            "Total Cut Length (km)",
+        ])
+
+        zones_n = _pick(kv, [
+            "Good Zones Count",
+            "Order__Good Zones Count (required length zones)",
+            "Good Zones Count (required length zones)",
+        ])
 
         done_str = done_dt.strftime("%Y-%m-%d %H:%M:%S") if done_dt else "—"
         age_str = f"{age_days:.1f} days" if done_dt else "—"
@@ -4589,10 +4639,8 @@ def render_done_home_section():
         c3.metric("CUT (km)", fmt_float(cut_km, 2))
         c4.metric("Zones", fmt_int(zones_n))
 
-
         if done_desc:
             st.caption(f"Done notes: {done_desc}")
-
 
         b1, b2 = st.columns([1.1, 2.9])
 
@@ -4611,8 +4659,13 @@ def render_done_home_section():
                 st.button("📄 Download CSV", disabled=True, use_container_width=True, key=f"done_missing_{idx}")
 
         with b2:
-            st.caption(f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (this one moves in ~{max(0.0, AUTO_MOVE_DAYS - age_days):.1f} days)."
-                       if done_dt else f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (done time unknown).")
+            if done_dt:
+                st.caption(
+                    f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** "
+                    f"(this one moves in ~{max(0.0, AUTO_MOVE_DAYS - age_days):.1f} days)."
+                )
+            else:
+                st.caption(f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (done time unknown).")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5569,6 +5622,13 @@ elif tab_selection == "📊 Dashboard":
             pass
         return str(v)
 
+    # ---------- NEW: clean uniform section titles ----------
+    def _sec(title: str):
+        return {"Parameter Name": f"### {title}", "Value": "", "Units": ""}
+
+    def _blank():
+        return {"Parameter Name": "", "Value": "", "Units": ""}
+
     def _choose_length_col(df_):
         if df_ is None or df_.empty:
             return None
@@ -5637,6 +5697,9 @@ elif tab_selection == "📊 Dashboard":
         rows = []
         now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # ---------- NEW: nicer, uniform header ----------
+        rows += [_sec("DASHBOARD ZONES"), _blank()]
+
         rows.append({"Parameter Name": "Zones Saved Timestamp", "Value": now_s, "Units": ""})
         rows.append({"Parameter Name": "Dashboard Log File", "Value": os.path.basename(log_file_path), "Units": ""})
         rows.append({"Parameter Name": "Good Zones Count", "Value": int(len(zones)), "Units": "count"})
@@ -5662,8 +5725,9 @@ elif tab_selection == "📊 Dashboard":
                 cols.append(c)
 
         for i, (start, end) in enumerate(zones, start=1):
-            rows.append({"Parameter Name": f"Zone {i} Start", "Value": _fmt_x(start), "Units": start_end_units})
-            rows.append({"Parameter Name": f"Zone {i} End", "Value": _fmt_x(end), "Units": start_end_units})
+            # ---------- NEW: cleaner zone markers ----------
+            rows.append({"Parameter Name": f"Zone {i} | Start", "Value": _fmt_x(start), "Units": start_end_units})
+            rows.append({"Parameter Name": f"Zone {i} | End", "Value": _fmt_x(end), "Units": start_end_units})
 
             try:
                 zdf = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
@@ -5677,10 +5741,11 @@ elif tab_selection == "📊 Dashboard":
                 vals = pd.to_numeric(zdf[col], errors="coerce").dropna()
                 if vals.empty:
                     continue
-                rows.append(
-                    {"Parameter Name": f"Marked Zone {i} Avg - {col}", "Value": float(vals.mean()), "Units": ""})
-                rows.append({"Parameter Name": f"Marked Zone {i} Min - {col}", "Value": float(vals.min()), "Units": ""})
-                rows.append({"Parameter Name": f"Marked Zone {i} Max - {col}", "Value": float(vals.max()), "Units": ""})
+                rows.append({"Parameter Name": f"Zone {i} | {col} | Avg", "Value": float(vals.mean()), "Units": ""})
+                rows.append({"Parameter Name": f"Zone {i} | {col} | Min", "Value": float(vals.min()), "Units": ""})
+                rows.append({"Parameter Name": f"Zone {i} | {col} | Max", "Value": float(vals.max()), "Units": ""})
+
+        rows += [_blank()]
         return rows
 
     def build_tm_rows_from_steps_allocate_only(dataset_csv_name: str, steps: list, zones_info: list, length_col_name: str = ""):
@@ -5689,19 +5754,24 @@ elif tab_selection == "📊 Dashboard":
         This is stable and avoids mixing STEP with AUTO.
         """
         rows = []
-        rows.append({"Parameter Name": "—", "Value": "—", "Units": ""})
-        rows.append({"Parameter Name": "CUT/SAVE Plan Source", "Value": str(os.path.basename(dataset_csv_name)), "Units": ""})
+        # ---------- NEW: nicer header, no ugly dashed rows ----------
+        rows += [_sec("T&M CUT/SAVE PLAN"), _blank()]
+        rows.append({"Parameter Name": "Plan Source (dataset CSV)", "Value": str(os.path.basename(dataset_csv_name)), "Units": ""})
         rows.append({"Parameter Name": "Plan Mode", "Value": "STEP plan from dataset CSV (allocated on good zones)", "Units": ""})
         if length_col_name:
-            rows.append({"Parameter Name": "Zone Length Column (log)", "Value": str(length_col_name), "Units": ""})
+            rows.append({"Parameter Name": "Length Column (log)", "Value": str(length_col_name), "Units": ""})
 
         if not steps:
             rows.append({"Parameter Name": "T&M Instructions", "Value": "STEP plan empty.", "Units": ""})
+            rows += [_blank()]
             return rows
 
+        rows += [_blank(), _sec("STEP PLAN (from dataset)"), _blank()]
         for i, (a, L) in enumerate(steps, start=1):
-            rows.append({"Parameter Name": f"STEP {i} Action", "Value": str(a).upper(), "Units": ""})
-            rows.append({"Parameter Name": f"STEP {i} Length", "Value": float(L), "Units": "km"})
+            rows.append({"Parameter Name": f"STEP {i} | Action", "Value": str(a).upper(), "Units": ""})
+            rows.append({"Parameter Name": f"STEP {i} | Length", "Value": float(L), "Units": "km"})
+
+        rows += [_blank(), _sec("ALLOCATED ON GOOD ZONES"), _blank()]
 
         tm_i = 1
         step_idx = 0
@@ -5720,9 +5790,9 @@ elif tab_selection == "📊 Dashboard":
             while zone_remaining > 1e-9 and step_idx < len(steps):
                 take = min(zone_remaining, step_rem)
 
-                rows.append({"Parameter Name": f"T&M Step {tm_i} Action", "Value": str(step_act).upper(), "Units": ""})
-                rows.append({"Parameter Name": f"T&M Step {tm_i} Length", "Value": float(take), "Units": "km"})
-                rows.append({"Parameter Name": f"T&M Step {tm_i} From", "Value": f"Zone {zi}", "Units": ""})
+                rows.append({"Parameter Name": f"T&M {tm_i} | Action", "Value": str(step_act).upper(), "Units": ""})
+                rows.append({"Parameter Name": f"T&M {tm_i} | Length", "Value": float(take), "Units": "km"})
+                rows.append({"Parameter Name": f"T&M {tm_i} | From", "Value": f"Zone {zi}", "Units": ""})
 
                 if str(step_act).upper() == "SAVE":
                     saved += float(take)
@@ -5738,9 +5808,28 @@ elif tab_selection == "📊 Dashboard":
                     if step_idx < len(steps):
                         step_act, step_rem = steps[step_idx][0], float(steps[step_idx][1])
 
+        rows += [_blank(), _sec("T&M TOTALS"), _blank()]
         rows.append({"Parameter Name": "Total Saved Length", "Value": float(saved), "Units": "km"})
         rows.append({"Parameter Name": "Total Cut Length", "Value": float(cut), "Units": "km"})
+        rows += [_blank()]
         return rows
+
+    def _extract_selected_drum_from_dataset_df(df_params: pd.DataFrame) -> str:
+        """
+        Try both old and new parameter names.
+        - New Process Setup: Process__Selected Drum
+        - Old: Selected Drum
+        """
+        if df_params is None or df_params.empty:
+            return ""
+        try:
+            s = df_params["Parameter Name"].astype(str).str.strip()
+            hit = df_params.loc[s.isin(["Process__Selected Drum", "Selected Drum"]), "Value"]
+            if hit is None or hit.empty:
+                return ""
+            return str(hit.iloc[-1]).strip()
+        except Exception:
+            return ""
 
     # ==========================================================
     # Load log CSV
@@ -5897,23 +5986,15 @@ elif tab_selection == "📊 Dashboard":
     # ==========================================================
     # Plot
     # ==========================================================
-    # ==========================================================
-    # Plot (multi Y axes with colored axis labels)
-    # ==========================================================
-    # ==========================================================
-    # Plot (multi Y axes with colored axis titles + ticks)
-    # ==========================================================
     st.subheader("📈 Plot")
 
     fig = go.Figure()
 
-    # Plotly default-ish palette (don’t change if you don’t want colors)
     default_colors = [
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
         "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
     ]
 
-    # ---- add traces (each on its own axis) ----
     for i, y_col in enumerate(y_axes):
         axis_ref = "y" if i == 0 else f"y{i + 1}"
         color = default_colors[i % len(default_colors)]
@@ -5927,7 +6008,6 @@ elif tab_selection == "📊 Dashboard":
             line=dict(color=color),
         ))
 
-    # ---- zones shading ----
     for (start, end) in st.session_state["good_zones"]:
         fig.add_vrect(x0=start, x1=end, fillcolor="green", opacity=0.25, line_width=0)
 
@@ -5938,29 +6018,22 @@ elif tab_selection == "📊 Dashboard":
             line_width=1, line_dash="dot"
         )
 
-    # ---- layout axes ----
-    # ---- layout axes ----
     layout_updates = {}
-
-    # left axis (no title text – we’ll use labels instead)
     layout_updates["yaxis"] = dict(
-        title=dict(text=""),  # ✅ remove axis title to avoid overlap
+        title=dict(text=""),
         tickfont=dict(color=default_colors[0]),
         showgrid=True,
     )
 
-    # right axes (no titles – only colored ticks)
     right_positions = [1.00, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.79]
-
     for i in range(1, len(y_axes)):
         axis_key = f"yaxis{i + 1}"
         color = default_colors[i % len(default_colors)]
-
         pos_idx = i - 1
         pos = right_positions[pos_idx] if pos_idx < len(right_positions) else max(0.55, 1.0 - 0.03 * pos_idx)
 
         layout_updates[axis_key] = dict(
-            title=dict(text=""),  # ✅ remove axis title
+            title=dict(text=""),
             tickfont=dict(color=color),
             anchor="x",
             overlaying="y",
@@ -5970,12 +6043,10 @@ elif tab_selection == "📊 Dashboard":
             zeroline=False,
         )
 
-    # ---- X axis: reduce tick clutter ----
-    # ---- X axis: reduce tick clutter + vertical labels ----
     xaxis_cfg = dict(
         automargin=True,
-        nticks=8,  # keep fewer ticks
-        tickangle=-90,  # ✅ vertical like before
+        nticks=8,
+        tickangle=-90,
         showgrid=False,
     )
 
@@ -5985,11 +6056,9 @@ elif tab_selection == "📊 Dashboard":
             ticklabelmode="instant",
         ))
 
-
-    # ---- add colored legend-like labels inside plot (instead of axis titles) ----
     annotations = []
-    y0 = 1.08  # start above plot
-    dy = 0.08  # spacing between labels
+    y0 = 1.08
+    dy = 0.08
     for i, col in enumerate(y_axes):
         color = default_colors[i % len(default_colors)]
         annotations.append(dict(
@@ -6014,8 +6083,6 @@ elif tab_selection == "📊 Dashboard":
         title=f"{' , '.join([str(y) for y in y_axes])} vs {x_axis}",
         margin=dict(l=10, r=10, t=85, b=10),
         height=620,
-
-        # ✅ remove bottom legend (we already have labels on plot)
         legend=dict(visible=False),
     )
 
@@ -6134,10 +6201,42 @@ elif tab_selection == "📊 Dashboard":
                     except Exception as e:
                         rows_to_save.append({"Parameter Name": "T&M Length Error", "Value": str(e), "Units": ""})
 
+                    # ---------- NEW: WINDER & LENGTH group (Drum + Length End + Zone Length Min/Max) ----------
+                    rows_to_save += [_blank(), _sec("WINDER & LENGTH"), _blank()]
+
+                    # Drum selected (from dataset CSV)
+                    selected_drum_val = ""
+                    if df_params is not None:
+                        selected_drum_val = _extract_selected_drum_from_dataset_df(df_params)
+                    if selected_drum_val:
+                        rows_to_save.append({"Parameter Name": "Drum | Selected", "Value": str(selected_drum_val), "Units": ""})
+
+                    # Fiber length end (log end)
+                    if length_col:
+                        try:
+                            L_all = pd.to_numeric(filtered_df[length_col], errors="coerce").dropna()
+                            if not L_all.empty:
+                                rows_to_save.append({"Parameter Name": "Fiber Length | End (log end)", "Value": float(L_all.iloc[-1]), "Units": "km"})
+                        except Exception:
+                            pass
+
+                        # Zone fiber length min/max (grouped with drum)
+                        for i, (zs, ze) in enumerate(zones_for_save, start=1):
+                            try:
+                                zdf = filtered_df[(filtered_df[x_axis] >= zs) & (filtered_df[x_axis] <= ze)]
+                                Lz = pd.to_numeric(zdf[length_col], errors="coerce").dropna()
+                                if Lz.empty:
+                                    continue
+                                rows_to_save.append({"Parameter Name": f"Zone {i} | Fiber Length | Min", "Value": float(Lz.min()), "Units": "km"})
+                                rows_to_save.append({"Parameter Name": f"Zone {i} | Fiber Length | Max", "Value": float(Lz.max()), "Units": "km"})
+                            except Exception:
+                                continue
+
+                    rows_to_save += [_blank()]
+
                     # 3) T&M instructions:
                     try:
                         if steps:
-                            # STEP plan path (alloc only; stable)
                             rows_to_save += build_tm_rows_from_steps_allocate_only(
                                 dataset_csv_name=target_csv,
                                 steps=steps,
@@ -6145,7 +6244,6 @@ elif tab_selection == "📊 Dashboard":
                                 length_col_name=length_col_name or "",
                             )
                         else:
-                            # AUTO plan path (CORRECT spool-end)
                             rows_to_save += build_tm_instruction_rows_auto_from_good_zones(
                                 filtered_df=filtered_df,
                                 x_axis=x_axis,
@@ -6209,10 +6307,13 @@ elif tab_selection == "✅ Draw Finalize":
     # Imports (local)
     # ==========================================================
     import os, re, time
+    import datetime as dt
     from datetime import datetime, timedelta
 
+    import numpy as np
     import pandas as pd
     import streamlit as st
+    import duckdb
 
     from helpers.text_utils import safe_str
     from helpers.dataset_io import (
@@ -6231,7 +6332,226 @@ elif tab_selection == "✅ Draw Finalize":
     DATASET_DIR = P.dataset_dir
     SAP_INVENTORY_FILE = "sap_rods_inventory.csv"
 
+    BASE_DIR = os.getcwd()
+    MAINT_FOLDER = P.maintenance_dir
+    DB_PATH = os.path.join(BASE_DIR, P.duckdb_path)
+
+    # ✅ Fault logs (same as Maintenance tab)
+    os.makedirs(MAINT_FOLDER, exist_ok=True)
+    FAULTS_CSV = os.path.join(MAINT_FOLDER, "faults_log.csv")
+    FAULTS_ACTIONS_CSV = os.path.join(MAINT_FOLDER, "faults_actions_log.csv")
+
+    FAULTS_COLS = [
+        "fault_id",
+        "fault_ts",
+        "fault_component",
+        "fault_title",
+        "fault_description",
+        "fault_severity",
+        "fault_actor",
+        "fault_source_file",
+        "fault_related_draw",
+    ]
+
+    FAULTS_ACTIONS_COLS = [
+        "fault_action_id",
+        "fault_id",
+        "action_ts",
+        "action_type",     # close / reopen / note
+        "actor",
+        "note",
+        "fix_summary",
+    ]
+
     ensure_dataset_dir(DATASET_DIR)
+
+    # ==========================================================
+    # DuckDB connection (shared with SQL Lab + Maintenance)
+    # ==========================================================
+    if "sql_duck_con" not in st.session_state:
+        st.session_state["sql_duck_con"] = duckdb.connect(DB_PATH)
+    con = st.session_state["sql_duck_con"]
+    try:
+        con.execute("PRAGMA threads=4;")
+    except Exception:
+        pass
+
+    # Create tables if missing (same schema as Maintenance tab)
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS faults_events (
+        fault_id        BIGINT,
+        fault_ts        TIMESTAMP,
+        component       VARCHAR,
+        title           VARCHAR,
+        description     VARCHAR,
+        severity        VARCHAR,
+        actor           VARCHAR,
+        source_file     VARCHAR,
+        related_draw    VARCHAR
+    );
+    """)
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS faults_actions (
+        fault_action_id  BIGINT,
+        fault_id         BIGINT,
+        action_ts        TIMESTAMP,
+        action_type      VARCHAR,
+        actor            VARCHAR,
+        note             VARCHAR,
+        fix_summary      VARCHAR
+    );
+    """)
+
+    # ==========================================================
+    # CSV helpers (append-only)
+    # ==========================================================
+    def _ensure_csv(path: str, cols: list):
+        if not os.path.isfile(path):
+            pd.DataFrame(columns=cols).to_csv(path, index=False)
+
+    def _append_csv(path: str, cols: list, df_rows: pd.DataFrame):
+        _ensure_csv(path, cols)
+        df = df_rows.copy()
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        df = df[cols]
+
+        # stringify time fields to avoid dtype crash
+        for tcol in [c for c in cols if c.endswith("_ts")]:
+            df[tcol] = pd.to_datetime(df[tcol], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        df.to_csv(path, mode="a", header=False, index=False)
+
+    def _read_csv_safe(path: str, cols: list) -> pd.DataFrame:
+        if not os.path.isfile(path):
+            return pd.DataFrame(columns=cols)
+        try:
+            df = pd.read_csv(path)
+            if df is None:
+                return pd.DataFrame(columns=cols)
+            for c in cols:
+                if c not in df.columns:
+                    df[c] = ""
+            return df[cols].copy()
+        except Exception:
+            return pd.DataFrame(columns=cols)
+
+    def _latest_fault_state(actions_df: pd.DataFrame) -> dict:
+        """
+        fault_id -> last action (close/reopen/note) ; closed if last action is 'close'
+        """
+        out = {}
+        if actions_df is None or actions_df.empty:
+            return out
+
+        a = actions_df.copy()
+        a["action_ts"] = pd.to_datetime(a["action_ts"], errors="coerce")
+        a["fault_id"] = pd.to_numeric(a["fault_id"], errors="coerce")
+        a = a.dropna(subset=["fault_id"]).copy()
+        a["fault_id"] = a["fault_id"].astype(int)
+
+        a = a.sort_values(["fault_id", "action_ts"], ascending=[True, True])
+        last = a.groupby("fault_id").tail(1)
+
+        for _, r in last.iterrows():
+            fid = int(r["fault_id"])
+            typ = safe_str(r.get("action_type", "")).strip().lower()
+            out[fid] = {
+                "is_closed": (typ == "close"),
+                "last_ts": r.get("action_ts", None),
+                "last_note": safe_str(r.get("note", "")),
+                "last_fix": safe_str(r.get("fix_summary", "")),
+                "last_type": typ,
+                "last_actor": safe_str(r.get("actor", "")),
+            }
+        return out
+
+    def _write_fault_action(con, *, fault_id: int, action_type: str, actor: str, note: str = "", fix_summary: str = ""):
+        now_dt = dt.datetime.now()
+        aid = int(time.time() * 1000)
+
+        try:
+            con.execute("""
+                INSERT INTO faults_actions
+                (fault_action_id, fault_id, action_ts, action_type, actor, note, fix_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [aid, int(fault_id), now_dt, str(action_type), str(actor), str(note), str(fix_summary)])
+        except Exception as e:
+            st.warning(f"Fault action DB insert failed (still saving CSV): {e}")
+
+        row = pd.DataFrame([{
+            "fault_action_id": aid,
+            "fault_id": int(fault_id),
+            "action_ts": now_dt,
+            "action_type": str(action_type),
+            "actor": str(actor),
+            "note": str(note),
+            "fix_summary": str(fix_summary),
+        }])
+        _append_csv(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS, row)
+
+    # ==========================================================
+    # Actor (same key as Maintenance so you type once)
+    # ==========================================================
+    st.session_state.setdefault("maint_actor", "operator")
+    st.text_input("Actor / operator name (for history)", key="maint_actor")
+    actor = st.session_state.get("maint_actor", "operator")
+
+    # ==========================================================
+    # Component list helper (try to reuse Maintenance task components)
+    # ==========================================================
+    normalize_map = {
+        "equipment": "Component",
+        "component": "Component",
+        "task name": "Task",
+        "task": "Task",
+    }
+
+    def _norm_colname(c: str) -> str:
+        return str(c).strip().lower()
+
+    def _load_components_from_maintenance_folder(folder: str) -> list:
+        comps = set()
+
+        # 1) from existing faults log
+        fdf = _read_csv_safe(FAULTS_CSV, FAULTS_COLS)
+        if not fdf.empty and "fault_component" in fdf.columns:
+            for x in fdf["fault_component"].astype(str).fillna("").tolist():
+                x = str(x).strip()
+                if x:
+                    comps.add(x)
+
+        # 2) from maintenance task files (best)
+        if not os.path.isdir(folder):
+            return sorted(comps)
+
+        files = [f for f in os.listdir(folder) if f.lower().endswith((".xlsx", ".xls", ".csv"))]
+        for fname in files:
+            p = os.path.join(folder, fname)
+            try:
+                if p.lower().endswith(".csv"):
+                    df = pd.read_csv(p)
+                else:
+                    df = pd.read_excel(p)
+                if df is None or df.empty:
+                    continue
+                # normalize minimal
+                df = df.rename(columns={c: normalize_map.get(_norm_colname(c), c) for c in df.columns})
+                if "Component" not in df.columns:
+                    continue
+                for x in df["Component"].astype(str).fillna("").tolist():
+                    x = str(x).strip()
+                    if x:
+                        comps.add(x)
+            except Exception:
+                continue
+
+        return sorted(comps)
+
+    @st.cache_data(show_spinner=False)
+    def _cached_components(folder: str) -> list:
+        return _load_components_from_maintenance_folder(folder)
 
     # ==========================================================
     # Short-lived message window (under Done / Failed)
@@ -6244,7 +6564,7 @@ elif tab_selection == "✅ Draw Finalize":
             "level": level,      # "success" | "warning" | "info" | "error"
             "title": title,
             "details": details or "",
-            "just_set": True,    # ✅ prevents "instant disappear" on same rerun
+            "just_set": True,
         }
 
     def _render_flash_window(where: str):
@@ -6253,8 +6573,6 @@ elif tab_selection == "✅ Draw Finalize":
             return
 
         now = time.time()
-
-        # ✅ allow at least one full render after setting (even if st.rerun happens)
         if flash.get("just_set"):
             flash["just_set"] = False
             st.session_state["_finalize_flash"] = flash
@@ -6264,8 +6582,6 @@ elif tab_selection == "✅ Draw Finalize":
                 st.session_state.pop("_finalize_flash", None)
                 return
 
-        # Try to auto-refresh while flash is visible (so it disappears by itself)
-        # If your Streamlit doesn't support it, it will still disappear on next interaction.
         try:
             st.autorefresh(interval=1000, limit=FLASH_SECONDS + 2, key=f"finalize_flash_refresh_{where}")
         except Exception:
@@ -6311,7 +6627,6 @@ elif tab_selection == "✅ Draw Finalize":
     # Helpers (shared)
     # ==========================================================
     def dataset_csv_path(name_or_path: str, dataset_dir: str) -> str:
-        # Accept filename or full path
         return resolve_dataset_csv_path(name_or_path, dataset_dir=dataset_dir)
 
     def _norm_str(s: str) -> str:
@@ -6649,6 +6964,52 @@ elif tab_selection == "✅ Draw Finalize":
         return append_rows_to_dataset_csv(dataset_csv_filename, rows, dataset_dir=DATASET_DIR)
 
     # ==========================================================
+    # Fault logging helper (used in Failed tab)
+    # ==========================================================
+    def log_fault_event_for_draw(
+        *,
+        con,
+        actor: str,
+        fault_component: str,
+        severity: str,
+        title: str,
+        description: str,
+        source_file: str,
+        related_draw: str,
+    ):
+        now_dt = dt.datetime.now()
+        fid = int(time.time() * 1000)
+
+        # DuckDB
+        try:
+            con.execute("""
+                INSERT INTO faults_events
+                (fault_id, fault_ts, component, title, description, severity, actor, source_file, related_draw)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                fid, now_dt,
+                str(fault_component), str(title), str(description),
+                str(severity), str(actor), str(source_file), str(related_draw)
+            ])
+        except Exception as e:
+            st.warning(f"DuckDB fault insert failed (still saving CSV): {e}")
+
+        # CSV
+        row = pd.DataFrame([{
+            "fault_id": fid,
+            "fault_ts": now_dt,
+            "fault_component": str(fault_component),
+            "fault_title": str(title),
+            "fault_description": str(description),
+            "fault_severity": str(severity),
+            "fault_actor": str(actor),
+            "fault_source_file": str(source_file),
+            "fault_related_draw": str(related_draw),
+        }])
+        _append_csv(FAULTS_CSV, FAULTS_COLS, row)
+        return fid
+
+    # ==========================================================
     # Dataset picker (shared UI)
     # ==========================================================
     st.markdown("---")
@@ -6676,6 +7037,8 @@ elif tab_selection == "✅ Draw Finalize":
         st.stop()
 
     st.success(f"Target: **{target_csv}**")
+
+    related_draw_default = os.path.splitext(os.path.basename(target_csv))[0]
 
     # Show matched order preview
     if os.path.exists(ORDERS_FILE):
@@ -6726,29 +7089,24 @@ elif tab_selection == "✅ Draw Finalize":
             do_mark_done = st.button(
                 "✅ Mark DONE",
                 use_container_width=True,
-                disabled=(not str(done_desc).strip()),  # ✅ allow 0.0
+                disabled=(not str(done_desc).strip()),
                 key="final_mark_done_btn",
             )
         with c2:
             st.caption("Also appends Done info into dataset CSV.")
 
-        # ✅ short-lived message window UNDER Done UI
         _render_flash_window(where="done")
 
         if do_mark_done:
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             summary_lines = []
-            final_level = "success"  # success unless something fails hard
+            final_level = "success"
 
-            # -------------------------
-            # 1) Dataset CSV append
-            # -------------------------
             ok_csv, msg_csv = append_rows_to_dataset_csv(
                 target_csv,
                 [
-                    {"Parameter Name": "Preform Length After Draw", "Value": float(preform_len_after_cm),
-                     "Units": "cm"},
+                    {"Parameter Name": "Preform Length After Draw", "Value": float(preform_len_after_cm), "Units": "cm"},
                     {"Parameter Name": "Done Description", "Value": str(done_desc).strip(), "Units": ""},
                     {"Parameter Name": "Done Timestamp", "Value": now_str, "Units": ""},
                 ],
@@ -6762,9 +7120,6 @@ elif tab_selection == "✅ Draw Finalize":
                 summary_lines.append("⚠️ Dataset CSV update failed")
                 final_level = "warning"
 
-            # -------------------------
-            # 2) Mark order done (hard fail stops)
-            # -------------------------
             ok, msg = mark_draw_order_done_by_dataset_csv(target_csv, done_desc, float(preform_len_after_cm))
             if not ok:
                 st.toast("❌ Failed to mark DONE", icon="❌")
@@ -6774,9 +7129,6 @@ elif tab_selection == "✅ Draw Finalize":
             st.toast("✅ Order marked DONE", icon="✅")
             summary_lines.append("✅ Order marked DONE")
 
-            # -------------------------
-            # 3) After-done hook
-            # -------------------------
             try:
                 hook_ok, hook_msg = run_after_done_hook(
                     target_csv=target_csv,
@@ -6796,9 +7148,6 @@ elif tab_selection == "✅ Draw Finalize":
                 st.toast("ℹ️ After-done hook skipped", icon="ℹ️")
                 summary_lines.append("ℹ️ After-done hook skipped")
 
-            # -------------------------
-            # 4) SAP (PM only)
-            # -------------------------
             try:
                 df_params, err = _read_dataset_params(target_csv)
                 if df_params is None:
@@ -6812,7 +7161,7 @@ elif tab_selection == "✅ Draw Finalize":
                         summary_lines.append("ℹ️ SAP not updated (not PM)")
                     else:
                         inv_ok, inv_msg = decrement_sap_rods_set_by_one(
-                            source_draw=os.path.splitext(os.path.basename(target_csv))[0],
+                            source_draw=related_draw_default,
                             when_str=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         )
                         if inv_ok:
@@ -6826,9 +7175,6 @@ elif tab_selection == "✅ Draw Finalize":
                 st.toast("ℹ️ SAP update skipped", icon="ℹ️")
                 summary_lines.append("ℹ️ SAP update skipped")
 
-            # -------------------------
-            # 5) Preform registry
-            # -------------------------
             try:
                 df_params, err = _read_dataset_params(target_csv)
                 if df_params is not None and "Parameter Name" in df_params.columns:
@@ -6838,7 +7184,7 @@ elif tab_selection == "✅ Draw Finalize":
                         append_preform_length(
                             preform_name=str(pf_name),
                             length_cm=float(preform_len_after_cm),
-                            source_draw=os.path.splitext(os.path.basename(target_csv))[0],
+                            source_draw=related_draw_default,
                         )
                         st.toast("📏 Preform length saved", icon="✅")
                         summary_lines.append(f"✅ Preform saved ({pf_name})")
@@ -6846,12 +7192,7 @@ elif tab_selection == "✅ Draw Finalize":
                 st.toast("ℹ️ Preform registry skipped", icon="ℹ️")
                 summary_lines.append("ℹ️ Preform registry skipped")
 
-            # ✅ ONE flash only (no stacking)
-            _set_flash(
-                final_level,
-                "Finalize DONE",
-                "\n".join(summary_lines)
-            )
+            _set_flash(final_level, "Finalize DONE", "\n".join(summary_lines))
             st.rerun()
 
     with tab_failed:
@@ -6873,82 +7214,217 @@ elif tab_selection == "✅ Draw Finalize":
             key="final_preform_left_cm",
         )
 
+        # ======================================================
+        # ✅ Fault insert (same idea as Maintenance tab)
+        # ======================================================
+        st.markdown("### 🚨 Failure → optionally log a Fault / Incident")
+
+        log_as_fault = st.toggle(
+            "This failure is a fault / incident (log to Faults)",
+            value=bool(st.session_state.get("final_failed_is_fault", False)),
+            key="final_failed_is_fault",
+        )
+
+        # Defaults/inputs (only when toggle is ON)
+        fault_payload = None
+        if log_as_fault:
+            comps = _cached_components(MAINT_FOLDER)
+            comp_options = (comps if comps else []) + ["Other (custom)"]
+
+            c1, c2, c3 = st.columns([1.4, 1.0, 1.0])
+            with c1:
+                selected_comp = st.selectbox(
+                    "Fault component",
+                    options=comp_options,
+                    key="final_fault_component_select",
+                )
+                if selected_comp == "Other (custom)":
+                    fault_component = st.text_input("Custom component name", key="final_fault_component_custom")
+                else:
+                    fault_component = selected_comp
+            with c2:
+                fault_severity = st.selectbox(
+                    "Severity",
+                    ["low", "medium", "high", "critical"],
+                    index=1,
+                    key="final_fault_sev_in",
+                )
+            with c3:
+                st.text_input(
+                    "Related draw",
+                    value=related_draw_default,
+                    disabled=True,
+                    key="final_fault_related_draw_view",
+                )
+
+            fault_title = st.text_input(
+                "Fault title",
+                placeholder="Short title",
+                value=st.session_state.get("final_fault_title_in", ""),
+                key="final_fault_title_in",
+            )
+
+            fault_desc_extra = st.text_area(
+                "Fault description (details / what to check next time)",
+                placeholder="You can paste the failed description + more details…",
+                value=st.session_state.get("final_fault_desc_in", ""),
+                height=120,
+                key="final_fault_desc_in",
+            )
+
+            fault_source_file = st.text_input(
+                "Source file (optional)",
+                placeholder="e.g. photo.jpg / email.pdf / log screenshot",
+                value=st.session_state.get("final_fault_src_in", ""),
+                key="final_fault_src_in",
+            )
+
+            # Build payload (we’ll validate right before saving)
+            fault_payload = {
+                "fault_component": safe_str(fault_component).strip(),
+                "fault_severity": safe_str(fault_severity).strip().lower(),
+                "fault_title": safe_str(fault_title).strip(),
+                "fault_description": safe_str(fault_desc_extra).strip(),
+                "fault_source_file": safe_str(fault_source_file).strip(),
+                "fault_related_draw": related_draw_default,
+            }
+
+            st.caption("Will be saved to **DuckDB faults_events** + **maintenance/faults_log.csv**")
+
+        st.markdown("---")
+
         do_mark_failed = st.button(
             "❌ Mark FAILED",
             use_container_width=True,
-            disabled=(not str(failed_desc).strip()),  # ✅ allow 0.0
+            disabled=(not str(failed_desc).strip()),
             key="final_mark_failed_btn",
         )
 
-        # ✅ short-lived message window UNDER Failed UI
         _render_flash_window(where="failed")
 
         if do_mark_failed:
+            summary_lines = []
+            final_level = "success"
+
+            # 1) Mark failed in orders
             okf, msgf = mark_draw_order_failed_by_dataset_csv(target_csv, failed_desc, float(preform_left_cm))
-            if okf:
-                st.toast("❌ Order marked FAILED", icon="✅")
-                _set_flash("success", "Order marked FAILED", msgf)
-
-                ok_csv, msg_csv = append_failed_metadata_to_dataset_csv(target_csv, failed_desc, float(preform_left_cm))
-                if ok_csv:
-                    st.toast("✅ Failed metadata saved to dataset CSV", icon="✅")
-                    _set_flash("success", "Failed metadata saved to dataset CSV", msg_csv)
-                else:
-                    st.toast("⚠️ Failed metadata NOT saved to dataset CSV", icon="⚠️")
-                    _set_flash("warning", "Failed metadata NOT saved to dataset CSV", msg_csv)
-
-                st.info("Next step:")
-                c1, c2 = st.columns(2)
-
-                with c1:
-                    if st.button("📅 Draw next day (reset + schedule)", key="final_failed_schedule_nextday", use_container_width=True):
-                        schedule_date = compute_next_planned_draw_date(datetime.now())
-                        oks, msgs = reset_failed_order_to_beginning_and_schedule(
-                            target_csv,
-                            schedule_date=schedule_date,
-                            scheduled_status="Scheduled",
-                        )
-                        if oks:
-                            st.toast("✅ Reset + scheduled", icon="✅")
-                            _set_flash("success", "Reset + scheduled", msgs)
-                        else:
-                            st.toast("⚠️ Reset failed", icon="⚠️")
-                            _set_flash("warning", "Reset failed", msgs)
-                        st.rerun()
-
-                with c2:
-                    if st.button("↩ Return to Pending (no schedule)", key="final_failed_return_pending", use_container_width=True):
-                        oks, msgs = reset_failed_order_to_beginning_and_schedule(
-                            target_csv,
-                            schedule_date="",
-                            scheduled_status="Scheduled",
-                        )
-                        if oks:
-                            st.toast("✅ Reset to Pending", icon="✅")
-                            _set_flash("success", "Reset to Pending", msgs)
-                        else:
-                            st.toast("⚠️ Reset failed", icon="⚠️")
-                            _set_flash("warning", "Reset failed", msgs)
-                        st.rerun()
-
-            else:
+            if not okf:
                 st.toast("⚠️ Failed to mark order FAILED", icon="⚠️")
                 _set_flash("warning", "Failed to mark order FAILED", msgf)
                 st.rerun()
+
+            st.toast("❌ Order marked FAILED", icon="✅")
+            summary_lines.append("✅ Order marked FAILED")
+
+            # 2) Append failed metadata into dataset CSV
+            ok_csv, msg_csv = append_failed_metadata_to_dataset_csv(target_csv, failed_desc, float(preform_left_cm))
+            if ok_csv:
+                st.toast("✅ Failed metadata saved to dataset CSV", icon="✅")
+                summary_lines.append("✅ Failed metadata saved to dataset CSV")
+            else:
+                st.toast("⚠️ Failed metadata NOT saved to dataset CSV", icon="⚠️")
+                summary_lines.append("⚠️ Failed metadata NOT saved to dataset CSV")
+                final_level = "warning"
+
+            # 3) Optional: log fault (same style as Maintenance)
+            if log_as_fault:
+                try:
+                    if not fault_payload:
+                        raise RuntimeError("Fault payload missing.")
+
+                    comp = fault_payload["fault_component"]
+                    title = fault_payload["fault_title"]
+                    desc = fault_payload["fault_description"]
+
+                    # If user didn’t type extra desc, reuse failed_desc
+                    if not desc:
+                        desc = str(failed_desc).strip()
+
+                    # If user didn’t give title, auto-create from failed_desc
+                    if not title:
+                        title = (str(failed_desc).strip()[:80] + "…") if len(str(failed_desc).strip()) > 80 else str(failed_desc).strip()
+
+                    if not comp:
+                        st.toast("⚠️ Fault component is required", icon="⚠️")
+                        summary_lines.append("⚠️ Fault NOT logged (missing component)")
+                        final_level = "warning"
+                    elif not title and not desc:
+                        st.toast("⚠️ Give fault title or description", icon="⚠️")
+                        summary_lines.append("⚠️ Fault NOT logged (missing title/desc)")
+                        final_level = "warning"
+                    else:
+                        fid = log_fault_event_for_draw(
+                            con=con,
+                            actor=actor,
+                            fault_component=comp,
+                            severity=fault_payload["fault_severity"] or "medium",
+                            title=title,
+                            description=desc,
+                            source_file=fault_payload["fault_source_file"],
+                            related_draw=related_draw_default,
+                        )
+                        st.toast("🚨 Fault logged", icon="✅")
+                        summary_lines.append(f"✅ Fault logged (ID {fid})")
+                except Exception as e:
+                    st.toast("⚠️ Fault logging failed", icon="⚠️")
+                    summary_lines.append(f"⚠️ Fault logging failed: {e}")
+                    final_level = "warning"
+
+            # ✅ One flash
+            _set_flash(final_level, "Finalize FAILED", "\n".join(summary_lines))
+
+            # Next step buttons
+            st.info("Next step:")
+            c1, c2 = st.columns(2)
+
+            with c1:
+                if st.button("📅 Draw next day (reset + schedule)", key="final_failed_schedule_nextday", use_container_width=True):
+                    schedule_date = compute_next_planned_draw_date(datetime.now())
+                    oks, msgs = reset_failed_order_to_beginning_and_schedule(
+                        target_csv,
+                        schedule_date=schedule_date,
+                        scheduled_status="Scheduled",
+                    )
+                    if oks:
+                        st.toast("✅ Reset + scheduled", icon="✅")
+                        _set_flash("success", "Reset + scheduled", msgs)
+                    else:
+                        st.toast("⚠️ Reset failed", icon="⚠️")
+                        _set_flash("warning", "Reset failed", msgs)
+                    st.rerun()
+
+            with c2:
+                if st.button("↩ Return to Pending (no schedule)", key="final_failed_return_pending", use_container_width=True):
+                    oks, msgs = reset_failed_order_to_beginning_and_schedule(
+                        target_csv,
+                        schedule_date="",
+                        scheduled_status="Scheduled",
+                    )
+                    if oks:
+                        st.toast("✅ Reset to Pending", icon="✅")
+                        _set_flash("success", "Reset to Pending", msgs)
+                    else:
+                        st.toast("⚠️ Reset failed", icon="⚠️")
+                        _set_flash("warning", "Reset failed", msgs)
+                    st.rerun()
+
+            # If user doesn’t click next-step, still rerun to show flash cleanly
+            st.rerun()
 # ------------------ Consumables Tab ------------------
 elif tab_selection == "🍃 Tower state - Consumables and dies":
     # ==========================================================
     # Imports (local to tab)
     # ==========================================================
     import os, json, math
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     import pandas as pd
     import streamlit as st
 
     # ✅ Your project imports
-    from app_io.paths import P, ensure_logs_dir, ensure_gas_reports_dir, gas_report_path, _abs, ensure_dir
-    from helpers.process_setup_state import apply_order_row_to_process_setup_state
+    from app_io.paths import (
+        P, ensure_logs_dir, ensure_gas_reports_dir, gas_report_path, _abs, ensure_dir
+    )
     from renders.navigation import render_navigation
 
     ensure_logs_dir()
@@ -6980,10 +7456,10 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
       .muted { opacity: 0.75; }
       .low-card { border: 1px solid rgba(255, 77, 77, 0.60) !important; background: rgba(255, 77, 77, 0.05) !important; }
       .low-num { color: rgba(255, 170, 170, 1.0); font-weight: 800; }
+      code { font-size: 0.86rem; }
     </style>
     """, unsafe_allow_html=True)
 
-    # Navigation (if you use it)
     try:
         render_navigation()
     except Exception:
@@ -6999,16 +7475,10 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     LOW_STOCK_KG = 1.0
     WAREHOUSE_STOCK_FILE = _abs("coating_type_stock.json")
 
-    # ✅ temps csv (wide 1-row)
     TOWER_TEMPS_CSV = getattr(P, "tower_temps_csv", _abs("tower_temps.csv"))
-
-    # ✅ containers csv (wide 1-row)
     TOWER_CONTAINERS_CSV = getattr(P, "tower_containers_csv", _abs("tower_containers.csv"))
 
-    # We keep snapshot for delta logic so we don't subtract warehouse repeatedly
     CONTAINER_SNAPSHOT_FILE = _abs("container_levels_prev.json")
-
-    # Also keep writing the legacy json if other parts depend on it (optional but safe)
     CONTAINER_CFG_PATH = P.container_config_json
 
     # ==========================================================
@@ -7016,6 +7486,10 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     # ==========================================================
     def _safe_float(x, default=0.0):
         try:
+            if x is None:
+                return float(default)
+            if isinstance(x, str) and x.strip() == "":
+                return float(default)
             return float(x)
         except Exception:
             return float(default)
@@ -7036,12 +7510,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
             json.dump(obj, f, indent=4)
         os.replace(tmp, path)
 
-    def _file_mtime(path: str) -> float:
-        try:
-            return os.path.getmtime(path) if os.path.exists(path) else 0.0
-        except Exception:
-            return 0.0
-
     def _read_one_row_csv(path: str) -> dict:
         if not os.path.exists(path):
             return {}
@@ -7059,6 +7527,18 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         row.update(data or {})
         row["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pd.DataFrame([row], columns=cols).to_csv(path, index=False)
+
+    def _list_files_recursive(root: str, exts=(".csv",)):
+        out = []
+        try:
+            for base, _, files in os.walk(root):
+                for fn in files:
+                    if fn.lower().endswith(exts):
+                        out.append(os.path.join(base, fn))
+        except Exception:
+            pass
+        out.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return out
 
     # ==========================================================
     # Load coating types
@@ -7080,7 +7560,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         "C_container_c", "C_pipe_c",
         "D_container_c", "D_pipe_c",
     ]
-
     TEMP_STATE_KEYS = {
         "die_holder_primary_c": "die_holder_primary_temp_state",
         "die_holder_secondary_c": "die_holder_secondary_temp_state",
@@ -7095,8 +7574,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     }
 
     wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
-    temps_mtime = _file_mtime(TOWER_TEMPS_CSV)
-
     for col, skey in TEMP_STATE_KEYS.items():
         if skey not in st.session_state:
             if col in wide_temps and str(wide_temps.get(col, "")).strip() != "":
@@ -7105,7 +7582,7 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
                 st.session_state[skey] = 25.0
 
     # ==========================================================
-    # 2) CONTAINERS CSV (wide)  ✅ NEW
+    # 2) CONTAINERS CSV (wide)
     # ==========================================================
     CONTAINER_COLS = [
         "updated_at",
@@ -7114,15 +7591,11 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         "C_level_kg", "C_type",
         "D_level_kg", "D_type",
     ]
-
-    # UI keys
     def _lvl_key(lab): return f"cont_level_{lab}"
     def _type_key(lab): return f"cont_type_{lab}"
 
     wide_cont = _read_one_row_csv(TOWER_CONTAINERS_CSV)
-    cont_mtime = _file_mtime(TOWER_CONTAINERS_CSV)
 
-    # Defaults if csv missing: try legacy json, else 0 + first type
     legacy_cfg = _read_json(CONTAINER_CFG_PATH, {})
     if not isinstance(legacy_cfg, dict):
         legacy_cfg = {}
@@ -7131,13 +7604,12 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         default_level = 0.0
         default_type = coating_types[0] if coating_types else ""
 
-        # from CSV
         lvl_col = f"{lab}_level_kg"
         typ_col = f"{lab}_type"
+
         if lvl_col in wide_cont and str(wide_cont.get(lvl_col, "")).strip() != "":
             default_level = _safe_float(wide_cont.get(lvl_col), default_level)
         else:
-            # from legacy json
             if isinstance(legacy_cfg.get(lab, {}), dict):
                 default_level = _safe_float(legacy_cfg.get(lab, {}).get("level", default_level), default_level)
 
@@ -7167,7 +7639,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.caption(" ")
         st.caption(" ")
 
-    # Manual refresh: Temps
     if refresh_temps:
         wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
         for col, skey in TEMP_STATE_KEYS.items():
@@ -7176,7 +7647,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.success("Temps reloaded from CSV.")
         st.rerun()
 
-    # Manual refresh: Containers
     if refresh_containers:
         wide_cont = _read_one_row_csv(TOWER_CONTAINERS_CSV)
         for lab in container_labels:
@@ -7193,7 +7663,7 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.rerun()
 
     # ==========================================================
-    # Warehouse stock (kg) - JSON (bulk stock)
+    # Warehouse stock (kg) - JSON
     # ==========================================================
     warehouse_stock = _read_json(WAREHOUSE_STOCK_FILE, {})
     if not isinstance(warehouse_stock, dict):
@@ -7201,19 +7671,21 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     for t in coating_types:
         warehouse_stock[t] = _safe_float(warehouse_stock.get(t, 0.0), 0.0)
 
-    # Snapshot for delta (so refill subtract once)
     prev_snapshot = _read_json(CONTAINER_SNAPSHOT_FILE, {})
     if not isinstance(prev_snapshot, dict):
         prev_snapshot = {}
     for lab in container_labels:
-        prev_snapshot.setdefault(lab, {"level": float(st.session_state[_lvl_key(lab)]), "type": str(st.session_state[_type_key(lab)])})
+        prev_snapshot.setdefault(
+            lab,
+            {"level": float(st.session_state[_lvl_key(lab)]), "type": str(st.session_state[_type_key(lab)])}
+        )
 
     # ==========================================================
-    # UI: Containers (levels/types)  ✅ now CSV-based
+    # UI: Containers
     # ==========================================================
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("🧪 Coating Containers (A–D)")
-    st.caption("Rule: level ↑ = refill (auto subtract from warehouse). level ↓ = consumption (total decreases).")
+    st.caption("Rule: level ↑ = refill (auto subtract from warehouse). level ↓ = consumption.")
 
     cols = st.columns(4)
     current_container_state = {}
@@ -7234,11 +7706,11 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
                 cur_t = st.session_state[_type_key(lab)]
                 if cur_t not in coating_types:
                     cur_t = coating_types[0]
-                idx = coating_types.index(cur_t)
+                idx_t = coating_types.index(cur_t)
                 ctype = st.selectbox(
                     f"Coating Type {lab}",
                     options=coating_types,
-                    index=idx,
+                    index=idx_t,
                     key=_type_key(lab)
                 )
             else:
@@ -7259,13 +7731,13 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
-    # Apply refill delta to warehouse (based on snapshot)
+    # Apply refill delta to warehouse (snapshot-based)
     # ==========================================================
     refill_events = []
     for lab in container_labels:
         prev_level = _safe_float(prev_snapshot.get(lab, {}).get("level", 0.0), 0.0)
-        cur_level  = _safe_float(current_container_state[lab]["level"], 0.0)
-        cur_type   = str(current_container_state[lab]["type"])
+        cur_level = _safe_float(current_container_state[lab]["level"], 0.0)
+        cur_type = str(current_container_state[lab]["type"])
         delta = cur_level - prev_level
 
         if delta > 1e-9 and cur_type in warehouse_stock:
@@ -7276,7 +7748,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
 
         prev_snapshot[lab] = {"level": float(cur_level), "type": cur_type}
 
-    # Persist: warehouse + snapshot
     try:
         _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
         _write_json(CONTAINER_SNAPSHOT_FILE, prev_snapshot)
@@ -7286,10 +7757,13 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     if refill_events:
         with st.expander("🧾 Detected refills (auto)", expanded=False):
             for lab, ctype, delta, before, after in refill_events:
-                st.write(f"Container **{lab}** refilled **+{delta:.2f} kg** of **{ctype}** → Warehouse: {before:.2f} → {after:.2f} kg")
+                st.write(
+                    f"Container **{lab}** refilled **+{delta:.2f} kg** of **{ctype}** → "
+                    f"Warehouse: {before:.2f} → {after:.2f} kg"
+                )
 
     # ==========================================================
-    # Auto-save containers to CSV  ✅ NEW
+    # Auto-save containers to CSV
     # ==========================================================
     last_cont_saved = st.session_state.get("containers_last_saved_snapshot", {})
     cur_cont_snapshot = {lab: (current_container_state[lab]["level"], current_container_state[lab]["type"]) for lab in container_labels}
@@ -7298,8 +7772,7 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
         last_cont_saved = cur_cont_snapshot
 
-    containers_changed = cur_cont_snapshot != last_cont_saved
-    if containers_changed:
+    if cur_cont_snapshot != last_cont_saved:
         out = {}
         for lab in container_labels:
             out[f"{lab}_level_kg"] = float(current_container_state[lab]["level"])
@@ -7309,7 +7782,6 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
             _write_one_row_csv(TOWER_CONTAINERS_CSV, CONTAINER_COLS, out)
             st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
 
-            # also update legacy json for compatibility (optional)
             legacy_out = {lab: {"level": float(current_container_state[lab]["level"]), "type": str(current_container_state[lab]["type"])} for lab in container_labels}
             _write_json(CONTAINER_CFG_PATH, legacy_out)
         except Exception as e:
@@ -7328,11 +7800,14 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         return sums
 
     container_sums = _sum_containers_by_type(current_container_state)
-    total_by_type = {t: _safe_float(warehouse_stock.get(t, 0.0), 0.0) + _safe_float(container_sums.get(t, 0.0), 0.0) for t in coating_types}
+    total_by_type = {
+        t: _safe_float(warehouse_stock.get(t, 0.0), 0.0) + _safe_float(container_sums.get(t, 0.0), 0.0)
+        for t in coating_types
+    }
 
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("🏷️ Coating Stock by Type (Auto)")
-    st.caption("Computed from warehouse + container contents. Auto-updates. Red when total < 1 kg.")
+    st.caption("Computed from warehouse + container contents. Red when total < 1 kg.")
 
     if coating_types:
         max_total = max(total_by_type.values()) if total_by_type else 0.0
@@ -7382,7 +7857,13 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
                 with col:
                     k = f"wh_{ctype}"
                     st.session_state.setdefault(k, float(warehouse_stock.get(ctype, 0.0)))
-                    val = st.number_input(f"{ctype} (kg)", min_value=0.0, step=0.1, value=float(st.session_state[k]), key=k)
+                    val = st.number_input(
+                        f"{ctype} (kg)",
+                        min_value=0.0,
+                        step=0.1,
+                        value=float(st.session_state[k]),
+                        key=k
+                    )
                     if abs(val - float(warehouse_stock.get(ctype, 0.0))) > 1e-9:
                         warehouse_stock[ctype] = float(val)
                         edited = True
@@ -7398,13 +7879,11 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
-    # Temps UI (containers + pipe are near containers; die-holder is global)
+    # Temps UI
     # ==========================================================
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("🌡️ Temperatures (CSV-based)")
-    st.caption("Temps are stored in one-row CSV and can be refreshed from external edits.")
 
-    # Containers temps
     for lab in container_labels:
         st.markdown(f"**Container {lab} temps**")
         c1, c2 = st.columns(2)
@@ -7455,8 +7934,7 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.session_state["temps_last_saved_snapshot"] = cur_temp_snapshot
         last_temp_saved = cur_temp_snapshot
 
-    temps_changed = cur_temp_snapshot != last_temp_saved
-    if temps_changed:
+    if cur_temp_snapshot != last_temp_saved:
         out = {
             "die_holder_primary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_primary_c"]]),
             "die_holder_secondary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_secondary_c"]]),
@@ -7472,13 +7950,7 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
             st.error(f"Failed to write temps CSV: {e}")
 
     # ==========================================================
-    # Gas section folded by default (keep your full logic here)
-    # ==========================================================
-    with st.expander("🧯 Gas Reports", expanded=False):
-        st.info("Gas section folded (as requested). Paste your full gas logic here if you want it integrated in this same block.")
-
-    # ==========================================================
-    # Dies system (auto save/load)
+    # Dies system
     # ==========================================================
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("🔩 Dies System")
@@ -7546,6 +8018,269 @@ elif tab_selection == "🍃 Tower state - Consumables and dies":
         st.caption(f"Auto-saved to `{DIES_CONFIG_PATH}`")
     except Exception as e:
         st.error(f"Failed to save dies config: {e}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==========================================================
+    # 🧯 GAS REPORTS (AUTO MONTHLY CSV) ✅ ALL MFCs = ARGON
+    #   - NO JSON
+    #   - NO daily/weekly
+    #   - outputs one CSV: argon_monthly_report.csv
+    # ==========================================================
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+    st.subheader("🧯 Argon Report — Monthly (AUTO from logs)")
+    st.caption("Auto-builds a single monthly CSV report from logs. All Furnace MFC1–4 Actual are summed as Argon.")
+
+    GAS_DIR = getattr(P, "gas_reports_dir", None) or _abs("gas_reports")
+    LOGS_DIR = getattr(P, "logs_dir", None) or _abs("logs")
+    ensure_dir(GAS_DIR)
+    ensure_dir(LOGS_DIR)
+
+    REPORT_CSV = os.path.join(GAS_DIR, "argon_monthly_report.csv")
+    STATE_JSON = os.path.join(GAS_DIR, "_argon_monthly_state.json")
+
+    TIME_COL = "Date/Time"
+    MFC_ACTUAL_COLS = [
+        "Furnace MFC1 Actual",
+        "Furnace MFC2 Actual",
+        "Furnace MFC3 Actual",
+        "Furnace MFC4 Actual",
+    ]
+
+
+    def _read_json(path, default):
+        if not os.path.exists(path):
+            return default
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return default
+
+
+    def _write_json(path, obj):
+        ensure_dir(os.path.dirname(path) or ".")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(obj, f, indent=4)
+        os.replace(tmp, path)
+
+
+    def _parse_dt_series_date_time(col: pd.Series) -> pd.Series:
+        # Handles your format: '19/11/2024 12:44:33772'
+        s = col.astype(str)
+
+        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+        if dt.notna().sum() >= max(10, int(0.6 * len(dt))):
+            return dt
+
+        out = []
+        for v in s.tolist():
+            try:
+                parts = v.split()
+                if len(parts) < 2:
+                    out.append(pd.NaT);
+                    continue
+                dpart = parts[0]
+                tpart = parts[1]
+                tt = tpart.split(":")
+                if len(tt) != 3:
+                    out.append(pd.NaT);
+                    continue
+                hh = int(tt[0]);
+                mm = int(tt[1])
+                secms = tt[2].strip()  # e.g. "33772"
+                ss = int(secms[:2]) if len(secms) >= 2 else 0
+                ms_str = secms[2:] if len(secms) > 2 else ""
+                ms = int(ms_str) if (ms_str.isdigit() and ms_str != "") else 0
+                if ms >= 1000:
+                    ms = int(ms_str[:3]) if len(ms_str) >= 3 else ms % 1000
+
+                dd, mon, yy = dpart.split("/")
+                out.append(datetime(int(yy), int(mon), int(dd), hh, mm, ss, int(ms) * 1000))
+            except Exception:
+                out.append(pd.NaT)
+
+        return pd.to_datetime(pd.Series(out), errors="coerce")
+
+
+    def _list_logs():
+        out = []
+        try:
+            for base, _, files in os.walk(LOGS_DIR):
+                for fn in files:
+                    if fn.lower().endswith(".csv"):
+                        out.append(os.path.join(base, fn))
+        except Exception:
+            pass
+        return out
+
+
+    def _safe_float(x, default=0.0):
+        try:
+            return float(x)
+        except Exception:
+            return float(default)
+
+
+    # UI controls
+    g1, g2, g3 = st.columns([1, 1, 1])
+    with g1:
+        dt_cap_s = st.number_input("dt cap (sec)", min_value=0.1, step=0.1, value=2.0, key="argon_monthly_dt_cap")
+    with g2:
+        last_days = st.number_input("Scan last N days (0=all)", min_value=0, step=1, value=365,
+                                    key="argon_monthly_scan_days")
+    with g3:
+        force = st.button("♻️ Force rebuild", use_container_width=True, key="argon_monthly_force")
+
+    state = _read_json(STATE_JSON, {"last_scan_mtime": 0.0, "last_run": ""})
+
+
+    def _build_monthly_csv(force_rebuild: bool = False):
+        logs = _list_logs()
+        if not logs:
+            return {"info": f"No logs found in `{LOGS_DIR}`"}
+
+        if int(last_days) > 0:
+            cutoff = datetime.now() - timedelta(days=int(last_days))
+            keep = []
+            for p in logs:
+                try:
+                    if datetime.fromtimestamp(os.path.getmtime(p)) >= cutoff:
+                        keep.append(p)
+                except Exception:
+                    pass
+            logs = keep
+
+        newest_mtime = 0.0
+        for p in logs:
+            try:
+                newest_mtime = max(newest_mtime, os.path.getmtime(p))
+            except Exception:
+                pass
+
+        if (not force_rebuild) and newest_mtime <= float(state.get("last_scan_mtime", 0.0)):
+            return {"info": "Up-to-date (no new logs detected)."}
+
+        # accum by YYYY-MM
+        accum = {}  # month -> dict
+
+        for lp in logs:
+            try:
+                df = pd.read_csv(lp)
+            except Exception:
+                continue
+
+            if TIME_COL not in df.columns:
+                continue
+
+            if not any(c in df.columns for c in MFC_ACTUAL_COLS):
+                continue
+
+            df["_t"] = _parse_dt_series_date_time(df[TIME_COL])
+            df = df.dropna(subset=["_t"]).sort_values("_t")
+            if len(df) < 3:
+                continue
+
+            # Argon flow = sum of MFCs (SLPM)
+            flow = None
+            for c in MFC_ACTUAL_COLS:
+                if c in df.columns:
+                    s = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                    flow = s if flow is None else (flow + s)
+            if flow is None:
+                continue
+
+            dt_s = df["_t"].diff().dt.total_seconds().fillna(0.0)
+            dt_s = dt_s.clip(lower=0.0, upper=float(dt_cap_s))
+            dt_min = dt_s / 60.0
+
+            month_key = df["_t"].dt.strftime("%Y-%m")
+            work = pd.DataFrame({"month": month_key, "flow": flow, "dt_min": dt_min})
+            work["SL"] = work["flow"] * work["dt_min"]
+
+            for m, g in work.groupby("month", dropna=True):
+                if m not in accum:
+                    accum[m] = {
+                        "total_SL": 0.0,
+                        "total_minutes": 0.0,
+                        "min_slpm": None,
+                        "max_slpm": None,
+                        "sum_flow_weighted": 0.0,  # flow * minutes
+                        "logs": set(),
+                        "rows": 0,
+                    }
+
+                total_sl = float(g["SL"].sum())
+                total_min = float(g["dt_min"].sum())
+
+                accum[m]["total_SL"] += total_sl
+                accum[m]["total_minutes"] += total_min
+                accum[m]["sum_flow_weighted"] += float((g["flow"] * g["dt_min"]).sum())
+                mn = float(g["flow"].min())
+                mx = float(g["flow"].max())
+                accum[m]["min_slpm"] = mn if accum[m]["min_slpm"] is None else min(accum[m]["min_slpm"], mn)
+                accum[m]["max_slpm"] = mx if accum[m]["max_slpm"] is None else max(accum[m]["max_slpm"], mx)
+                accum[m]["logs"].add(lp)
+                accum[m]["rows"] += int(len(g))
+
+        if not accum:
+            return {"info": "No valid data found in scanned logs."}
+
+        # Build CSV
+        rows = []
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for m, a in accum.items():
+            avg_slpm = (a["sum_flow_weighted"] / a["total_minutes"]) if a["total_minutes"] > 0 else 0.0
+            rows.append({
+                "month": m,
+                "gas": "Argon",
+                "total_standard_liters": float(a["total_SL"]),
+                "total_minutes": float(a["total_minutes"]),
+                "avg_slpm": float(avg_slpm),
+                "min_slpm": float(a["min_slpm"] if a["min_slpm"] is not None else 0.0),
+                "max_slpm": float(a["max_slpm"] if a["max_slpm"] is not None else 0.0),
+                "logs_count": int(len(a["logs"])),
+                "rows_used": int(a["rows"]),
+                "updated_at": now_str
+            })
+
+        out_df = pd.DataFrame(rows).sort_values("month", ascending=False)
+        out_df.to_csv(REPORT_CSV, index=False)
+
+        state["last_scan_mtime"] = float(newest_mtime)
+        state["last_run"] = now_str
+        _write_json(STATE_JSON, state)
+
+        return {"updated": True, "rows": len(out_df), "logs_scanned": len(logs)}
+
+
+    # ✅ AUTO build on load
+    info = _build_monthly_csv(force_rebuild=bool(force))
+
+    if "info" in info:
+        st.caption(info["info"])
+    else:
+        st.caption(f"AUTO updated ✅ | logs scanned: {info.get('logs_scanned', 0)} | months: {info.get('rows', 0)}")
+
+    # View report
+    if os.path.exists(REPORT_CSV):
+        try:
+            rep = pd.read_csv(REPORT_CSV)
+            st.dataframe(rep, use_container_width=True, hide_index=True)
+            with open(REPORT_CSV, "r") as f:
+                st.download_button(
+                    "⬇️ Download monthly CSV",
+                    data=f.read(),
+                    file_name=os.path.basename(REPORT_CSV),
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="argon_monthly_download"
+                )
+        except Exception as e:
+            st.error(f"Failed to load report CSV: {e}")
+    else:
+        st.info("Monthly report CSV not created yet.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 # ------------------ Schedule Tab ------------------
@@ -7946,6 +8681,7 @@ elif tab_selection == "📦 Order Draw":
         "PANDA - PM",
         "TIGER - PM",
         "Octagonal",
+        "ROUND",
         "STEP INDEX",
         "Ring Core",
         "Hollow Core",
@@ -9382,9 +10118,23 @@ elif tab_selection == "🧪 Development Process":
     from datetime import datetime
 
     # =========================================================
-    # ✅ Development Process (FULL TAB + Attachments/PDF/Photos)
+    # ✅ Development Process (FULL TAB)
+    # ✅ Wide layout (guarded)
+    # ✅ Attachments: Photos / PDFs (preview) / Notebooks (.ipynb open real)
+    # ✅ Notes: Markdown + LaTeX
+    # ✅ Per-experiment: Preview tab is DEFAULT, all inputs moved to Edit tab
     # ✅ Fixed: dev_selected_project session_state crash on delete
     # =========================================================
+
+    # =========================
+    # Page config (WIDE) - safe guard
+    # =========================
+    if "_page_config_set" not in st.session_state:
+        try:
+            st.set_page_config(layout="wide")
+        except Exception:
+            pass
+        st.session_state["_page_config_set"] = True
 
     # =========================
     # CSS (HOME-LIKE POLISH)
@@ -9510,7 +10260,7 @@ elif tab_selection == "🧪 Development Process":
     PROJECTS_FILE = "development_projects.csv"
     EXPERIMENTS_FILE = "development_experiments.csv"
     UPDATES_FILE = "experiment_updates.csv"
-    DATASET_DIR = P.dataset_dir  # uses your global paths object
+    DATASET_DIR = P.dataset_dir
     MEDIA_ROOT = "development_media"
 
     IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
@@ -9539,6 +10289,7 @@ elif tab_selection == "🧪 Development Process":
                 "Draw CSV",
                 "Attachments",
                 "Attachment Captions",
+                "Markdown Notes",
             ]).to_csv(EXPERIMENTS_FILE, index=False)
 
         if not os.path.exists(UPDATES_FILE):
@@ -9561,7 +10312,7 @@ elif tab_selection == "🧪 Development Process":
     _ensure_columns(EXPERIMENTS_FILE, [
         "Project Name", "Experiment Title", "Date", "Researcher", "Methods", "Purpose",
         "Observations", "Results", "Is Drawing", "Drawing Details", "Draw CSV",
-        "Attachments", "Attachment Captions"
+        "Attachments", "Attachment Captions", "Markdown Notes"
     ])
     _ensure_columns(UPDATES_FILE, ["Project Name", "Experiment Title", "Update Date", "Researcher", "Update Notes"])
 
@@ -9583,6 +10334,7 @@ elif tab_selection == "🧪 Development Process":
             df["Is Drawing"] = df["Is Drawing"].fillna(False).astype(bool)
         df["Attachments"] = df.get("Attachments", "").fillna("")
         df["Attachment Captions"] = df.get("Attachment Captions", "").fillna("")
+        df["Markdown Notes"] = df.get("Markdown Notes", "").fillna("")
         return df
 
     def save_experiments(df):
@@ -9647,6 +10399,26 @@ elif tab_selection == "🧪 Development Process":
     def is_pdf(path: str) -> bool:
         return str(path).lower().endswith(".pdf")
 
+    def is_notebook(path: str) -> bool:
+        return str(path).lower().endswith(".ipynb")
+
+    def open_notebook_real(path: str):
+        """
+        Best-effort: open .ipynb with the OS default application.
+        Works when Streamlit runs locally (PyCharm). On a server it opens on the server machine.
+        """
+        import os as _os, sys as _sys, subprocess as _subprocess
+        p = _os.path.abspath(path)
+        if not _os.path.exists(p):
+            raise FileNotFoundError(p)
+
+        if _sys.platform.startswith("darwin"):
+            _subprocess.Popen(["open", p])
+        elif _sys.platform.startswith("win"):
+            _os.startfile(p)  # type: ignore[attr-defined]
+        else:
+            _subprocess.Popen(["xdg-open", p])
+
     def _unique_path(path: str) -> str:
         if not os.path.exists(path):
             return path
@@ -9678,7 +10450,7 @@ elif tab_selection == "🧪 Development Process":
         )
 
     # =========================
-    # PDF preview (RENDER ONLY - reliable)
+    # PDF preview (RENDER ONLY)
     # =========================
     @st.cache_data(show_spinner=False)
     def pdf_render_pages(path: str, max_pages: int = 1, zoom: float = 1.6):
@@ -9743,10 +10515,10 @@ elif tab_selection == "🧪 Development Process":
     # =========================
     def show_saved_attachments(paths, caps: dict, expander_key: str):
         if not paths:
-            st.info("No attachments yet. Use **➕ Add attachments** below.")
+            st.info("No attachments yet.")
             return
 
-        st.caption("Images are shown inline. PDFs can be previewed. All files are downloadable.")
+        st.caption("Images inline • PDFs preview • Notebooks open (local) • Everything downloadable.")
 
         imgs = [p for p in paths if is_image(os.path.basename(p))]
         others = [p for p in paths if p not in imgs]
@@ -9771,13 +10543,25 @@ elif tab_selection == "🧪 Development Process":
                     st.caption(cap if cap else "")
 
                 with r2:
+                    # PDF preview
                     if is_pdf(p) and os.path.exists(p):
                         if st.button("👁️ Preview", key=f"pdf_prev__{expander_key}__{i}__{fn}", use_container_width=True):
                             st.session_state[f"pdf_preview_path__{expander_key}"] = p
 
+                    # Notebook open (real)
+                    if is_notebook(p) and os.path.exists(p):
+                        if st.button("📓 Open", key=f"nb_open__{expander_key}__{i}__{fn}", use_container_width=True):
+                            try:
+                                open_notebook_real(p)
+                                st.success("Opened notebook locally (best-effort).")
+                            except Exception as e:
+                                st.warning(f"Could not open notebook: {e}")
+
                 with r3:
                     if is_pdf(p):
                         render_download_file(p, "⬇️ Download PDF", key=f"dl_pdf__{expander_key}__{i}__{fn}")
+                    elif is_notebook(p):
+                        render_download_file(p, "⬇️ Download .ipynb", key=f"dl_nb__{expander_key}__{i}__{fn}")
                     else:
                         render_download_file(p, "⬇️ Download", key=f"dl_file__{expander_key}__{i}__{fn}")
 
@@ -9796,12 +10580,11 @@ elif tab_selection == "🧪 Development Process":
     # Session defaults
     # =========================
     st.session_state.setdefault("dev_view_mode_main", "Active")
-
     st.session_state.setdefault("dev_show_add_experiment", False)
     st.session_state.setdefault("dev_show_new_project", False)
     st.session_state.setdefault("dev_show_manage_project", False)
 
-    # ✅ FIX: keep selection in non-widget key + versioned widget key
+    # ✅ selection safe keys
     st.session_state.setdefault("dev_selected_project", "")
     st.session_state.setdefault("dev_project_select_ver", 0)
 
@@ -9811,7 +10594,7 @@ elif tab_selection == "🧪 Development Process":
     st.markdown("""
     <div class="dp-hero">
       <div class="dp-hero-title">🧪 Development Process</div>
-      <div class="dp-hero-sub">Plan experiments • Attach files • Track updates • Link draws to datasets</div>
+      <div class="dp-hero-sub">Plan experiments • Attach files • Track updates • Link draws • Notes with Markdown/LaTeX</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -9826,7 +10609,6 @@ elif tab_selection == "🧪 Development Process":
 
     st.markdown('<div class="dp-sticky"><div class="dp-toolbar">', unsafe_allow_html=True)
 
-    # Row 1: View + Project + Add Experiment
     r1a, r1b, r1c = st.columns([1.10, 1.90, 1.20], gap="medium")
 
     with r1a:
@@ -9844,7 +10626,6 @@ elif tab_selection == "🧪 Development Process":
         filtered = projects_df[projects_df["Archived"] == (view_mode == "Archived")]
         project_options = [""] + filtered["Project Name"].dropna().astype(str).unique().tolist()
 
-        # --- SAFE select: versioned widget key ---
         cur_sel = st.session_state.get("dev_selected_project", "")
         if cur_sel and (cur_sel not in project_options):
             st.session_state["dev_selected_project"] = ""
@@ -9860,10 +10641,7 @@ elif tab_selection == "🧪 Development Process":
             index=default_idx,
             key=proj_widget_key,
         )
-
-        # store selection in non-widget key (safe to modify anytime)
         st.session_state["dev_selected_project"] = picked
-        selected_project = picked
 
     with r1c:
         selected_project = st.session_state.get("dev_selected_project", "")
@@ -9874,7 +10652,6 @@ elif tab_selection == "🧪 Development Process":
         else:
             st.button("➕ Add Experiment", use_container_width=True, disabled=True, key="dp_btn_add_exp_disabled")
 
-    # Row 2: New Project + Manage + Status pill
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     r2a, r2b, r2c = st.columns([1.05, 1.25, 2.70], gap="medium")
 
@@ -9938,7 +10715,7 @@ elif tab_selection == "🧪 Development Process":
                     st.success("Project created!")
                     st.session_state["dev_show_new_project"] = False
                     st.session_state["dev_selected_project"] = new_project_name.strip()
-                    st.session_state["dev_project_select_ver"] += 1  # force selectbox refresh
+                    st.session_state["dev_project_select_ver"] += 1
                     st.rerun()
 
     # =========================
@@ -9993,7 +10770,7 @@ elif tab_selection == "🧪 Development Process":
 
                             st.session_state["dev_selected_project"] = ""
                             st.session_state["dev_show_manage_project"] = False
-                            st.session_state["dev_project_select_ver"] += 1  # recreate selectbox with a new key
+                            st.session_state["dev_project_select_ver"] += 1
                             st.warning("Deleted permanently.")
                             st.rerun()
 
@@ -10031,11 +10808,7 @@ elif tab_selection == "🧪 Development Process":
             draw_csv_live = ""
 
             if is_drawing_live:
-                drawing_details_live = st.text_area(
-                    "Drawing Details",
-                    height=90,
-                    key=f"newexp_drawing_details__{selected_project}"
-                )
+                drawing_details_live = st.text_area("Drawing Details", height=90, key=f"newexp_drawing_details__{selected_project}")
 
                 dataset_files = list_dataset_csvs_newest_first()
                 if dataset_files:
@@ -10053,7 +10826,7 @@ elif tab_selection == "🧪 Development Process":
             st.divider()
             st.markdown("### 📎 Attach files (optional)")
             uploaded_new_files = st.file_uploader(
-                "Drag & drop files",
+                "Drag & drop files (images / PDF / .ipynb / anything)",
                 type=None,
                 accept_multiple_files=True,
                 key=f"newexp_attachments__{selected_project}"
@@ -10068,6 +10841,11 @@ elif tab_selection == "🧪 Development Process":
                         height=80,
                         key=f"newexp_caption__{selected_project}__{f.name}"
                     )
+
+            st.divider()
+            st.markdown("### 📓 Notes (Markdown + LaTeX)")
+            notes_md = st.text_area("Write notes here", height=160, key=f"newexp_notes__{selected_project}")
+            st.caption("Markdown + LaTeX: inline `$E=mc^2$` or block `$$\\Delta n(r)=n_0 e^{-r^2/w^2}$$`")
 
             st.divider()
 
@@ -10128,6 +10906,7 @@ elif tab_selection == "🧪 Development Process":
                             "Draw CSV": draw_csv_live.strip() if is_drawing_live else "",
                             "Attachments": join_path_list(saved_paths) if saved_paths else "",
                             "Attachment Captions": dump_captions(caps_map) if caps_map else "",
+                            "Markdown Notes": (st.session_state.get(f"newexp_notes__{selected_project}", "") or "").strip(),
                         }])
 
                         exp_df = pd.concat([exp_df, new_exp], ignore_index=True)
@@ -10159,121 +10938,177 @@ elif tab_selection == "🧪 Development Process":
             expander_key = f"exp_{selected_project}_{exp_title}_{exp_date}_{idx}"
 
             with st.expander(f"🧪 {exp_title} ({exp_date})", expanded=False):
-                st.write(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
-                st.write(f"**Methods:** {exp.get('Methods', 'N/A')}")
-                st.write(f"**Purpose:** {exp.get('Purpose', 'N/A')}")
-                st.write(f"**Observations:** {exp.get('Observations', 'N/A')}")
-                st.write(f"**Results:** {exp.get('Results', 'N/A')}")
 
-                if bool(exp.get("Is Drawing", False)):
-                    st.markdown("#### 🧵 Drawing")
-                    st.write(f"**Drawing Details:** {exp.get('Drawing Details', '')}")
-                    draw_csv_name = str(exp.get("Draw CSV", "")).strip()
-                    if draw_csv_name:
-                        st.write(f"**Draw CSV:** `{draw_csv_name}`")
-                        csv_path = os.path.join(DATASET_DIR, draw_csv_name)
-                        if os.path.exists(csv_path):
-                            if st.button("📄 Load & View Draw CSV", key=f"load_draw__{expander_key}"):
-                                df_draw = load_draw_csv(csv_path)
-                                st.dataframe(df_draw, use_container_width=True, height=320)
+                # ✅ DEFAULT TAB = Preview (put it first)
+                tab_preview, tab_edit = st.tabs(["👁️ Preview", "✍️ Edit"])
 
-                st.divider()
+                # -------------------------
+                # PREVIEW (NO INPUTS)
+                # -------------------------
+                with tab_preview:
+                    st.write(f"**Researcher:** {exp.get('Researcher', 'N/A')}")
+                    st.write(f"**Methods:** {exp.get('Methods', 'N/A')}")
+                    st.write(f"**Purpose:** {exp.get('Purpose', 'N/A')}")
+                    st.write(f"**Observations:** {exp.get('Observations', 'N/A')}")
+                    st.write(f"**Results:** {exp.get('Results', 'N/A')}")
 
-                st.markdown("#### 📎 Attachments (Saved)")
-                saved_paths = parse_path_list(exp.get("Attachments", ""))
-                saved_caps = parse_captions(exp.get("Attachment Captions", ""))
-                show_saved_attachments(saved_paths, saved_caps, expander_key)
+                    # Notes preview
+                    st.divider()
+                    st.markdown("#### 📓 Notes (Markdown + LaTeX)")
+                    notes_preview = str(exp.get("Markdown Notes", "") or "").strip()
+                    if notes_preview:
+                        st.markdown(notes_preview)
+                    else:
+                        st.caption("No notes yet.")
 
-                st.markdown("#### ➕ Add attachments")
-                st.caption("Add more files after the experiment was created.")
+                    # Drawing preview (view-only button allowed)
+                    if bool(exp.get("Is Drawing", False)):
+                        st.divider()
+                        st.markdown("#### 🧵 Drawing")
+                        st.write(f"**Drawing Details:** {exp.get('Drawing Details', '')}")
+                        draw_csv_name = str(exp.get("Draw CSV", "")).strip()
+                        if draw_csv_name:
+                            st.write(f"**Draw CSV:** `{draw_csv_name}`")
+                            csv_path = os.path.join(DATASET_DIR, draw_csv_name)
+                            if os.path.exists(csv_path):
+                                if st.button("📄 Load & View Draw CSV", key=f"load_draw__{expander_key}"):
+                                    df_draw = load_draw_csv(csv_path)
+                                    st.dataframe(df_draw, use_container_width=True, height=320)
 
-                add_files = st.file_uploader(
-                    "Drop files here",
-                    type=None,
-                    accept_multiple_files=True,
-                    key=f"add_files__{expander_key}"
-                )
+                    # Attachments preview (saved only)
+                    st.divider()
+                    st.markdown("#### 📎 Attachments")
+                    saved_paths = parse_path_list(exp.get("Attachments", ""))
+                    saved_caps = parse_captions(exp.get("Attachment Captions", ""))
+                    show_saved_attachments(saved_paths, saved_caps, expander_key)
 
-                add_caps = {}
-                if add_files:
-                    st.markdown("**Descriptions for new files**")
-                    for f in add_files:
-                        add_caps[f.name] = st.text_area(
-                            f"Description for {f.name}",
-                            height=80,
-                            key=f"add_cap__{expander_key}__{f.name}"
-                        )
+                    # Updates preview (list only)
+                    st.divider()
+                    st.markdown("#### 📜 Progress Updates")
+                    upd_df = load_updates()
+                    exp_updates = upd_df[
+                        (upd_df["Project Name"] == selected_project) &
+                        (upd_df["Experiment Title"] == exp_title)
+                    ].copy()
 
-                    if st.button("💾 Save attachments", use_container_width=True, key=f"save_added__{expander_key}"):
-                        media_dir = exp_media_dir(selected_project, exp_title, exp_date)
+                    if exp_updates.empty:
+                        st.caption("No updates yet.")
+                    else:
+                        exp_updates["Update_sort"] = pd.to_datetime(exp_updates["Update Date"], errors="coerce")
+                        exp_updates = exp_updates.sort_values("Update_sort", ascending=True)
+                        for _, u in exp_updates.iterrows():
+                            st.write(
+                                f"📅 **{u.get('Update Date', '')}** — **{u.get('Researcher', '')}**: {u.get('Update Notes', '')}"
+                            )
 
-                        new_paths = []
-                        for f in add_files:
-                            try:
-                                out_path = _unique_path(os.path.join(media_dir, f.name))
-                                with open(out_path, "wb") as w:
-                                    w.write(f.getbuffer())
-                                new_paths.append(out_path)
-                                saved_caps[os.path.basename(out_path)] = (add_caps.get(f.name, "") or "").strip()
-                            except Exception as e:
-                                st.error(f"Failed saving {f.name}: {e}")
-
-                        if new_paths:
+                # -------------------------
+                # EDIT (ALL INPUTS HERE)
+                # -------------------------
+                with tab_edit:
+                    # Notes editor
+                    st.markdown("#### ✍️ Edit Notes (Markdown + LaTeX)")
+                    edited_notes = st.text_area(
+                        "Notes",
+                        value=str(exp.get("Markdown Notes", "") or ""),
+                        height=220,
+                        key=f"md_notes__{expander_key}"
+                    )
+                    csave, chelp = st.columns([1, 2])
+                    with csave:
+                        if st.button("💾 Save Notes", use_container_width=True, key=f"save_notes__{expander_key}"):
                             exp_df2 = load_experiments()
                             mask = (
                                 (exp_df2["Project Name"] == selected_project) &
                                 (exp_df2["Experiment Title"].astype(str) == exp_title) &
                                 (exp_df2["Date"].astype(str) == exp_date)
                             )
-                            merged = (saved_paths or []) + new_paths
-                            exp_df2.loc[mask, "Attachments"] = join_path_list(merged)
-                            exp_df2.loc[mask, "Attachment Captions"] = dump_captions(saved_caps)
+                            exp_df2.loc[mask, "Markdown Notes"] = (edited_notes or "").strip()
                             save_experiments(exp_df2)
-
-                            st.success(f"Saved {len(new_paths)} file(s).")
+                            st.success("Notes saved.")
                             st.rerun()
+                    with chelp:
+                        st.caption("Inline `$E=mc^2$` • block `$$\\Delta n(r)=n_0 e^{-r^2/w^2}$$` • tables, code blocks, etc.")
 
-                st.divider()
+                    st.divider()
 
-                upd_df = load_updates()
-                exp_updates = upd_df[
-                    (upd_df["Project Name"] == selected_project) &
-                    (upd_df["Experiment Title"] == exp_title)
-                ].copy()
+                    # Add attachments (inputs here)
+                    st.markdown("#### ➕ Add attachments")
+                    st.caption("Upload images / PDFs / notebooks (.ipynb) or any file.")
+                    add_files = st.file_uploader(
+                        "Drop files here",
+                        type=None,
+                        accept_multiple_files=True,
+                        key=f"add_files__{expander_key}"
+                    )
 
-                st.markdown("#### 📜 Progress Updates")
-                if exp_updates.empty:
-                    st.caption("No updates yet.")
-                else:
-                    exp_updates["Update_sort"] = pd.to_datetime(exp_updates["Update Date"], errors="coerce")
-                    exp_updates = exp_updates.sort_values("Update_sort", ascending=True)
-                    for _, u in exp_updates.iterrows():
-                        st.write(
-                            f"📅 **{u.get('Update Date', '')}** — **{u.get('Researcher', '')}**: {u.get('Update Notes', '')}"
-                        )
+                    add_caps = {}
+                    if add_files:
+                        st.markdown("**Descriptions for new files**")
+                        for f in add_files:
+                            add_caps[f.name] = st.text_area(
+                                f"Description for {f.name}",
+                                height=80,
+                                key=f"add_cap__{expander_key}__{f.name}"
+                            )
 
-                st.markdown("#### 🔄 Add Update")
-                with st.form(f"update_form__{expander_key}"):
-                    update_researcher = st.text_input("Your name", key=f"upd_name__{expander_key}")
-                    update_notes = st.text_area("Update notes", height=80, key=f"upd_notes__{expander_key}")
-                    submit_update = st.form_submit_button("Add Update")
+                        if st.button("💾 Save attachments", use_container_width=True, key=f"save_added__{expander_key}"):
+                            media_dir = exp_media_dir(selected_project, exp_title, exp_date)
+                            exp_df2 = load_experiments()
 
-                if submit_update:
-                    if not update_notes.strip():
-                        st.warning("Please write update notes.")
-                    else:
-                        upd_df2 = load_updates()
-                        new_u = pd.DataFrame([{
-                            "Project Name": selected_project,
-                            "Experiment Title": exp_title,
-                            "Update Date": datetime.now().strftime("%Y-%m-%d"),
-                            "Researcher": update_researcher.strip(),
-                            "Update Notes": update_notes.strip()
-                        }])
-                        upd_df2 = pd.concat([upd_df2, new_u], ignore_index=True)
-                        save_updates(upd_df2)
-                        st.success("Update added!")
-                        st.rerun()
+                            # current saved state
+                            current_paths = parse_path_list(exp.get("Attachments", ""))
+                            current_caps = parse_captions(exp.get("Attachment Captions", ""))
+
+                            new_paths = []
+                            for f in add_files:
+                                try:
+                                    out_path = _unique_path(os.path.join(media_dir, f.name))
+                                    with open(out_path, "wb") as w:
+                                        w.write(f.getbuffer())
+                                    new_paths.append(out_path)
+                                    current_caps[os.path.basename(out_path)] = (add_caps.get(f.name, "") or "").strip()
+                                except Exception as e:
+                                    st.error(f"Failed saving {f.name}: {e}")
+
+                            if new_paths:
+                                mask = (
+                                    (exp_df2["Project Name"] == selected_project) &
+                                    (exp_df2["Experiment Title"].astype(str) == exp_title) &
+                                    (exp_df2["Date"].astype(str) == exp_date)
+                                )
+                                merged = (current_paths or []) + new_paths
+                                exp_df2.loc[mask, "Attachments"] = join_path_list(merged)
+                                exp_df2.loc[mask, "Attachment Captions"] = dump_captions(current_caps)
+                                save_experiments(exp_df2)
+
+                                st.success(f"Saved {len(new_paths)} file(s).")
+                                st.rerun()
+
+                    st.divider()
+
+                    # Add update (inputs here)
+                    st.markdown("#### 🔄 Add Update")
+                    with st.form(f"update_form__{expander_key}"):
+                        update_researcher = st.text_input("Your name", key=f"upd_name__{expander_key}")
+                        update_notes = st.text_area("Update notes", height=80, key=f"upd_notes__{expander_key}")
+                        submit_update = st.form_submit_button("Add Update")
+
+                    if submit_update:
+                        if not update_notes.strip():
+                            st.warning("Please write update notes.")
+                        else:
+                            upd_df2 = load_updates()
+                            new_u = pd.DataFrame([{
+                                "Project Name": selected_project,
+                                "Experiment Title": exp_title,
+                                "Update Date": datetime.now().strftime("%Y-%m-%d"),
+                                "Researcher": update_researcher.strip(),
+                                "Update Notes": update_notes.strip()
+                            }])
+                            upd_df2 = pd.concat([upd_df2, new_u], ignore_index=True)
+                            save_updates(upd_df2)
+                            st.success("Update added!")
+                            st.rerun()
 
     st.divider()
 
@@ -10298,8 +11133,18 @@ elif tab_selection == "🧪 Development Process":
             st.error(f"Failed to save conclusion: {e}")
 # ------------------ Protocols Tab ------------------
 elif tab_selection == "📋 Protocols":
-    import os, json, hashlib
+    import os, json, hashlib, time
     import streamlit as st
+
+    # ==========================================================
+    # Page config (wide)
+    # ==========================================================
+    if "_page_config_set" not in st.session_state:
+        try:
+            st.set_page_config(layout="wide")
+        except Exception:
+            pass
+        st.session_state["_page_config_set"] = True
 
     # ==========================================================
     # CSS (title lower + wide create form + clean cards)
@@ -10365,7 +11210,6 @@ elif tab_selection == "📋 Protocols":
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
       .small-note { font-size: 0.85rem; opacity: 0.75; }
 
-      /* Expander as big panel */
       details[data-testid="stExpander"] {
         border-radius: 14px !important;
         border: 1px solid rgba(255,255,255,0.10) !important;
@@ -10373,9 +11217,8 @@ elif tab_selection == "📋 Protocols":
         padding: 6px 10px !important;
       }
 
-      /* ✅ Make text areas feel bigger */
       textarea {
-        min-height: 420px !important; /* fallback */
+        min-height: 420px !important;
         font-size: 0.98rem !important;
         line-height: 1.35 !important;
       }
@@ -10389,7 +11232,7 @@ elif tab_selection == "📋 Protocols":
     <div class="proto-topbar">
       <div class="proto-title">
         <h1>📋 Protocols</h1>
-        <div class="proto-sub">Browse, run checklists, and manage tower protocols.</div>
+        <div class="proto-sub">Browse, run checklists, attach photos, and manage tower protocols.</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -10398,6 +11241,9 @@ elif tab_selection == "📋 Protocols":
     # Storage
     # ==========================================================
     PROTOCOLS_FILE = "protocols.json"
+    ASSETS_DIR = "protocols_assets"
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+
     protocol_types = ["Drawings", "Maintenance", "Tower Regular Operations"]
     sub_types = ["Checklist", "Instructions"]
 
@@ -10405,26 +11251,27 @@ elif tab_selection == "📋 Protocols":
         if not os.path.exists(path):
             return default
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return default
 
     def _safe_write_json(path: str, obj):
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(obj, f, indent=4)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=4, ensure_ascii=False)
         os.replace(tmp, path)
 
     if "protocols" not in st.session_state:
         st.session_state["protocols"] = _safe_read_json(PROTOCOLS_FILE, [])
 
-    # Ensure schema
+    # Ensure schema (backward compatible)
     for p in st.session_state["protocols"]:
         p.setdefault("type", "Tower Regular Operations")
         p.setdefault("sub_type", "Instructions")
         p.setdefault("instructions", "")
         p.setdefault("name", "Untitled")
+        p.setdefault("images", [])  # ✅ new
 
     # Checklist progress state (session)
     if "protocol_check_state" not in st.session_state:
@@ -10443,6 +11290,35 @@ elif tab_selection == "📋 Protocols":
             return True
         blob = f"{p.get('name','')} {p.get('type','')} {p.get('sub_type','')} {p.get('instructions','')}".lower()
         return q.lower() in blob
+
+    # ==========================================================
+    # Image helpers
+    # ==========================================================
+    def _safe_ext(filename: str) -> str:
+        fn = (filename or "").lower().strip()
+        for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+            if fn.endswith(ext):
+                return ext
+        return ".png"
+
+    def _save_uploaded_image(uploaded_file, pid: str) -> str:
+        # Unique + stable-ish name: pid + time + hash
+        raw = uploaded_file.getvalue()
+        h = hashlib.md5(raw).hexdigest()[:10]
+        ext = _safe_ext(uploaded_file.name)
+        fname = f"{pid}_{int(time.time()*1000)}_{h}{ext}"
+        path = os.path.join(ASSETS_DIR, fname)
+        with open(path, "wb") as f:
+            f.write(raw)
+        return fname
+
+    def _existing_image_paths(img_names: list) -> list:
+        out = []
+        for n in (img_names or []):
+            p = os.path.join(ASSETS_DIR, str(n))
+            if os.path.isfile(p):
+                out.append(p)
+        return out
 
     # ==========================================================
     # Stats
@@ -10505,12 +11381,13 @@ elif tab_selection == "📋 Protocols":
     if not items:
         st.info("No protocols match your filters.")
     else:
-        for p in items:
+        for idx, p in enumerate(items):
             pid = _proto_id(p)
             name = p.get("name", "Untitled")
             ptype = p.get("type", "")
             psub = p.get("sub_type", "Instructions")
             instructions = p.get("instructions", "")
+            images = p.get("images", []) or []
 
             st.markdown(
                 f"""
@@ -10520,6 +11397,7 @@ elif tab_selection == "📋 Protocols":
                     <div class="proto-meta">
                       <span class="pill">{ptype}</span>
                       <span class="pill">{psub}</span>
+                      <span class="pill">{len(images)} photos</span>
                     </div>
                   </div>
                 """,
@@ -10527,6 +11405,24 @@ elif tab_selection == "📋 Protocols":
             )
 
             with st.expander("Open", expanded=False):
+
+                # ------------------------------
+                # Preview: Photos (always)
+                # ------------------------------
+                img_paths = _existing_image_paths(images)
+                if img_paths:
+                    st.caption("📷 Photos")
+                    # Show up to 3 per row
+                    cols = st.columns(3)
+                    for i, path in enumerate(img_paths):
+                        with cols[i % 3]:
+                            st.image(path, use_container_width=True)
+
+                    st.markdown('<div class="hr-lite"></div>', unsafe_allow_html=True)
+
+                # ------------------------------
+                # Preview: Checklist / Instructions
+                # ------------------------------
                 if psub == "Checklist":
                     lines = _normalize_lines(instructions)
                     if not lines:
@@ -10556,7 +11452,6 @@ elif tab_selection == "📋 Protocols":
                         if st.button("Reset this checklist", key=f"reset_{pid}", use_container_width=True):
                             st.session_state["protocol_check_state"][pid] = {ln: False for ln in lines}
                             st.rerun()
-
                 else:
                     pretty = (instructions or "").strip()
                     if not pretty:
@@ -10565,6 +11460,101 @@ elif tab_selection == "📋 Protocols":
                         st.markdown(pretty.replace("\n", "  \n"))
 
                 st.markdown('<div class="hr-lite"></div>', unsafe_allow_html=True)
+
+                # ------------------------------
+                # Edit mode (only shows inputs)
+                # ------------------------------
+                edit = st.toggle("✏️ Edit this protocol", key=f"proto_edit_{pid}", value=False)
+                if edit:
+                    st.subheader("Edit")
+
+                    c1, c2, c3 = st.columns([1.7, 1.0, 1.0])
+                    with c1:
+                        new_name = st.text_input("Name", value=p.get("name", ""), key=f"edit_name_{pid}")
+                    with c2:
+                        new_type = st.selectbox("Type", protocol_types, index=protocol_types.index(p.get("type","Tower Regular Operations")) if p.get("type") in protocol_types else 0, key=f"edit_type_{pid}")
+                    with c3:
+                        new_sub = st.selectbox("Sub-type", sub_types, index=sub_types.index(p.get("sub_type","Instructions")) if p.get("sub_type") in sub_types else 1, key=f"edit_sub_{pid}")
+
+                    new_text = st.text_area(
+                        "Instructions / Checklist items",
+                        value=p.get("instructions", ""),
+                        height=420,
+                        key=f"edit_text_{pid}",
+                    )
+
+                    st.markdown("### 📷 Photos")
+                    up = st.file_uploader(
+                        "Upload photos (png/jpg/jpeg/webp)",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        accept_multiple_files=True,
+                        key=f"proto_uploader_{pid}",
+                    )
+
+                    # show list + delete options
+                    existing_imgs = p.get("images", []) or []
+                    if existing_imgs:
+                        del_sel = st.multiselect(
+                            "Select photos to remove",
+                            options=existing_imgs,
+                            key=f"proto_del_sel_{pid}",
+                        )
+                    else:
+                        del_sel = []
+
+                    csave, cdel = st.columns([1, 1])
+                    with csave:
+                        if st.button("💾 Save changes", key=f"save_{pid}", use_container_width=True):
+                            # find original object in session list and update it
+                            for j in range(len(st.session_state["protocols"])):
+                                if _proto_id(st.session_state["protocols"][j]) == pid:
+                                    # save uploads
+                                    imgs = list(existing_imgs)
+                                    if up:
+                                        for uf in up:
+                                            try:
+                                                fname = _save_uploaded_image(uf, pid)
+                                                imgs.append(fname)
+                                            except Exception as e:
+                                                st.warning(f"Failed saving image: {e}")
+
+                                    # delete selected photos (and files)
+                                    if del_sel:
+                                        imgs2 = []
+                                        for im in imgs:
+                                            if im in del_sel:
+                                                try:
+                                                    fp = os.path.join(ASSETS_DIR, im)
+                                                    if os.path.isfile(fp):
+                                                        os.remove(fp)
+                                                except Exception:
+                                                    pass
+                                            else:
+                                                imgs2.append(im)
+                                        imgs = imgs2
+
+                                    st.session_state["protocols"][j] = {
+                                        "name": (new_name or "Untitled").strip(),
+                                        "type": new_type,
+                                        "sub_type": new_sub,
+                                        "instructions": (new_text or "").strip(),
+                                        "images": imgs,
+                                    }
+                                    _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
+                                    st.success("Saved.")
+                                    st.rerun()
+                            st.warning("Could not find protocol to save (ID mismatch).")
+
+                    with cdel:
+                        if st.button("🗑️ Delete this protocol", key=f"del_proto_{pid}", use_container_width=True):
+                            st.session_state["protocols"] = [
+                                pp for pp in st.session_state["protocols"]
+                                if _proto_id(pp) != pid
+                            ]
+                            _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
+                            st.success("Deleted.")
+                            st.rerun()
+
                 st.markdown(
                     f"<div class='small-note muted'>ID: <span class='mono'>{pid}</span></div>",
                     unsafe_allow_html=True
@@ -10575,12 +11565,9 @@ elif tab_selection == "📋 Protocols":
     # ==========================================================
     # 2) CREATE / MANAGE AFTER (FULL WIDTH + HUGE WRITING AREA)
     # ==========================================================
-    with st.expander("➕ Create / Manage Protocols", expanded=False):
+    with st.expander("➕ Create new protocol", expanded=False):
         st.markdown("<div class='small-note muted'>Create in full width so it’s comfortable to write.</div>", unsafe_allow_html=True)
         st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
-
-        # ✅ FULL WIDTH create form (no narrow columns)
-        st.subheader("➕ Create new protocol")
 
         with st.form("proto_create_form_big", clear_on_submit=True):
             r1c1, r1c2, r1c3 = st.columns([1.8, 1.0, 1.0])
@@ -10591,11 +11578,17 @@ elif tab_selection == "📋 Protocols":
             with r1c3:
                 new_sub = st.selectbox("Sub-type", sub_types, index=0, key="proto_new_subtype_big")
 
-            # ✅ BIG writing space
             new_text = st.text_area(
                 "Instructions",
-                height=520,  # real size (works better than CSS alone)
+                height=520,
                 placeholder="Checklist: one item per line.\n\nInstructions: write steps freely.",
+            )
+
+            new_photos = st.file_uploader(
+                "Optional: add photos now (png/jpg/jpeg/webp)",
+                type=["png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True,
+                key="proto_create_photos",
             )
 
             add = st.form_submit_button("Add protocol", use_container_width=True)
@@ -10603,41 +11596,30 @@ elif tab_selection == "📋 Protocols":
                 if not (new_name and new_text):
                     st.error("Please fill **name** and **instructions**.")
                 else:
-                    st.session_state["protocols"].append({
+                    # create first (so we have a pid for filenames)
+                    proto_obj = {
                         "name": new_name.strip(),
                         "type": new_type,
                         "sub_type": new_sub,
                         "instructions": new_text.strip(),
-                    })
+                        "images": [],
+                    }
+                    pid_new = _proto_id(proto_obj)
+
+                    imgs = []
+                    if new_photos:
+                        for uf in new_photos:
+                            try:
+                                imgs.append(_save_uploaded_image(uf, pid_new))
+                            except Exception as e:
+                                st.warning(f"Failed saving image: {e}")
+
+                    proto_obj["images"] = imgs
+
+                    st.session_state["protocols"].append(proto_obj)
                     _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
                     st.success(f"Added: {new_name}")
                     st.rerun()
-
-        st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
-
-        # ✅ Manage block (bulk delete + reset)
-        st.subheader("🧹 Manage")
-        manage_mode = st.toggle("Enable manage mode", key="proto_manage_mode_big", value=False)
-
-        if manage_mode:
-            names = [p.get("name", "") for p in st.session_state["protocols"]]
-            delete_sel = st.multiselect("Select protocols to delete", options=names, key="proto_delete_sel_big")
-
-            if st.button("🗑️ Delete selected", use_container_width=True, disabled=(len(delete_sel) == 0)):
-                st.session_state["protocols"] = [
-                    p for p in st.session_state["protocols"] if p.get("name", "") not in delete_sel
-                ]
-                _safe_write_json(PROTOCOLS_FILE, st.session_state["protocols"])
-                st.success(f"Deleted {len(delete_sel)} protocol(s).")
-                st.rerun()
-
-            st.markdown("<div class='hr-lite'></div>", unsafe_allow_html=True)
-
-        if st.button("🔁 Reset ALL checklist progress (session)", use_container_width=True):
-            st.session_state["protocol_check_state"] = {}
-            st.success("Checklist progress cleared for this session.")
-
-        st.caption("Tip: Keep manage mode OFF for normal use.")
 # ------------------ Maintenance Tab ------------------
 elif tab_selection == "🧰 Maintenance":
     import os, json, glob, time

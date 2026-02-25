@@ -1,0 +1,69 @@
+============================================================
+DRAW REPORT — CLEAN SUMMARY
+============================================================
+Time: 2026-02-24 21:14:02
+CSV: TTTTESTCSVF_1.csv
+Preform Length After Draw: 0.5 cm
+Done Description: TEST ALSO THE POSitioN OF ZONES
+
+
+******************* T&M SECTION ***************************
+Drum: BN1
+Total Saved: 0.278 km
+Total Cut: 0.196 km
+Good Zones: 2 count
+Fiber Length End (log end): 0.474 km
+Good Zone 1 Length: 0.239 km
+Good Zone 2 Length: 0.039 km
+Good Zone 1 Fibre Length Min: 0.098 km
+Good Zone 1 Fibre Length Max: 0.337 km
+Good Zone 2 Fibre Length Min: 0.031 km
+Good Zone 2 Fibre Length Max: 0.07 km
+
+T&M INSTRUCTIONS:
+Step 1: CUT  →  0.137 km
+Step 2: SAVE  →  0.239 km  (Good Zone 1)
+    Fibre Length Min: 0.098 km
+    Fibre Length Max: 0.337 km
+Step 3: CUT  →  0.028 km
+Step 4: SAVE  →  0.039 km  (Good Zone 2)
+    Fibre Length Min: 0.031 km
+    Fibre Length Max: 0.07 km
+Step 5: CUT  →  0.031 km
+
+******************* IDENTITY *******************************
+Project: TAMAM - TIGER
+Draw Name: TTTTESTCSVF_1
+Preform: TTTTESTCSV
+Geometry: TIGER - PM
+Fiber Diameter: 40 µm
+Main Coating: DP-1032
+Main Coat Dia: 80 µm
+Secondary Coating: DS-2015
+Secondary Coat Dia: 110 µm
+
+******************* ZONE DATA ******************************
+Zone 1 | Bare Fibre Diameter | Avg: 401.844
+Zone 1 | Pf Process Position | Min: 40.846
+Zone 1 | Pf Process Position | Max: 100.959
+Zone 1 | Capstan Speed | Avg: 17.212
+Zone 1 | Fibre Length | Min: 0.098
+Zone 1 | Fibre Length | Max: 0.337
+Zone 1 | Furnace DegC Actual | Avg: 2044.333
+Zone 1 | Cane Speed Actual | Avg: 0
+Zone 1 | Tension N | Avg: 51.855
+Zone 1 | Coated Outer Diameter | Avg: 2
+Zone 1 | Coated Inner Diameter | Avg: 485.641
+Zone 2 | Bare Fibre Diameter | Avg: 287.303
+Zone 2 | Pf Process Position | Min: 26.118
+Zone 2 | Pf Process Position | Max: 34.718
+Zone 2 | Capstan Speed | Avg: 5.002
+Zone 2 | Fibre Length | Min: 0.031
+Zone 2 | Fibre Length | Max: 0.07
+Zone 2 | Furnace DegC Actual | Avg: 2050.012
+Zone 2 | Cane Speed Actual | Avg: 0
+Zone 2 | Tension N | Avg: -12.319
+Zone 2 | Coated Outer Diameter | Avg: 2
+Zone 2 | Coated Inner Diameter | Avg: 411.684
+
+============================================================

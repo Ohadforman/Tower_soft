@@ -1,0 +1,99 @@
+============================================================
+DRAW REPORT — CLEAN SUMMARY
+============================================================
+Time: 2026-02-25 11:16:33
+CSV: TtestNEWCSVF_1.csv
+Preform Length After Draw: 0 cm
+Done Description: DDD
+
+
+******************* T&M SECTION ***************************
+Drum: BN1
+Total Saved: 0.179 km
+Total Cut: 0.294 km
+Good Zones: 3 count
+Fiber Length End (log end): 0.474 km
+Good Zone 1 Length: 0.109 km
+Good Zone 2 Length: 0.038 km
+Good Zone 3 Length: 0.033 km
+Good Zone 1 Fibre Length Min: 0.22 km
+Good Zone 1 Fibre Length Max: 0.328 km
+Good Zone 2 Fibre Length Min: 0.094 km
+Good Zone 2 Fibre Length Max: 0.132 km
+Good Zone 3 Fibre Length Min: 0.002 km
+Good Zone 3 Fibre Length Max: 0.034 km
+
+T&M INSTRUCTIONS:
+Step 1: CUT  →  0.145 km
+Step 2: SAVE  →  0.109 km  (Good Zone 1)
+    Fibre Length Min: 0.22 km
+    Fibre Length Max: 0.328 km
+Step 3: CUT  →  0.088 km
+Step 4: SAVE  →  0.038 km  (Good Zone 2)
+    Fibre Length Min: 0.094 km
+    Fibre Length Max: 0.132 km
+Step 5: CUT  →  0.059 km
+Step 6: SAVE  →  0.033 km  (Good Zone 3)
+    Fibre Length Min: 0.002 km
+    Fibre Length Max: 0.034 km
+Step 7: CUT  →  0.002 km
+
+******************* IDENTITY *******************************
+Project: TAMAM - TIGER
+Draw Name: TtestNEWCSVF_1
+Preform: TtestNEWCSV
+Geometry: TIGER - PM
+Fiber Diameter: 40 µm
+Main Coating: DP-1032
+Main Coat Dia: 80 µm
+Secondary Coating: DS-2015
+Secondary Coat Dia: 110 µm
+
+******************* ZONE DATA ******************************
+Zone 1 | Bare Fibre Diameter | Avg: 401.368
+Zone 1 | Pf Process Position | Min: 73.507
+Zone 1 | Pf Process Position | Max: 99.13
+Zone 1 | Capstan Speed | Avg: 18.639
+Zone 1 | Fibre Length | Min: 0.22
+Zone 1 | Fibre Length | Max: 0.328
+Zone 1 | Furnace DegC Actual | Avg: 2040.021
+Zone 1 | Cane Speed Actual | Avg: 0
+Zone 1 | Tension N | Avg: 59.926
+Zone 1 | Coated Outer Diameter | Avg: 2
+Zone 1 | UV 1 Intensity | Avg: 0
+Zone 1 | UV 2 Intensity | Avg: 0
+Zone 1 | UV1 Status | Avg: 4
+Zone 1 | UV2 Status | Avg: 4
+Zone 1 | Coated Inner Diameter | Avg: 485.183
+Zone 2 | Bare Fibre Diameter | Avg: 404.504
+Zone 2 | Pf Process Position | Min: 39.932
+Zone 2 | Pf Process Position | Max: 54.115
+Zone 2 | Capstan Speed | Avg: 9.6
+Zone 2 | Fibre Length | Min: 0.094
+Zone 2 | Fibre Length | Max: 0.132
+Zone 2 | Furnace DegC Actual | Avg: 2050.011
+Zone 2 | Cane Speed Actual | Avg: 0
+Zone 2 | Tension N | Avg: 27.85
+Zone 2 | Coated Outer Diameter | Avg: 2
+Zone 2 | UV 1 Intensity | Avg: 0
+Zone 2 | UV 2 Intensity | Avg: 0
+Zone 2 | UV1 Status | Avg: 4
+Zone 2 | UV2 Status | Avg: 4
+Zone 2 | Coated Inner Diameter | Avg: 486.776
+Zone 3 | Bare Fibre Diameter | Avg: 247.376
+Zone 3 | Pf Process Position | Min: 21.07
+Zone 3 | Pf Process Position | Max: 26.943
+Zone 3 | Capstan Speed | Avg: 5.002
+Zone 3 | Fibre Length | Min: 0.002
+Zone 3 | Fibre Length | Max: 0.034
+Zone 3 | Furnace DegC Actual | Avg: 2049.963
+Zone 3 | Cane Speed Actual | Avg: 0
+Zone 3 | Tension N | Avg: -14.046
+Zone 3 | Coated Outer Diameter | Avg: 2
+Zone 3 | UV 1 Intensity | Avg: 0
+Zone 3 | UV 2 Intensity | Avg: 0
+Zone 3 | UV1 Status | Avg: 2.076
+Zone 3 | UV2 Status | Avg: 4
+Zone 3 | Coated Inner Diameter | Avg: 242.532
+
+============================================================

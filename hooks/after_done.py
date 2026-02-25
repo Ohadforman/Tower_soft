@@ -2,6 +2,9 @@ import os
 import platform
 import subprocess
 from datetime import datetime
+import re
+
+import pandas as pd
 
 
 def run_after_done_hook(
@@ -11,95 +14,225 @@ def run_after_done_hook(
     hook_dir: str = "hooks",
     timeout_sec: int = 120,
 ):
-    """
-    Runs an OS-specific 'after done' hook:
-      - mac/linux: hooks/after_done.sh
-      - windows:   hooks/after_done.bat
 
-    Always writes a text log:
-      hooks/after_done_last_run.txt
-
-    Returns (ok: bool, msg: str).
-    """
     os.makedirs(hook_dir, exist_ok=True)
 
-    # ---- log file (always)
     log_path = os.path.join(hook_dir, "after_done_last_run.txt")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # ---- sanitize description for passing to scripts (avoid quotes/newlines issues)
-    safe_desc = (done_desc or "").replace("\r", " ").replace("\n", " ").strip()
-    safe_desc = safe_desc[:500]  # keep it short for cmdline safety
+    dataset_dir = os.path.join(os.getcwd(), "data_set_csv")
+    csv_path = os.path.join(dataset_dir, target_csv)
 
-    # ---- prepare args
-    args = [
-        str(target_csv),
-        f"{float(preform_len_after_cm):.1f}",
-        safe_desc,
+    # ---------------------------------------------------------
+    # SMART ROUNDING (3 decimals)
+    # ---------------------------------------------------------
+    def fmt(value, units=""):
+        try:
+            num = float(value)
+            if num.is_integer():
+                return f"{int(num)} {units}".strip()
+            return f"{round(num, 3)} {units}".strip()
+        except Exception:
+            return f"{value} {units}".strip()
+
+    # ---------------------------------------------------------
+    # Logging helper
+    # ---------------------------------------------------------
+    def log(msg):
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except Exception:
+            pass
+
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("=== AFTER DONE PRINT ===\n")
+        f.write(f"{now_str}\n\n")
+
+    if not os.path.exists(csv_path):
+        return False, f"CSV not found: {csv_path}"
+
+    df = pd.read_csv(csv_path, keep_default_na=False)
+
+    if "Parameter Name" not in df.columns:
+        return False, "Invalid CSV format"
+
+    def get(name):
+        m = df["Parameter Name"] == name
+        if not m.any():
+            return ""
+        val = df.loc[m, "Value"].iloc[-1]
+        units = df.loc[m, "Units"].iloc[-1]
+        return fmt(val, units)
+
+    # ---------------------------------------------------------
+    # IDENTITY SECTION
+    # ---------------------------------------------------------
+    identity = [
+        ("Project", get("Order__Fiber Project")),
+        ("Draw Name", get("Order__Draw Name")),
+        ("Preform", get("Order__Preform Number")),
+        ("Geometry", get("Order__Fiber Geometry Type")),
+        ("Fiber Diameter", get("Order__Fiber Diameter (µm)")),
+        ("Main Coating", get("Order__Main Coating")),
+        ("Main Coat Dia", get("Order__Main Coating Diameter (µm)")),
+        ("Secondary Coating", get("Order__Secondary Coating")),
+        ("Secondary Coat Dia", get("Order__Secondary Coating Diameter (µm)")),
     ]
 
-    # ---- decide OS + script path
-    is_windows = (os.name == "nt") or (platform.system().lower().startswith("win"))
-    if is_windows:
-        script_path = os.path.join(hook_dir, "after_done.bat")
-        cmd = [script_path] + args
-    else:
-        script_path = os.path.join(hook_dir, "after_done.sh")
-        cmd = ["bash", script_path] + args
+    # ---------------------------------------------------------
+    # T&M SECTION
+    # ---------------------------------------------------------
+    drum = get("Drum | Selected") or get("Process__Selected Drum")
 
-    # ---- write a header to log
-    with open(log_path, "w", encoding="utf-8") as f:
-        f.write("=== AFTER DONE HOOK RUN ===\n")
+    tm_section = [
+        ("Drum", drum),
+        ("Total Saved", get("Total Saved Length")),
+        ("Total Cut", get("Total Cut Length")),
+        ("Good Zones", get("Good Zones Count")),
+        ("Fiber Length End (log end)", get("Fiber Length End (log end)")),
+    ]
+
+    # Good Zone Length
+    gz_lengths = df[df["Parameter Name"].str.match(r"^Good Zone \d+ Length$", na=False)]
+    for _, r in gz_lengths.iterrows():
+        tm_section.append((r["Parameter Name"], fmt(r["Value"], r["Units"])))
+
+    # Good Zone Fibre Min/Max
+    gz_minmax = df[df["Parameter Name"].str.contains(r"Good Zone .*Fibre Length (Min|Max)", regex=True, na=False)]
+    for _, r in gz_minmax.iterrows():
+        tm_section.append((r["Parameter Name"], fmt(r["Value"], r["Units"])))
+
+    # ---------------------------------------------------------
+    # T&M STEP INSTRUCTIONS
+    # ---------------------------------------------------------
+    steps = []
+    step_rows = df[df["Parameter Name"].str.startswith("T&M Step", na=False)]
+
+    step_dict = {}
+    for _, r in step_rows.iterrows():
+        name = r["Parameter Name"]
+        val = r["Value"]
+        units = r["Units"]
+
+        m = re.match(r"T&M Step (\d+) (.*)", name)
+        if not m:
+            continue
+
+        step_num = int(m.group(1))
+        label = m.group(2)
+
+        if step_num not in step_dict:
+            step_dict[step_num] = {}
+
+        step_dict[step_num][label] = fmt(val, units)
+
+    for s in sorted(step_dict.keys()):
+        data = step_dict[s]
+        line = f"Step {s}: {data.get('Action','')}"
+        if "Length" in data:
+            line += f"  →  {data['Length']}"
+        if "Zone" in data:
+            line += f"  ({data['Zone']})"
+        steps.append(line)
+
+        for key in data:
+            if "Fibre Length Min" in key or "Fibre Length Max" in key:
+                steps.append(f"    {key}: {data[key]}")
+
+    # ---------------------------------------------------------
+    # ZONE DATA FILTERING
+    # ---------------------------------------------------------
+    REMOVE = [
+        "Good Fibre State",
+        "Diameter Error",
+        "Furnace Power",
+        "Furnace MFC",
+        "Preform Speed Actual",
+        "Trend Marker",
+        "Furnace DegC Set",
+        "Intensity",
+        "Poly",
+        "Diameter Deviation",
+    ]
+
+    def remove_line(name):
+        return any(r in name for r in REMOVE)
+
+    zone_lines = []
+
+    for _, row in df.iterrows():
+        name = row["Parameter Name"]
+        if not name.startswith("Zone "):
+            continue
+        if remove_line(name):
+            continue
+
+        val = row["Value"]
+        units = row["Units"]
+
+        # Pf Process Position → Min/Max only
+        if "Pf Process Position" in name:
+            if "| Min" in name or "| Max" in name:
+                zone_lines.append((name, fmt(val, units)))
+            continue
+
+        # Fibre Length → Min/Max only
+        if "Fibre Length" in name:
+            if "| Min" in name or "| Max" in name:
+                zone_lines.append((name, fmt(val, units)))
+            continue
+
+        # Others → Avg only
+        if "| Avg" in name:
+            zone_lines.append((name, fmt(val, units)))
+
+    # ---------------------------------------------------------
+    # WRITE FILE
+    # ---------------------------------------------------------
+    safe_name = target_csv.replace(".csv", "")
+    out_file = os.path.join(hook_dir, f"{safe_name}_PRINT.txt")
+
+    with open(out_file, "w", encoding="utf-8") as f:
+
+        f.write("============================================================\n")
+        f.write("DRAW REPORT — CLEAN SUMMARY\n")
+        f.write("============================================================\n")
         f.write(f"Time: {now_str}\n")
-        f.write(f"OS: {platform.system()} ({os.name})\n")
-        f.write(f"Script: {os.path.abspath(script_path)}\n")
-        f.write(f"Args: {args}\n")
+        f.write(f"CSV: {target_csv}\n")
+        f.write(f"Preform Length After Draw: {fmt(preform_len_after_cm, 'cm')}\n")
+        if done_desc:
+            f.write(f"Done Description: {done_desc}\n")
         f.write("\n")
 
-    if not os.path.exists(script_path):
-        msg = (
-            f"Hook script not found: {script_path}\n"
-            f"Create it to enable after-done actions.\n"
-            f"Log: {log_path}"
-        )
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
-        return False, msg
+        f.write("******************* T&M SECTION ***************************\n")
+        for k, v in tm_section:
+            if v:
+                f.write(f"{k}: {v}\n")
+        f.write("\n")
 
-    # ---- run
-    try:
-        p = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            check=False,
-        )
+        if steps:
+            f.write("T&M INSTRUCTIONS:\n")
+            for s in steps:
+                f.write(f"{s}\n")
+            f.write("\n")
 
-        stdout = (p.stdout or "").strip()
-        stderr = (p.stderr or "").strip()
+        f.write("******************* IDENTITY *******************************\n")
+        for k, v in identity:
+            if v:
+                f.write(f"{k}: {v}\n")
+        f.write("\n")
 
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"Exit code: {p.returncode}\n\n")
-            if stdout:
-                f.write("---- STDOUT ----\n")
-                f.write(stdout + "\n\n")
-            if stderr:
-                f.write("---- STDERR ----\n")
-                f.write(stderr + "\n\n")
+        f.write("******************* ZONE DATA ******************************\n")
+        for k, v in zone_lines:
+            f.write(f"{k}: {v}\n")
 
-        if p.returncode == 0:
-            return True, f"After-done hook OK. Log written to: {log_path}"
-        return False, f"After-done hook FAILED (exit {p.returncode}). Log: {log_path}"
+        f.write("\n============================================================\n")
 
-    except subprocess.TimeoutExpired:
-        msg = f"After-done hook timed out after {timeout_sec}s. Log: {log_path}"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
-        return False, msg
+    log(f"Wrote file: {out_file}")
 
-    except Exception as e:
-        msg = f"Failed running after-done hook: {e}. Log: {log_path}"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
-        return False, msg
+    if platform.system().lower().startswith("darwin"):
+        subprocess.run(["lp", out_file], timeout=timeout_sec, check=False)
+        log("Sent to printer.")
+
+    return True, f"Printed clean summary: {out_file}"

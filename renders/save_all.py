@@ -28,10 +28,10 @@ def render_save_all_block(
     """
     Save Everything (one click) → appends rows to an existing dataset CSV.
 
-    IMPORTANT:
-    - IRIS: uses iris_data dict (from render_iris_selection_section_collect()).
-    - COATING: reads CANONICAL values from st.session_state (NOT coating_data keys),
-      so it saves what the UI currently shows (including Ideal/Optimal fields).
+    FIX (this version):
+    - All appended rows are clearly marked as Process setup:  Process__<name>
+    - Adds a section header before the process block
+    - Adds a buffer + NEXT SECTION marker after Selected Drum
     """
     st.subheader("💾 Save Everything (one click)")
 
@@ -55,17 +55,29 @@ def render_save_all_block(
             return ""
 
     def _val(x) -> str:
-        # keep "" if empty; convert None -> ""
         return "" if x is None else str(x)
 
+    def _section(title: str) -> Dict[str, Any]:
+        return {"Parameter Name": f"=== {title} ===", "Value": "", "Units": ""}
+
+    def _blank() -> Dict[str, Any]:
+        return {"Parameter Name": "", "Value": "", "Units": ""}
+
+    def _proc(name: str) -> str:
+        name = safe_str(name).strip()
+        return f"Process__{name}" if name else ""
+
     # -----------------------------
-    # Build rows
+    # Build rows (PROCESS BLOCK)
     # -----------------------------
-    rows: List[Dict[str, Any]] = [{
-        "Parameter Name": "Process Setup Timestamp",
-        "Value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Units": ""
-    }]
+    rows: List[Dict[str, Any]] = [
+        _section("PROCESS SETUP"),
+        {
+            "Parameter Name": _proc("Process Setup Timestamp"),
+            "Value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Units": ""
+        }
+    ]
 
     save_to_latest_clicked = st.button("⚡ Save ALL to MOST RECENT CSV", key="ps_saveall_to_latest")
 
@@ -91,24 +103,24 @@ def render_save_all_block(
         circ_d = iris_data.get("Circular Diameter (mm)")
 
         rows += [
-            {"Parameter Name": "Preform Diameter", "Value": _val(circ_d), "Units": "mm"},
-            {"Parameter Name": "Preform Shape", "Value": shape_lbl, "Units": ""},
+            {"Parameter Name": _proc("Preform Diameter"), "Value": _val(circ_d), "Units": "mm"},
+            {"Parameter Name": _proc("Preform Shape"), "Value": shape_lbl, "Units": ""},
 
-            {"Parameter Name": "Octagonal Preform", "Value": 1 if is_oct else 0, "Units": "bool"},
-            {"Parameter Name": "Octagonal F2F", "Value": _val(oct_f2f), "Units": "mm"},
+            {"Parameter Name": _proc("Octagonal Preform"), "Value": 1 if is_oct else 0, "Units": "bool"},
+            {"Parameter Name": _proc("Octagonal F2F"), "Value": _val(oct_f2f), "Units": "mm"},
 
-            {"Parameter Name": "Tiger Preform", "Value": 1 if tiger_flag else 0, "Units": "bool"},
-            {"Parameter Name": "Tiger Cut", "Value": _val(tiger_pct), "Units": "%"},
+            {"Parameter Name": _proc("Tiger Preform"), "Value": 1 if tiger_flag else 0, "Units": "bool"},
+            {"Parameter Name": _proc("Tiger Cut"), "Value": _val(tiger_pct), "Units": "%"},
 
-            {"Parameter Name": "PM Iris System", "Value": 1 if pm_sys else 0, "Units": "bool"},
-            {"Parameter Name": "Iris Mode", "Value": iris_mode, "Units": ""},
+            {"Parameter Name": _proc("PM Iris System"), "Value": 1 if pm_sys else 0, "Units": "bool"},
+            {"Parameter Name": _proc("Iris Mode"), "Value": iris_mode, "Units": ""},
 
-            {"Parameter Name": "Base Area", "Value": _val(base_area), "Units": "mm^2"},
-            {"Parameter Name": "Adjusted Area", "Value": _val(adj_area), "Units": "mm^2"},
-            {"Parameter Name": "Effective Preform Diameter", "Value": _val(eff_d), "Units": "mm"},
+            {"Parameter Name": _proc("Base Area"), "Value": _val(base_area), "Units": "mm^2"},
+            {"Parameter Name": _proc("Adjusted Area"), "Value": _val(adj_area), "Units": "mm^2"},
+            {"Parameter Name": _proc("Effective Preform Diameter"), "Value": _val(eff_d), "Units": "mm"},
 
-            {"Parameter Name": "Selected Iris Diameter", "Value": _val(sel_iris), "Units": "mm"},
-            {"Parameter Name": "Iris Gap Area", "Value": _val(gap_area), "Units": "mm^2"},
+            {"Parameter Name": _proc("Selected Iris Diameter"), "Value": _val(sel_iris), "Units": "mm"},
+            {"Parameter Name": _proc("Iris Gap Area"), "Value": _val(gap_area), "Units": "mm^2"},
         ]
 
     # =========================
@@ -169,54 +181,54 @@ def render_save_all_block(
 
     if has_any_coating:
         rows += [
-            {"Parameter Name": "Entry Fiber Diameter", "Value": _val(entry_um), "Units": "µm"},
-            {"Parameter Name": "Target First Coating Diameter", "Value": _val(tgt1_um), "Units": "µm"},
-            {"Parameter Name": "Target Second Coating Diameter", "Value": _val(tgt2_um), "Units": "µm"},
+            {"Parameter Name": _proc("Entry Fiber Diameter"), "Value": _val(entry_um), "Units": "µm"},
+            {"Parameter Name": _proc("Target First Coating Diameter"), "Value": _val(tgt1_um), "Units": "µm"},
+            {"Parameter Name": _proc("Target Second Coating Diameter"), "Value": _val(tgt2_um), "Units": "µm"},
 
-            {"Parameter Name": "First Coating Diameter (Theoretical)", "Value": _val(pred_fc_um), "Units": "µm"},
-            {"Parameter Name": "Second Coating Diameter (Theoretical)", "Value": _val(pred_sc_um), "Units": "µm"},
+            {"Parameter Name": _proc("First Coating Diameter (Theoretical)"), "Value": _val(pred_fc_um), "Units": "µm"},
+            {"Parameter Name": _proc("Second Coating Diameter (Theoretical)"), "Value": _val(pred_sc_um), "Units": "µm"},
 
-            {"Parameter Name": "Primary Coating", "Value": coat1, "Units": ""},
-            {"Parameter Name": "Secondary Coating", "Value": coat2, "Units": ""},
+            {"Parameter Name": _proc("Primary Coating"), "Value": coat1, "Units": ""},
+            {"Parameter Name": _proc("Secondary Coating"), "Value": coat2, "Units": ""},
 
-            {"Parameter Name": "Primary Coating Temperature", "Value": _val(t1_c), "Units": "°C"},
-            {"Parameter Name": "Secondary Coating Temperature", "Value": _val(t2_c), "Units": "°C"},
+            {"Parameter Name": _proc("Primary Coating Temperature"), "Value": _val(t1_c), "Units": "°C"},
+            {"Parameter Name": _proc("Secondary Coating Temperature"), "Value": _val(t2_c), "Units": "°C"},
 
-            {"Parameter Name": "Primary Die Diameter", "Value": _val(p_die_um), "Units": "µm"},
-            {"Parameter Name": "Secondary Die Diameter", "Value": _val(s_die_um), "Units": "µm"},
+            {"Parameter Name": _proc("Primary Die Diameter"), "Value": _val(p_die_um), "Units": "µm"},
+            {"Parameter Name": _proc("Secondary Die Diameter"), "Value": _val(s_die_um), "Units": "µm"},
 
-            {"Parameter Name": "Primary Die Name", "Value": p_die_name, "Units": ""},
-            {"Parameter Name": "Secondary Die Name", "Value": s_die_name, "Units": ""},
+            {"Parameter Name": _proc("Primary Die Name"), "Value": p_die_name, "Units": ""},
+            {"Parameter Name": _proc("Secondary Die Name"), "Value": s_die_name, "Units": ""},
 
-            {"Parameter Name": "Coating Die Selection Mode", "Value": die_mode, "Units": ""},
+            {"Parameter Name": _proc("Coating Die Selection Mode"), "Value": die_mode, "Units": ""},
         ]
 
         if str(draw_speed_m_min).strip():
-            rows.append({"Parameter Name": "Draw Speed", "Value": _val(draw_speed_m_min), "Units": "m/min"})
+            rows.append({"Parameter Name": _proc("Draw Speed"), "Value": _val(draw_speed_m_min), "Units": "m/min"})
 
         # ideal/continuous (optional)
         if str(ideal_p).strip():
-            rows.append({"Parameter Name": "Ideal Primary Die (µm)", "Value": _val(ideal_p), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Ideal Primary Die (µm)"), "Value": _val(ideal_p), "Units": "µm"})
         if str(ideal_s).strip():
-            rows.append({"Parameter Name": "Ideal Secondary Die (µm)", "Value": _val(ideal_s), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Ideal Secondary Die (µm)"), "Value": _val(ideal_s), "Units": "µm"})
         if str(ideal_fc).strip():
-            rows.append({"Parameter Name": "Pred @ Ideal FC (µm)", "Value": _val(ideal_fc), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Pred @ Ideal FC (µm)"), "Value": _val(ideal_fc), "Units": "µm"})
         if str(ideal_sc).strip():
-            rows.append({"Parameter Name": "Pred @ Ideal SC (µm)", "Value": _val(ideal_sc), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Pred @ Ideal SC (µm)"), "Value": _val(ideal_sc), "Units": "µm"})
         if str(d_fc).strip():
-            rows.append({"Parameter Name": "Δ Ideal FC vs Target", "Value": _val(d_fc), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Δ Ideal FC vs Target"), "Value": _val(d_fc), "Units": "µm"})
         if str(d_sc).strip():
-            rows.append({"Parameter Name": "Δ Ideal SC vs Target", "Value": _val(d_sc), "Units": "µm"})
+            rows.append({"Parameter Name": _proc("Δ Ideal SC vs Target"), "Value": _val(d_sc), "Units": "µm"})
 
     # =========================
     # PID rows
     # =========================
     if pid_data:
         rows += [
-            {"Parameter Name": "P Gain (Diameter Control)", "Value": _val(pid_data.get("p_gain")), "Units": ""},
-            {"Parameter Name": "I Gain (Diameter Control)", "Value": _val(pid_data.get("i_gain")), "Units": ""},
-            {"Parameter Name": "TF Mode", "Value": _val(pid_data.get("winder_mode")), "Units": ""},
-            {"Parameter Name": "Increment TF Value", "Value": _val(pid_data.get("increment_value")), "Units": "mm"},
+            {"Parameter Name": _proc("P Gain (Diameter Control)"), "Value": _val(pid_data.get("p_gain")), "Units": ""},
+            {"Parameter Name": _proc("I Gain (Diameter Control)"), "Value": _val(pid_data.get("i_gain")), "Units": ""},
+            {"Parameter Name": _proc("TF Mode"), "Value": _val(pid_data.get("winder_mode")), "Units": ""},
+            {"Parameter Name": _proc("Increment TF Value"), "Value": _val(pid_data.get("increment_value")), "Units": "mm"},
         ]
 
     # =========================
@@ -224,10 +236,16 @@ def render_save_all_block(
     # =========================
     if drum_data:
         rows += [
-            {"Parameter Name": "Selected Drum", "Value": _val(drum_data.get("Selected Drum")), "Units": ""}
+            {"Parameter Name": _proc("Selected Drum"), "Value": _val(drum_data.get("Selected Drum")), "Units": ""}
+        ]
+        # ✅ buffer + next section marker after drum
+        rows += [
+            _blank(),
+            _section("LOGS DATA SECTION"),
+            _blank(),
         ]
 
-    # Filter out Value=None only
+    # Filter out Value=None only (keep blanks/sections)
     rows = [r for r in rows if r.get("Value") is not None]
 
     # -----------------------------
@@ -251,17 +269,6 @@ def render_save_all_block(
     # -----------------------------
     # Save actions
     # -----------------------------
-    if save_to_latest_clicked:
-        if not latest:
-            st.error("No CSV files found in data_set_csv/")
-        else:
-            latest_path = dataset_csv_path(latest)
-            ok, msg = append_rows_to_dataset_csv(latest_path, rows)
-            if ok:
-                st.success(f"Saved ALL to most recent: {latest}")
-            else:
-                st.error(msg)
-
     if st.button("💾 Save ALL to SELECTED CSV", key="ps_saveall_to_selected"):
         if not selected_csv:
             st.error("Pick a CSV first.")
@@ -270,5 +277,16 @@ def render_save_all_block(
             ok, msg = append_rows_to_dataset_csv(target_path, rows)
             if ok:
                 st.success(f"Saved ALL to: {selected_csv}")
+            else:
+                st.error(msg)
+
+    if save_to_latest_clicked:
+        if not latest:
+            st.error("No CSV files found in data_set_csv/")
+        else:
+            latest_path = dataset_csv_path(latest)
+            ok, msg = append_rows_to_dataset_csv(latest_path, rows)
+            if ok:
+                st.success(f"Saved ALL to most recent: {latest}")
             else:
                 st.error(msg)

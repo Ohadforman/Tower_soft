@@ -3,12 +3,23 @@
         "name": "200/200",
         "type": "Drawings",
         "instructions": "hello",
-        "sub_type": "Instructions"
+        "sub_type": "Instructions",
+        "images": []
     },
     {
         "name": "clean die holders",
         "type": "Maintenance",
         "sub_type": "Checklist",
-        "instructions": "remove from tower\nunscrew 2 set of 4\n15 min aceton \n5 min iso"
+        "instructions": "remove from tower\nunscrew 2 set of 4\n15 min aceton \n5 min iso",
+        "images": []
+    },
+    {
+        "name": "PURGE COATING LINES",
+        "type": "Maintenance",
+        "sub_type": "Checklist",
+        "instructions": "assemble the kit \nmake the pressure 3 bar \nrun until no bubbles seen",
+        "images": [
+            "5c39a7db06_1771998924077_59023b0041.png"
+        ]
     }
 ]

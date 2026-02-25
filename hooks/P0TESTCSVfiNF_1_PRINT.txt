@@ -1,0 +1,85 @@
+============================================================
+DRAW REPORT — CLEAN SUMMARY
+============================================================
+Time: 2026-02-24 20:58:48
+CSV: P0TESTCSVfiNF_1.csv
+Preform Length After Draw: 1.5 cm
+
+******************* T&M SECTION ***************************
+Drum: BN1
+Total Saved: 0.1728435922414073 km
+Total Cut: 0.3008988033980127 km
+Good Zones: 3 count
+Fiber Length End (log end): 0.47374239563942 km
+Good Zone 1 Length: 0.12084239721298301 km
+Good Zone 2 Length: 0.025743596255779294 km
+Good Zone 3 Length: 0.026257598772644997 km
+Good Zone 1 Fibre Length Min: 0.190450400114059 km
+Good Zone 1 Fibre Length Max: 0.311292797327042 km
+Good Zone 2 Fibre Length Min: 0.0724207982420921 km
+Good Zone 2 Fibre Length Max: 0.0981643944978714 km
+Good Zone 3 Fibre Length Min: 0.0240688007324934 km
+Good Zone 3 Fibre Length Max: 0.0503263995051384 km
+
+T&M INSTRUCTIONS:
+Step 1: CUT  →  0.16244959831237799 km
+Step 2: SAVE  →  0.12084239721298301 km  (Good Zone 1)
+    Fibre Length Min: 0.190450400114059 km
+    Fibre Length Max: 0.311292797327042 km
+Step 3: CUT  →  0.0922860056161876 km
+Step 4: SAVE  →  0.025743596255779294 km  (Good Zone 2)
+    Fibre Length Min: 0.0724207982420921 km
+    Fibre Length Max: 0.0981643944978714 km
+Step 5: CUT  →  0.022094398736953735 km
+Step 6: SAVE  →  0.026257598772644997 km  (Good Zone 3)
+    Fibre Length Min: 0.0240688007324934 km
+    Fibre Length Max: 0.0503263995051384 km
+Step 7: CUT  →  0.0240688007324934 km
+
+******************* IDENTITY *******************************
+Project: LARA - ELOP
+Draw Name: P0TESTCSVfiNF_1
+Preform: P0TESTCSVfiN
+Geometry: Octagonal
+Fiber Diameter: 400.0 µm
+Main Coating: Coating_OF_136
+Main Coat Dia: 560.0 µm
+Secondary Coating: DP-1032
+Secondary Coat Dia: 650.0 µm
+
+******************* ZONE DATA ******************************
+Zone 1 | Bare Fibre Diameter | Avg: 400.22333467923676 
+Zone 1 | Pf Process Position | Min: 66.9281311035156 
+Zone 1 | Pf Process Position | Max: 95.1054992675781 
+Zone 1 | Capstan Speed | Avg: 18.825846647604916 
+Zone 1 | Fibre Length | Min: 0.190450400114059 
+Zone 1 | Fibre Length | Max: 0.311292797327042 
+Zone 1 | Furnace DegC Actual | Avg: 2040.192866398738 
+Zone 1 | Cane Speed Actual | Avg: 0.0 
+Zone 1 | Tension N | Avg: 59.11118722573305 
+Zone 1 | Coated Outer Diameter | Avg: 2.0 
+Zone 1 | Coated Inner Diameter | Avg: 484.83333646334137 
+Zone 2 | Bare Fibre Diameter | Avg: 386.79709699076994 
+Zone 2 | Pf Process Position | Min: 35.2668762207031 
+Zone 2 | Pf Process Position | Max: 40.846435546875 
+Zone 2 | Capstan Speed | Avg: 5.061677440520258 
+Zone 2 | Fibre Length | Min: 0.0724207982420921 
+Zone 2 | Fibre Length | Max: 0.0981643944978714 
+Zone 2 | Furnace DegC Actual | Avg: 2049.9737981980875 
+Zone 2 | Cane Speed Actual | Avg: 0.0 
+Zone 2 | Tension N | Avg: 13.922534358116895 
+Zone 2 | Coated Outer Diameter | Avg: 2.0 
+Zone 2 | Coated Inner Diameter | Avg: 474.53225855673514 
+Zone 3 | Bare Fibre Diameter | Avg: 246.95312571525574 
+Zone 3 | Pf Process Position | Min: 24.6544494628906 
+Zone 3 | Pf Process Position | Max: 30.4176330566406 
+Zone 3 | Capstan Speed | Avg: 5.002500072121624 
+Zone 3 | Fibre Length | Min: 0.0240688007324934 
+Zone 3 | Fibre Length | Max: 0.0503263995051384 
+Zone 3 | Furnace DegC Actual | Avg: 2049.9844131469763 
+Zone 3 | Cane Speed Actual | Avg: 0.0 
+Zone 3 | Tension N | Avg: -14.089522793889042 
+Zone 3 | Coated Outer Diameter | Avg: 2.0 
+Zone 3 | Coated Inner Diameter | Avg: 339.09375047683716 
+
+============================================================

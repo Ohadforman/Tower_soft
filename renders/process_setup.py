@@ -15,7 +15,6 @@ from helpers.constants import STATUS_COL, STATUS_UPDATED_COL, MSG_SCHED, MSG_FAI
 from helpers.process_setup_state import apply_order_row_to_process_setup_state
 
 # These are your existing “collect” UIs (already moved out of dash_try)
-# If your module names differ, adjust these imports only.
 from renders.coating import render_coating_section
 from renders.iris import render_iris_selection_section_collect
 from renders.pid_tf import render_pid_tf_section_collect
@@ -23,6 +22,7 @@ from renders.drum import render_drum_selection_section_collect
 from helpers.coating_config import load_coating_config
 from helpers.coating_config import load_config_coating_json
 from renders.save_all import render_save_all_block
+
 
 # ==========================================================
 # Link helpers
@@ -223,6 +223,18 @@ def render_scheduled_quick_start(
         if notes:
             st.caption(notes)
 
+    # -----------------------------
+    # CSV block helpers (ORDER block)
+    # -----------------------------
+    def _section(title: str):
+        return {"Parameter Name": f"=== {title} ===", "Value": "", "Units": ""}
+
+    def _blank():
+        return {"Parameter Name": "", "Value": "", "Units": ""}
+
+    def _add_order(base_rows: list, name: str, val, unit: str = ""):
+        base_rows.append({"Parameter Name": f"Order__{name}", "Value": val, "Units": unit})
+
     for idx in scheduled.index:
         row = df.loc[idx].to_dict()
         header = (
@@ -240,8 +252,8 @@ def render_scheduled_quick_start(
 
             if preform:
                 next_n = next_draw_index_for_preform(preform, df)
-                draw_name = f"{preform}F_{next_n}"          # ✅ FIX: define draw_name
-                default_csv_name = f"{draw_name}.csv"       # ✅ filename matches draw_name
+                draw_name = f"{preform}F_{next_n}"
+                default_csv_name = f"{draw_name}.csv"
             else:
                 draw_name = "draw"
                 default_csv_name = f"draw_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -264,38 +276,37 @@ def render_scheduled_quick_start(
                     st.stop()
 
                 base_rows = []
+                base_rows.append(_section("ORDER PARAMETERS"))
 
-                def add(name, val, unit=""):
-                    base_rows.append({"Parameter Name": name, "Value": val, "Units": unit})
+                # ✅ Draw Name consistent with filename scheme
+                _add_order(base_rows, "Draw Name", os.path.splitext(os.path.basename(csv_name))[0])
+                _add_order(base_rows, "Draw Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                _add_order(base_rows, "Order Index", int(idx))
+                _add_order(base_rows, "Preform Number", preform)
+                _add_order(base_rows, "Fiber Project", row.get("Fiber Project", ""))
+                _add_order(base_rows, "Priority", row.get("Priority", ""))
+                _add_order(base_rows, "Order Opener", row.get("Order Opener", ""))
 
-                # ✅ Keep Draw Name consistent with filename scheme
-                add("Draw Name", os.path.splitext(os.path.basename(csv_name))[0])
-                add("Draw Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                add("Order Index", int(idx))
-                add("Preform Number", preform)
-                add("Fiber Project", row.get("Fiber Project", ""))
-                add("Priority", row.get("Priority", ""))
-                add("Order Opener", row.get("Order Opener", ""))
+                _add_order(base_rows, "Fiber Geometry Type", row.get("Fiber Geometry Type", ""))
+                _add_order(base_rows, "Tiger Cut (%)", row.get("Tiger Cut (%)", ""), "%")
+                _add_order(base_rows, "Octagonal F2F (mm)", row.get("Octagonal F2F (mm)", ""), "mm")
 
-                add("Fiber Geometry Type", row.get("Fiber Geometry Type", ""))
-                add("Tiger Cut (%)", row.get("Tiger Cut (%)", ""), "%")
-                add("Octagonal F2F (mm)", row.get("Octagonal F2F (mm)", ""), "mm")
+                _add_order(base_rows, "Required Length (m) (for T&M+costumer)", row.get("Required Length (m) (for T&M+costumer)", ""), "m")
+                _add_order(base_rows, "Good Zones Count (required length zones)", row.get("Good Zones Count (required length zones)", ""), "count")
 
-                add("Required Length (m) (for T&M+costumer)", row.get("Required Length (m) (for T&M+costumer)", ""), "m")
-                add("Good Zones Count (required length zones)", row.get("Good Zones Count (required length zones)", ""), "count")
+                _add_order(base_rows, "Fiber Diameter (µm)", row.get("Fiber Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Main Coating Diameter (µm)", row.get("Main Coating Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Secondary Coating Diameter (µm)", row.get("Secondary Coating Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Tension (g)", row.get("Tension (g)", ""), "g")
+                _add_order(base_rows, "Draw Speed (m/min)", row.get("Draw Speed (m/min)", ""), "m/min")
 
-                add("Fiber Diameter (µm)", row.get("Fiber Diameter (µm)", ""), "µm")
-                add("Main Coating Diameter (µm)", row.get("Main Coating Diameter (µm)", ""), "µm")
-                add("Secondary Coating Diameter (µm)", row.get("Secondary Coating Diameter (µm)", ""), "µm")
-                add("Tension (g)", row.get("Tension (g)", ""), "g")
-                add("Draw Speed (m/min)", row.get("Draw Speed (m/min)", ""), "m/min")
+                _add_order(base_rows, "Main Coating", row.get("Main Coating", ""))
+                _add_order(base_rows, "Secondary Coating", row.get("Secondary Coating", ""))
+                _add_order(base_rows, "Main Coating Temperature (°C)", row.get("Main Coating Temperature (°C)", ""), "°C")
+                _add_order(base_rows, "Secondary Coating Temperature (°C)", row.get("Secondary Coating Temperature (°C)", ""), "°C")
+                _add_order(base_rows, "Order Notes", row.get("Notes", ""))
 
-                add("Main Coating", row.get("Main Coating", ""))
-                add("Secondary Coating", row.get("Secondary Coating", ""))
-                add("Main Coating Temperature (°C)", row.get("Main Coating Temperature (°C)", ""), "°C")
-                add("Secondary Coating Temperature (°C)", row.get("Secondary Coating Temperature (°C)", ""), "°C")
-                add("Order Notes", row.get("Notes", ""))
-
+                base_rows.append(_blank())
                 pd.DataFrame(base_rows).to_csv(csv_path, index=False)
 
                 # ✅ Link order → Active CSV + move to In Progress
@@ -339,8 +350,10 @@ def render_create_draw_dataset_csv(key_prefix: str = "ps_create"):
 
         df_new = pd.DataFrame(
             [
-                {"Parameter Name": "Draw Name", "Value": name, "Units": ""},
-                {"Parameter Name": "Draw Date", "Value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Units": ""},
+                {"Parameter Name": "=== ORDER PARAMETERS ===", "Value": "", "Units": ""},
+                {"Parameter Name": "Order__Draw Name", "Value": name, "Units": ""},
+                {"Parameter Name": "Order__Draw Date", "Value": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Units": ""},
+                {"Parameter Name": "", "Value": "", "Units": ""},
             ],
             columns=["Parameter Name", "Value", "Units"],
         )

@@ -1,0 +1,49 @@
+============================================================
+DRAW REPORT — CLEAN SUMMARY
+============================================================
+Time: 2026-02-24 20:51:16
+CSV: TCSVTESTF_1.csv
+Preform Length After Draw: 0.0 cm
+
+******************* T&M SECTION ***************************
+Drum: BN1
+Total Saved: 0.25074520707130427 km
+Total Cut: 0.22299718856811573 km
+Good Zones: 1 count
+Fiber Length End (log end): 0.47374239563942 km
+Good Zone 1 Length: 0.25074520707130427 km
+Good Zone 1 Fibre Length Min: 0.0636627972126007 km
+Good Zone 1 Fibre Length Max: 0.314408004283905 km
+
+T&M INSTRUCTIONS:
+Step 1: CUT  →  0.15933439135551503 km
+Step 2: SAVE  →  0.25074520707130427 km  (Good Zone 1)
+    Fibre Length Min: 0.0636627972126007 km
+    Fibre Length Max: 0.314408004283905 km
+Step 3: CUT  →  0.06366279721260071 km
+
+******************* IDENTITY *******************************
+Project: TAMAM - TIGER
+Draw Name: TCSVTESTF_1
+Preform: TCSVTEST
+Geometry: TIGER - PM
+Fiber Diameter: 40.0 µm
+Main Coating: DP-1032
+Main Coat Dia: 80.0 µm
+Secondary Coating: DS-2015
+Secondary Coat Dia: 110.0 µm
+
+******************* ZONE DATA ******************************
+Zone 1 | Bare Fibre Diameter | Avg: 392.5962982827045 
+Zone 1 | Pf Process Position | Min: 33.3443298339844 
+Zone 1 | Pf Process Position | Max: 95.8374633789063 
+Zone 1 | Capstan Speed | Avg: 12.845617194885904 
+Zone 1 | Fibre Length | Min: 0.0636627972126007 
+Zone 1 | Fibre Length | Max: 0.314408004283905 
+Zone 1 | Furnace DegC Actual | Avg: 2046.5632931973084 
+Zone 1 | Cane Speed Actual | Avg: 0.0 
+Zone 1 | Tension N | Avg: 36.46867280107863 
+Zone 1 | Coated Outer Diameter | Avg: 2.0 
+Zone 1 | Coated Inner Diameter | Avg: 479.6723414644282 
+
+============================================================
