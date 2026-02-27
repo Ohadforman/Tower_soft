@@ -79,7 +79,7 @@ image_base64 = get_base64_image("IMG_1094.JPEG")
 
 st.set_page_config(
     page_title="Tower",
-    #layout="wide",
+    layout="wide",
     initial_sidebar_state="collapsed",  # <-- default collapsed
 )
 @st.cache_data(show_spinner=False)
@@ -5577,6 +5577,25 @@ elif tab_selection == "📊 Dashboard":
     )
 
     # ==========================================================
+    # WIDE (best set ONCE at top of app; safe-guard here)
+    # ==========================================================
+    if "_page_config_set" not in st.session_state:
+        try:
+            st.set_page_config(layout="wide")
+        except Exception:
+            pass
+        st.session_state["_page_config_set"] = True
+
+    st.markdown(
+        """
+        <style>
+          .block-container { max-width: 98rem !important; padding-top: 1.2rem; }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # ==========================================================
     # Constants / paths
     # ==========================================================
     DATASET_DIR = P.dataset_dir
@@ -5622,7 +5641,6 @@ elif tab_selection == "📊 Dashboard":
             pass
         return str(v)
 
-    # ---------- NEW: clean uniform section titles ----------
     def _sec(title: str):
         return {"Parameter Name": f"### {title}", "Value": "", "Units": ""}
 
@@ -5646,15 +5664,16 @@ elif tab_selection == "📊 Dashboard":
                 return c
         return None
 
-    def reorder_zones_by_spool_end(filtered_df, x_axis, zones, length_col):
+    def reorder_zones_by_spool_end(df_plot, x_axis_for_sort, zones, length_col):
         """
         Returns zones reordered so index 1 is closest to spool end.
         Sorting key = smallest km_from_end_start.
+        NOTE: Uses df_plot (the plotted df with same selection/index space as zones).
         """
-        if not zones or filtered_df is None or filtered_df.empty or not length_col:
+        if not zones or df_plot is None or df_plot.empty or not length_col:
             return zones
 
-        dfw = filtered_df.sort_values(by=x_axis).copy()
+        dfw = df_plot.sort_values(by=x_axis_for_sort).copy()
         L_all = pd.to_numeric(dfw[length_col], errors="coerce").dropna()
         if L_all.empty:
             return zones
@@ -5663,7 +5682,7 @@ elif tab_selection == "📊 Dashboard":
         enriched = []
         for orig_i, (zs, ze) in enumerate(zones, start=1):
             try:
-                zdf = dfw[(dfw[x_axis] >= zs) & (dfw[x_axis] <= ze)]
+                zdf = dfw[(dfw[x_axis_for_sort] >= zs) & (dfw[x_axis_for_sort] <= ze)]
             except Exception:
                 zdf = pd.DataFrame()
             if zdf.empty:
@@ -5672,73 +5691,94 @@ elif tab_selection == "📊 Dashboard":
             if Lz.empty:
                 continue
             L_max = float(Lz.max())
-            km0 = max(0.0, L_end - L_max)  # zone near-end edge
+            km0 = max(0.0, L_end - L_max)
             enriched.append((km0, orig_i, (zs, ze)))
 
         if not enriched:
             return zones
 
-        enriched.sort(key=lambda t: t[0])  # closest to end first
+        enriched.sort(key=lambda t: t[0])
         return [t[2] for t in enriched]
 
+    # ==========================================================
+    # ✅ FIXED SAVE: slice by selected ROWS (plot selection), not by datetime parsing
+    # - df_all: full log (all columns, all rows)
+    # - df_plot: plotted df (sorted, has __x_sel__ and __rownum__)
+    # zones are in df_plot selection space (x_axis_slice)
+    # ==========================================================
     def build_zone_save_rows(
         log_file_path,
-        x_axis,
-        y_axes_selected,
-        filtered_df,
+        x_axis_display,   # real column name (e.g. "Date/Time")
+        x_axis_slice,     # "__x_sel__" when datetime, else x_axis_display
+        df_all,           # full log dataframe (with __rownum__)
+        df_plot,          # plotted dataframe (with __rownum__, sorted, with __x_sel__ if dt)
         zones,
-        include_all_numeric_cols=True,
-        always_include_cols=None,
         exclude_cols=None,
     ):
-        always_include_cols = always_include_cols or []
         exclude_cols = set([str(c).strip() for c in (exclude_cols or [])])
 
         rows = []
         now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # ---------- NEW: nicer, uniform header ----------
         rows += [_sec("DASHBOARD ZONES"), _blank()]
-
         rows.append({"Parameter Name": "Zones Saved Timestamp", "Value": now_s, "Units": ""})
         rows.append({"Parameter Name": "Dashboard Log File", "Value": os.path.basename(log_file_path), "Units": ""})
         rows.append({"Parameter Name": "Good Zones Count", "Value": int(len(zones)), "Units": "count"})
-        rows.append({"Parameter Name": "Good Zones X Column", "Value": str(x_axis), "Units": ""})
+        rows.append({"Parameter Name": "Good Zones X Column", "Value": str(x_axis_display), "Units": ""})
 
         if not zones:
+            rows += [_blank()]
             return rows
 
-        start_end_units = "index/label"
-        if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
-            start_end_units = "datetime"
-        elif pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
-            start_end_units = str(x_axis)
+        # summarize ALL columns except x + helper cols
+        cols = []
+        for c in df_all.columns.tolist():
+            if c in exclude_cols:
+                continue
+            if c in ["__rownum__", "__x_sel__"]:
+                continue
+            if c == x_axis_display:
+                continue
+            cols.append(c)
 
-        if include_all_numeric_cols:
-            cols = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
-            cols = [c for c in cols if c != x_axis and c not in exclude_cols]
-        else:
-            cols = [c for c in (y_axes_selected or []) if c not in exclude_cols]
-
-        for c in always_include_cols:
-            if c in filtered_df.columns and c not in cols and c not in exclude_cols:
-                cols.append(c)
+        def _to_num(s: pd.Series) -> pd.Series:
+            return pd.to_numeric(s, errors="coerce")
 
         for i, (start, end) in enumerate(zones, start=1):
-            # ---------- NEW: cleaner zone markers ----------
-            rows.append({"Parameter Name": f"Zone {i} | Start", "Value": _fmt_x(start), "Units": start_end_units})
-            rows.append({"Parameter Name": f"Zone {i} | End", "Value": _fmt_x(end), "Units": start_end_units})
-
+            # slice df_plot by selection axis
             try:
-                zdf = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
+                a = float(start); b = float(end)
+                if b < a:
+                    a, b = b, a
+                zplot = df_plot[(df_plot[x_axis_slice] >= a) & (df_plot[x_axis_slice] <= b)].copy()
+            except Exception:
+                zplot = pd.DataFrame()
+
+            # start/end display values (REAL x values from df_plot)
+            if not zplot.empty:
+                x0 = zplot[x_axis_display].iloc[0]
+                x1 = zplot[x_axis_display].iloc[-1]
+                rows.append({"Parameter Name": f"Zone {i} | Start", "Value": _fmt_x(x0), "Units": str(x_axis_display)})
+                rows.append({"Parameter Name": f"Zone {i} | End", "Value": _fmt_x(x1), "Units": str(x_axis_display)})
+            else:
+                rows.append({"Parameter Name": f"Zone {i} | Start", "Value": str(start), "Units": str(x_axis_display)})
+                rows.append({"Parameter Name": f"Zone {i} | End", "Value": str(end), "Units": str(x_axis_display)})
+                rows.append({"Parameter Name": f"Zone {i} | DEBUG", "Value": "zplot EMPTY (selection window has no points)", "Units": ""})
+                continue
+
+            # ✅ THIS IS THE KEY: slice the FULL LOG using the selected row numbers
+            try:
+                rownums = zplot["__rownum__"].dropna().astype(int).tolist()
+                zdf = df_all[df_all["__rownum__"].isin(rownums)].copy()
             except Exception:
                 zdf = pd.DataFrame()
 
             if zdf.empty:
+                rows.append({"Parameter Name": f"Zone {i} | DEBUG", "Value": "zdf EMPTY (rownum slice failed)", "Units": ""})
                 continue
 
             for col in cols:
-                vals = pd.to_numeric(zdf[col], errors="coerce").dropna()
+                vals = _to_num(zdf[col]).dropna()
                 if vals.empty:
                     continue
                 rows.append({"Parameter Name": f"Zone {i} | {col} | Avg", "Value": float(vals.mean()), "Units": ""})
@@ -5749,12 +5789,7 @@ elif tab_selection == "📊 Dashboard":
         return rows
 
     def build_tm_rows_from_steps_allocate_only(dataset_csv_name: str, steps: list, zones_info: list, length_col_name: str = ""):
-        """
-        SIMPLE STEP allocation across zones (no spool-end geometry here).
-        This is stable and avoids mixing STEP with AUTO.
-        """
         rows = []
-        # ---------- NEW: nicer header, no ugly dashed rows ----------
         rows += [_sec("T&M CUT/SAVE PLAN"), _blank()]
         rows.append({"Parameter Name": "Plan Source (dataset CSV)", "Value": str(os.path.basename(dataset_csv_name)), "Units": ""})
         rows.append({"Parameter Name": "Plan Mode", "Value": "STEP plan from dataset CSV (allocated on good zones)", "Units": ""})
@@ -5815,11 +5850,6 @@ elif tab_selection == "📊 Dashboard":
         return rows
 
     def _extract_selected_drum_from_dataset_df(df_params: pd.DataFrame) -> str:
-        """
-        Try both old and new parameter names.
-        - New Process Setup: Process__Selected Drum
-        - Old: Selected Drum
-        """
         if df_params is None or df_params.empty:
             return ""
         try:
@@ -5849,6 +5879,10 @@ elif tab_selection == "📊 Dashboard":
         st.warning("Log CSV loaded but is empty.")
         st.stop()
 
+    # ✅ add stable row id immediately
+    df = df.copy()
+    df["__rownum__"] = np.arange(len(df), dtype=int)
+
     # ==========================================================
     # Dataset CSV context
     # ==========================================================
@@ -5866,15 +5900,61 @@ elif tab_selection == "📊 Dashboard":
     if "dash_zone_msg" not in st.session_state:
         st.session_state["dash_zone_msg"] = ""
 
+    if "dash_queued_zones" not in st.session_state:
+        st.session_state["dash_queued_zones"] = []
+    if "dash_preview_zone" not in st.session_state:
+        st.session_state["dash_preview_zone"] = None
+    if "dash_last_sel_sig" not in st.session_state:
+        st.session_state["dash_last_sel_sig"] = None
+
     if st.session_state["dash_last_log_file"] != os.path.basename(log_path):
         st.session_state["good_zones"] = []
+        st.session_state["dash_queued_zones"] = []
+        st.session_state["dash_preview_zone"] = None
+        st.session_state["dash_last_sel_sig"] = None
         st.session_state["dash_last_log_file"] = os.path.basename(log_path)
         st.session_state["dash_zone_msg"] = ""
+
+    def _dedup_and_sort(zs):
+        """De-duplicate zones while preserving the order they were added.
+
+        NOTE: We intentionally DO NOT sort here, because sorting makes "Undo last" remove the
+        last-by-x zone instead of the last-added zone.
+        """
+        out = []
+        seen = set()
+        for a, b in zs:
+            try:
+                aa = float(a)
+                bb = float(b)
+            except Exception:
+                # If for some reason it's not numeric, keep as-is but still try to dedup by string
+                key = (str(a), str(b))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append((a, b))
+                continue
+
+            # normalize ordering within a zone
+            if bb < aa:
+                aa, bb = bb, aa
+
+            # robust key (matches your _sig precision)
+            key = (round(aa, 9), round(bb, 9))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((aa, bb))
+        return out
+
+    def _sig(a, b):
+        return (round(float(a), 9), round(float(b), 9))
 
     # ==========================================================
     # Controls
     # ==========================================================
-    column_options = df.columns.tolist()
+    column_options = [c for c in df.columns.tolist() if c != "__rownum__"]
     if not column_options:
         st.warning("No columns found in log CSV.")
         st.stop()
@@ -5893,7 +5973,29 @@ elif tab_selection == "📊 Dashboard":
         st.stop()
 
     # ==========================================================
-    # Stable x typing + filtered df
+    # Nice UI labels (colored chips) for the selected Y signals
+    # ==========================================================
+    st.markdown("#### Selected signals")
+    chips = []
+    for i, y_col in enumerate(y_axes):
+        color = default_colors[i % len(default_colors)] if 'default_colors' in locals() else None
+        # fallback color list if default_colors not defined yet
+        if color is None:
+            _tmp_colors = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
+            ]
+            color = _tmp_colors[i % len(_tmp_colors)]
+        chips.append(
+            f"<span style='display:inline-block; padding:4px 10px; margin:4px 6px 0 0; border-radius:999px; "
+            f"border:1px solid {color}; color:{color}; font-weight:600; font-size:0.95rem;'>" 
+            f"{safe_str(y_col)}" 
+            f"</span>"
+        )
+    st.markdown("""<div style='margin-top:-6px; margin-bottom:10px;'>""" + "".join(chips) + "</div>", unsafe_allow_html=True)
+
+    # ==========================================================
+    # Stable x typing + build df_plot
     # ==========================================================
     df_work = df.copy()
 
@@ -5911,82 +6013,100 @@ elif tab_selection == "📊 Dashboard":
         else:
             df_work[x_axis] = x_raw.astype(str)
 
-    filtered_df = df_work.dropna(subset=[x_axis] + y_axes).sort_values(by=x_axis)
-    if filtered_df.empty:
+    # df_all = full log (keep ALL columns)
+    df_all = df_work.copy()
+
+    # df_plot = only rows that can be plotted (dropna on x+y), but KEEP __rownum__
+    df_plot = df_work.dropna(subset=[x_axis] + y_axes).sort_values(by=x_axis).copy()
+    if df_plot.empty:
         st.warning("No data to plot after filtering NA values for selected X/Y columns.")
         st.stop()
 
     # ==========================================================
-    # Zone Marker UI
+    # ✅ FORCE numeric selection axis for zones (works for ANY X type)
+    # - Plotly selection returns numeric ranges when X is categorical
+    # - We always use __x_sel__ to slice zones reliably
     # ==========================================================
-    st.subheader("🟩 Zone Marker")
-    st.caption("Use the slider to pick a range, then click **Add Selected Zone**.")
+    x_axis_display = x_axis          # real column name to display in UI/hover
+    x_axis_slice   = "__x_sel__"     # numeric axis used for selection/slicing
 
-    base_key = f"dash_zone_slider__{safe_str(x_axis)}"
-    time_range = None
-
-    if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
-        tmin = filtered_df[x_axis].min().to_pydatetime()
-        tmax = filtered_df[x_axis].max().to_pydatetime()
-        time_range = st.slider(
-            "Select Time Range for Good Zone",
-            min_value=tmin,
-            max_value=tmax,
-            value=(tmin, tmax),
-            step=pd.Timedelta(seconds=1).to_pytimedelta(),
-            format="HH:mm:ss",
-            key=f"{base_key}_dt",
-        )
-    elif pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
-        xmin = float(filtered_df[x_axis].min())
-        xmax = float(filtered_df[x_axis].max())
-        step = (xmax - xmin) / 1000.0 if xmax > xmin else 1.0
-        if step <= 0:
-            step = 1.0
-        time_range = st.slider(
-            f"Select Range for Good Zone ({x_axis})",
-            min_value=xmin,
-            max_value=xmax,
-            value=(xmin, xmax),
-            step=step,
-            key=f"{base_key}_num",
-        )
-    else:
-        i0, i1 = st.slider(
-            "Select Index Range for Good Zone",
-            min_value=0,
-            max_value=max(0, len(filtered_df) - 1),
-            value=(0, max(0, len(filtered_df) - 1)),
-            step=1,
-            key=f"{base_key}_idx",
-        )
-        xs = filtered_df[x_axis].iloc[int(i0)]
-        xe = filtered_df[x_axis].iloc[int(i1)]
-        time_range = (xs, xe)
-
-    cA, cB, cC = st.columns([1, 1, 2])
-    with cA:
-        if st.button("➕ Add Selected Zone", key=f"dash_add_zone__{safe_str(x_axis)}", use_container_width=True, disabled=not bool(time_range)):
-            st.session_state["good_zones"].append(time_range)
-            st.session_state["dash_zone_msg"] = f"✅ Zone added ({len(st.session_state['good_zones'])} total)"
-            st.rerun()
-
-    with cB:
-        if st.button("🧹 Clear Zones", key=f"dash_clear_zones__{safe_str(x_axis)}", use_container_width=True, disabled=not bool(st.session_state["good_zones"])):
-            st.session_state["good_zones"] = []
-            st.session_state["dash_zone_msg"] = "🧽 Zones cleared"
-            st.rerun()
-
-    with cC:
-        st.info(f"Zones currently: **{len(st.session_state['good_zones'])}**")
-
-    if st.session_state.get("dash_zone_msg"):
-        st.success(st.session_state["dash_zone_msg"])
+    df_plot = df_plot.copy()
+    df_plot["__x_sel__"] = np.arange(len(df_plot), dtype=float)
+    df_plot["__x_sel__"] = pd.to_numeric(df_plot["__x_sel__"], errors="coerce")
 
     # ==========================================================
-    # Plot
+    # LIVE Zone Marker settings
+    # ==========================================================
+    st.subheader("🟩 Zone Marker (LIVE on-plot selection)")
+    st.caption("Drag a horizontal window on the plot. Turn on Auto-queue to mark many quickly, then 'Add Queued Zones'.")
+
+    opt1, opt2, opt3 = st.columns([1, 1, 2])
+    with opt1:
+        dash_auto_queue = st.checkbox("Auto-queue every selection", value=True, key="dash_auto_queue")
+    with opt2:
+        dash_keep_preview = st.checkbox("Keep preview after queue", value=False, key="dash_keep_preview")
+    with opt3:
+        st.info(
+            f"Saved: **{len(st.session_state['good_zones'])}** | "
+            f"Queued: **{len(st.session_state['dash_queued_zones'])}** | "
+            f"Preview: **{'Yes' if st.session_state['dash_preview_zone'] else 'No'}**"
+        )
+
+    # ==========================================================
+    # Plot interaction mode (Zone marking vs Pan/Zoom)
+    # ==========================================================
+    mcol1, mcol2, mcol3 = st.columns([1.1, 1.1, 3.0])
+    with mcol1:
+        zone_mode = st.toggle(
+            "🟩 Zone Mode",
+            value=True,
+            key="dash_zone_mode_toggle",
+            help="ON = mark zones (box select) | OFF = pan/zoom freely",
+        )
+    with mcol2:
+        pan_or_zoom = st.selectbox(
+            "When Zone Mode OFF",
+            options=["Pan", "Zoom"],
+            index=0,
+            key="dash_pan_zoom_choice",
+        )
+    with mcol3:
+        if zone_mode:
+            st.info("Zone Mode is ON: drag on the plot to mark a zone.")
+        else:
+            st.caption("Zone Mode is OFF: use pan/zoom, then turn Zone Mode back ON to mark again.")
+
+    drag_mode = "select" if zone_mode else ("pan" if pan_or_zoom == "Pan" else "zoom")
+    # When leaving Zone Mode, also clear any active selection box in Plotly (prevents stuck selection)
+    if not zone_mode:
+        st.session_state["dash_last_sel_sig"] = None
+
+    # ==========================================================
+    # Plot (selection uses numeric axis when datetime)
     # ==========================================================
     st.subheader("📈 Plot")
+
+    # Use dtype only for formatting ticks/hover; slicing is ALWAYS via __x_sel__
+    is_dt_x = pd.api.types.is_datetime64_any_dtype(df_plot[x_axis_display])
+
+    # ----------------------------------------------------------
+    # ✅ Keep zoom/pan when toggling Zone Mode (Streamlit reruns)
+    # Plotly will preserve view as long as uirevision stays stable.
+    # Change uirevision only when log/X/Y changes.
+    # ----------------------------------------------------------
+    _uirev_key = f"{os.path.basename(log_path)}|{x_axis_display}|{','.join([str(y) for y in y_axes])}"
+    st.session_state["dash_uirev_key"] = _uirev_key
+
+    # ----------------------------------------------------------
+    # ✅ Persist current zoom/pan ranges across reruns/toggles
+    # We store the last Plotly relayout ranges per "uirevision key".
+    # This is more reliable than uirevision alone when dragmode changes.
+    # ----------------------------------------------------------
+    st.session_state.setdefault("dash_view_state", {})
+    _view_state = st.session_state["dash_view_state"].get(_uirev_key, {})
+    _xrange = _view_state.get("xrange", None)  # [xmin, xmax]
+    _yrange = _view_state.get("yrange", None)  # [ymin, ymax] for left axis
+    _yrange_map = _view_state.get("yrange_map", {})  # axis_name -> [min,max]
 
     fig = go.Figure()
 
@@ -5998,129 +6118,292 @@ elif tab_selection == "📊 Dashboard":
     for i, y_col in enumerate(y_axes):
         axis_ref = "y" if i == 0 else f"y{i + 1}"
         color = default_colors[i % len(default_colors)]
+        y_vals = pd.to_numeric(df_plot[y_col], errors="coerce")
+
+        # Always plot using numeric selection axis; show real X via customdata
+        if is_dt_x:
+            custom = pd.to_datetime(df_plot[x_axis_display], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S").to_numpy()
+            hover_x_label = "Time"
+        else:
+            custom = df_plot[x_axis_display].astype(str).to_numpy()
+            hover_x_label = str(x_axis_display)
 
         fig.add_trace(go.Scatter(
-            x=filtered_df[x_axis],
-            y=pd.to_numeric(filtered_df[y_col], errors="coerce"),
+            x=df_plot[x_axis_slice],
+            y=y_vals,
             mode="lines",
             name=y_col,
             yaxis=axis_ref,
             line=dict(color=color),
+            customdata=custom,
+            hovertemplate=f"{hover_x_label}: %{{customdata}}<br>y: %{{y}}<extra></extra>",
+            # IMPORTANT: stable uid so Plotly can preserve zoom/pan with uirevision across Streamlit reruns
+            uid=f"dash_trace_{i}_{str(y_col)}",
         ))
 
+    # Saved zones (green)
     for (start, end) in st.session_state["good_zones"]:
         fig.add_vrect(x0=start, x1=end, fillcolor="green", opacity=0.25, line_width=0)
 
-    if time_range:
-        fig.add_vrect(
-            x0=time_range[0], x1=time_range[1],
-            fillcolor="blue", opacity=0.15,
-            line_width=1, line_dash="dot"
-        )
+    # Queued zones (orange)
+    for (start, end) in st.session_state["dash_queued_zones"]:
+        fig.add_vrect(x0=start, x1=end, fillcolor="orange", opacity=0.18, line_width=0)
+
+    # Preview (blue)
+    if st.session_state["dash_preview_zone"] is not None:
+        a, b = st.session_state["dash_preview_zone"]
+        fig.add_vrect(x0=a, x1=b, fillcolor="blue", opacity=0.18, line_width=1, line_dash="dot")
 
     layout_updates = {}
+
+    # Alternate axis sides: Left, Right, Left, Right...
+    left_positions = [0.00, 0.03, 0.06, 0.09, 0.12, 0.15]
+    right_positions = [1.00, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.79]
+
+    # Y1 (index 0) -> LEFT
     layout_updates["yaxis"] = dict(
         title=dict(text=""),
         tickfont=dict(color=default_colors[0]),
         showgrid=True,
+        side="left",
+        position=float(left_positions[0]),
     )
 
-    right_positions = [1.00, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.79]
+    # restore last left y-range if available
+    if isinstance(_yrange, (list, tuple)) and len(_yrange) == 2:
+        try:
+            layout_updates["yaxis"]["range"] = [float(_yrange[0]), float(_yrange[1])]
+        except Exception:
+            pass
+
+    left_i = 1
+    right_i = 0
+
+    # Additional axes
     for i in range(1, len(y_axes)):
         axis_key = f"yaxis{i + 1}"
         color = default_colors[i % len(default_colors)]
-        pos_idx = i - 1
-        pos = right_positions[pos_idx] if pos_idx < len(right_positions) else max(0.55, 1.0 - 0.03 * pos_idx)
 
-        layout_updates[axis_key] = dict(
+        # i=1 -> right, i=2 -> left, i=3 -> right ...
+        use_left = (i % 2 == 0)
+        if use_left:
+            pos = left_positions[left_i] if left_i < len(left_positions) else (0.15 + 0.03 * (left_i - len(left_positions) + 1))
+            side = "left"
+            left_i += 1
+        else:
+            pos = right_positions[right_i] if right_i < len(right_positions) else max(0.55, 1.0 - 0.03 * right_i)
+            side = "right"
+            right_i += 1
+
+        axis_cfg = dict(
             title=dict(text=""),
             tickfont=dict(color=color),
             anchor="x",
             overlaying="y",
-            side="right",
+            side=side,
             position=float(pos),
             showgrid=False,
             zeroline=False,
         )
 
-    xaxis_cfg = dict(
-        automargin=True,
-        nticks=8,
-        tickangle=-90,
-        showgrid=False,
-    )
+        # restore per-axis range if available
+        try:
+            r = _yrange_map.get(axis_key) if isinstance(_yrange_map, dict) else None
+            if isinstance(r, (list, tuple)) and len(r) == 2:
+                axis_cfg["range"] = [float(r[0]), float(r[1])]
+        except Exception:
+            pass
 
-    if pd.api.types.is_datetime64_any_dtype(filtered_df[x_axis]):
-        xaxis_cfg.update(dict(
-            tickformat="%d/%m/%Y %H:%M:%S",
-            ticklabelmode="instant",
-        ))
+        layout_updates[axis_key] = axis_cfg
 
-    annotations = []
-    y0 = 1.08
-    dy = 0.08
-    for i, col in enumerate(y_axes):
-        color = default_colors[i % len(default_colors)]
-        annotations.append(dict(
-            x=0.01,
-            y=y0 - i * dy,
-            xref="paper",
-            yref="paper",
-            text=f"<b>{col}</b>",
-            showarrow=False,
-            align="left",
-            font=dict(color=color, size=12),
-            bgcolor="rgba(0,0,0,0.35)",
-            bordercolor="rgba(255,255,255,0.12)",
-            borderwidth=1,
-            borderpad=6,
-        ))
+    xaxis_cfg = dict(automargin=True, nticks=8, tickangle=-90, showgrid=False)
+    # restore last x-range (numeric __x_sel__) if available
+    if isinstance(_xrange, (list, tuple)) and len(_xrange) == 2:
+        try:
+            xaxis_cfg["range"] = [float(_xrange[0]), float(_xrange[1])]
+        except Exception:
+            pass
+
+    tick_count = 10
+    idx = np.linspace(0, len(df_plot) - 1, tick_count).astype(int)
+    tickvals = df_plot["__x_sel__"].iloc[idx].astype(float).tolist()
+
+    if is_dt_x:
+        ticktext = pd.to_datetime(df_plot[x_axis_display], errors="coerce").iloc[idx].dt.strftime("%d/%m/%Y %H:%M:%S").tolist()
+    else:
+        ticktext = df_plot[x_axis_display].astype(str).iloc[idx].tolist()
+
+    xaxis_cfg.update(dict(tickmode="array", tickvals=tickvals, ticktext=ticktext))
 
     fig.update_layout(
         **layout_updates,
         xaxis=xaxis_cfg,
-        annotations=annotations,
-        title=f"{' , '.join([str(y) for y in y_axes])} vs {x_axis}",
-        margin=dict(l=10, r=10, t=85, b=10),
+        title=f"{' , '.join([str(y) for y in y_axes])} vs {x_axis_display}",
+        margin=dict(l=70, r=70, t=85, b=10),
         height=620,
-        legend=dict(visible=False),
+        legend=dict(
+            visible=True,
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0.0,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=12),
+        ),
+        dragmode=drag_mode,
+        selectdirection="h",
+        uirevision=str(st.session_state.get("dash_uirev_key", "dash_keep_view")),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    CHART_KEY = "dash_zone_plot_live"
+    returned = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode=("box",),
+        key=CHART_KEY,
+    )
 
-    # ==========================================================
-    # Zones summary (kept)
-    # ==========================================================
-    if st.session_state["good_zones"]:
-        st.subheader("✅ Good Zones Summary")
-        summary_rows = []
-        combined = {y: [] for y in y_axes}
+    payload = None
+    if isinstance(returned, dict):
+        payload = returned
+    elif isinstance(st.session_state.get(CHART_KEY, None), dict):
+        payload = st.session_state.get(CHART_KEY, None)
 
-        for i, (start, end) in enumerate(st.session_state["good_zones"], start=1):
-            try:
-                zone_data = filtered_df[(filtered_df[x_axis] >= start) & (filtered_df[x_axis] <= end)]
-            except Exception:
-                zone_data = pd.DataFrame()
-            if zone_data.empty:
-                continue
+    # ----------------------------------------------------------
+    # Capture zoom/pan from Plotly relayout events (if present)
+    # Streamlit may provide it as relayoutData / relayout_data
+    # ----------------------------------------------------------
+    try:
+        _relayout = None
+        if isinstance(payload, dict):
+            _relayout = payload.get("relayoutData") or payload.get("relayout_data")
+        if isinstance(_relayout, dict) and _relayout:
+            # x range
+            xr0 = _relayout.get("xaxis.range[0]")
+            xr1 = _relayout.get("xaxis.range[1]")
+            if xr0 is not None and xr1 is not None:
+                st.session_state["dash_view_state"].setdefault(_uirev_key, {})
+                st.session_state["dash_view_state"][_uirev_key]["xrange"] = [float(xr0), float(xr1)]
 
-            for y_col in y_axes:
-                vals = pd.to_numeric(zone_data[y_col], errors="coerce").dropna()
-                if vals.empty:
+            # left y range
+            yr0 = _relayout.get("yaxis.range[0]")
+            yr1 = _relayout.get("yaxis.range[1]")
+            if yr0 is not None and yr1 is not None:
+                st.session_state["dash_view_state"].setdefault(_uirev_key, {})
+                st.session_state["dash_view_state"][_uirev_key]["yrange"] = [float(yr0), float(yr1)]
+
+            # additional y-axes ranges (yaxis2, yaxis3, ...)
+            ym = st.session_state["dash_view_state"].setdefault(_uirev_key, {}).setdefault("yrange_map", {})
+            for k, v in list(_relayout.items()):
+                # keys like yaxis2.range[0], yaxis3.range[1]
+                if not isinstance(k, str):
                     continue
-                summary_rows.append({
-                    "Zone": f"Zone {i}",
-                    "Y": y_col,
-                    "Start": _fmt_x(start),
-                    "End": _fmt_x(end),
-                    "Avg": float(vals.mean()),
-                    "Min": float(vals.min()),
-                    "Max": float(vals.max()),
-                })
-                combined[y_col].extend(vals.values.tolist())
+                if k.startswith("yaxis") and ".range[" in k:
+                    axis_name = k.split(".", 1)[0]  # yaxis2
+                    # collect 0/1
+                    r0 = _relayout.get(f"{axis_name}.range[0]")
+                    r1 = _relayout.get(f"{axis_name}.range[1]")
+                    if r0 is not None and r1 is not None:
+                        try:
+                            ym[axis_name] = [float(r0), float(r1)]
+                        except Exception:
+                            pass
+    except Exception:
+        pass
 
-        if summary_rows:
-            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    sel_rng = None
+    try:
+        sel = (payload or {}).get("selection", {})
+        box = sel.get("box", [])
+        if isinstance(box, list) and box and isinstance(box[0], dict):
+            xr = box[0].get("x", None)
+            if isinstance(xr, (list, tuple)) and len(xr) >= 2:
+                a = float(xr[0]); b = float(xr[1])
+                if b < a:
+                    a, b = b, a
+                sel_rng = (a, b)
+    except Exception:
+        sel_rng = None
+
+    if sel_rng is not None:
+        a, b = sel_rng
+        sig = _sig(a, b)
+        if sig != st.session_state["dash_last_sel_sig"]:
+            st.session_state["dash_last_sel_sig"] = sig
+            st.session_state["dash_preview_zone"] = (a, b)
+
+            if dash_auto_queue:
+                st.session_state["dash_queued_zones"].append((a, b))
+                st.session_state["dash_queued_zones"] = _dedup_and_sort(st.session_state["dash_queued_zones"])
+                st.session_state["dash_zone_msg"] = f"🟧 Queued ({len(st.session_state['dash_queued_zones'])})"
+                if not dash_keep_preview:
+                    st.session_state["dash_preview_zone"] = None
+
+            st.rerun()
+
+    # ==========================================================
+    # Zone actions
+    # ==========================================================
+    st.subheader("🟩 Zone Actions")
+
+    b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 1])
+
+    with b1:
+        if st.button("➕ Add Preview", use_container_width=True, disabled=(st.session_state["dash_preview_zone"] is None)):
+            st.session_state["good_zones"].append(st.session_state["dash_preview_zone"])
+            st.session_state["good_zones"] = _dedup_and_sort(st.session_state["good_zones"])
+            st.session_state["dash_preview_zone"] = None
+            st.session_state["dash_zone_msg"] = f"✅ Added preview (saved: {len(st.session_state['good_zones'])})"
+            st.rerun()
+
+    with b2:
+        if st.button("🟧 Queue Preview", use_container_width=True, disabled=(st.session_state["dash_preview_zone"] is None)):
+            st.session_state["dash_queued_zones"].append(st.session_state["dash_preview_zone"])
+            st.session_state["dash_queued_zones"] = _dedup_and_sort(st.session_state["dash_queued_zones"])
+            if not dash_keep_preview:
+                st.session_state["dash_preview_zone"] = None
+            st.session_state["dash_zone_msg"] = f"🟧 Queued (queued: {len(st.session_state['dash_queued_zones'])})"
+            st.rerun()
+
+    with b3:
+        if st.button("✅ Add Queued Zones", use_container_width=True, disabled=(len(st.session_state["dash_queued_zones"]) == 0)):
+            st.session_state["good_zones"].extend(st.session_state["dash_queued_zones"])
+            st.session_state["good_zones"] = _dedup_and_sort(st.session_state["good_zones"])
+            st.session_state["dash_queued_zones"] = []
+            st.session_state["dash_zone_msg"] = f"✅ Added queued zones (saved: {len(st.session_state['good_zones'])})"
+            st.rerun()
+
+    with b4:
+        if st.button("↩️ Undo Last Saved", use_container_width=True, disabled=(len(st.session_state["good_zones"]) == 0)):
+            st.session_state["good_zones"].pop()
+            st.session_state["dash_zone_msg"] = f"↩️ Undone last saved (saved: {len(st.session_state['good_zones'])})"
+            st.rerun()
+
+    with b5:
+        if st.button("↩️ Undo Last Queued", use_container_width=True, disabled=(len(st.session_state["dash_queued_zones"]) == 0)):
+            st.session_state["dash_queued_zones"].pop()
+            st.session_state["dash_zone_msg"] = f"↩️ Undone last queued (queued: {len(st.session_state['dash_queued_zones'])})"
+            st.rerun()
+
+    c6, c7 = st.columns([1, 3])
+    with c6:
+        if st.button(
+            "🧹 Clear All",
+            use_container_width=True,
+            disabled=(len(st.session_state["good_zones"]) == 0 and len(st.session_state["dash_queued_zones"]) == 0 and st.session_state["dash_preview_zone"] is None),
+        ):
+            st.session_state["good_zones"] = []
+            st.session_state["dash_queued_zones"] = []
+            st.session_state["dash_preview_zone"] = None
+            st.session_state["dash_last_sel_sig"] = None
+            st.session_state["dash_zone_msg"] = "🧽 Cleared everything"
+            st.rerun()
+
+    with c7:
+        if st.session_state.get("dash_zone_msg"):
+            st.success(st.session_state["dash_zone_msg"])
 
     # ==========================================================
     # SAVE
@@ -6163,14 +6446,12 @@ elif tab_selection == "📊 Dashboard":
                 if not os.path.exists(dataset_path):
                     st.error(f"Dataset CSV not found: {dataset_path}")
                 else:
-                    # read dataset
                     try:
                         df_params = pd.read_csv(dataset_path, keep_default_na=False)
                     except Exception as e:
                         st.error(f"Failed reading dataset CSV: {e}")
                         df_params = None
 
-                    # Parse STEP plan (optional)
                     steps = []
                     if df_params is not None:
                         try:
@@ -6178,63 +6459,39 @@ elif tab_selection == "📊 Dashboard":
                         except Exception:
                             steps = []
 
-                    # Determine length column and reorder zones for saving + AUTO
-                    length_col = _choose_length_col(filtered_df)
+                    length_col = _choose_length_col(df_plot)
                     zones_for_save = st.session_state["good_zones"]
                     if length_col:
-                        zones_for_save = reorder_zones_by_spool_end(filtered_df, x_axis, zones_for_save, length_col)
+                        zones_for_save = reorder_zones_by_spool_end(df_plot, x_axis_slice, zones_for_save, length_col)
 
-                    # 1) Save zone stats (in spool-end order)
+                    # ✅ Save zones + FULL log stats (fixed)
                     rows_to_save = build_zone_save_rows(
                         log_file_path=log_path,
-                        x_axis=x_axis,
-                        y_axes_selected=y_axes,
-                        filtered_df=filtered_df,
+                        x_axis_display=x_axis_display,
+                        x_axis_slice=x_axis_slice,
+                        df_all=df_all,
+                        df_plot=df_plot,
                         zones=zones_for_save,
-                        include_all_numeric_cols=True,
+                        exclude_cols=[],
                     )
 
-                    # 2) zone lengths (same order)
+                    # zone lengths (still computed on df_plot)
                     zones_info, length_col_name = ([], "")
                     try:
-                        zones_info, length_col_name = zone_lengths_from_log_km(filtered_df, x_axis, zones_for_save)
+                        zones_info, length_col_name = zone_lengths_from_log_km(df_plot, x_axis_slice, zones_for_save)
                     except Exception as e:
                         rows_to_save.append({"Parameter Name": "T&M Length Error", "Value": str(e), "Units": ""})
 
-                    # ---------- NEW: WINDER & LENGTH group (Drum + Length End + Zone Length Min/Max) ----------
                     rows_to_save += [_blank(), _sec("WINDER & LENGTH"), _blank()]
 
-                    # Drum selected (from dataset CSV)
                     selected_drum_val = ""
                     if df_params is not None:
                         selected_drum_val = _extract_selected_drum_from_dataset_df(df_params)
                     if selected_drum_val:
                         rows_to_save.append({"Parameter Name": "Drum | Selected", "Value": str(selected_drum_val), "Units": ""})
 
-                    # Fiber length end (log end)
-                    if length_col:
-                        try:
-                            L_all = pd.to_numeric(filtered_df[length_col], errors="coerce").dropna()
-                            if not L_all.empty:
-                                rows_to_save.append({"Parameter Name": "Fiber Length | End (log end)", "Value": float(L_all.iloc[-1]), "Units": "km"})
-                        except Exception:
-                            pass
-
-                        # Zone fiber length min/max (grouped with drum)
-                        for i, (zs, ze) in enumerate(zones_for_save, start=1):
-                            try:
-                                zdf = filtered_df[(filtered_df[x_axis] >= zs) & (filtered_df[x_axis] <= ze)]
-                                Lz = pd.to_numeric(zdf[length_col], errors="coerce").dropna()
-                                if Lz.empty:
-                                    continue
-                                rows_to_save.append({"Parameter Name": f"Zone {i} | Fiber Length | Min", "Value": float(Lz.min()), "Units": "km"})
-                                rows_to_save.append({"Parameter Name": f"Zone {i} | Fiber Length | Max", "Value": float(Lz.max()), "Units": "km"})
-                            except Exception:
-                                continue
-
                     rows_to_save += [_blank()]
 
-                    # 3) T&M instructions:
                     try:
                         if steps:
                             rows_to_save += build_tm_rows_from_steps_allocate_only(
@@ -6245,8 +6502,8 @@ elif tab_selection == "📊 Dashboard":
                             )
                         else:
                             rows_to_save += build_tm_instruction_rows_auto_from_good_zones(
-                                filtered_df=filtered_df,
-                                x_axis=x_axis,
+                                filtered_df=df_plot,
+                                x_axis=x_axis_slice,
                                 good_zones=zones_for_save,
                                 length_col_name=length_col_name or None,
                                 dataset_csv_name=os.path.basename(target_csv),
@@ -6280,11 +6537,15 @@ elif tab_selection == "📊 Dashboard":
                 math_y_col = st.selectbox("Math Y column (optional)", ["None"] + math_numeric_cols, key="dash_math_y_col")
             with m3:
                 default_expr = "x ** y" if math_y_col != "None" else "x"
-                math_expr = st.text_input("Expression (use x, y and np)", value=st.session_state.get("dash_math_expr", default_expr), key="dash_math_expr")
+                math_expr = st.text_input(
+                    "Expression (use x, y and np)",
+                    value=st.session_state.get("dash_math_expr", default_expr),
+                    key="dash_math_expr",
+                )
                 st.caption("Examples: `x**y`, `x*y`, `np.log(x)`, `np.sqrt(x+y)`")
 
             math_df = df.copy()
-            math_df[x_axis] = df_work[x_axis]
+            math_df[x_axis_display] = df_work[x_axis_display]
             x_arr = pd.to_numeric(math_df[math_x_col], errors="coerce").to_numpy(dtype=float)
             y_arr = None if (math_y_col == "None") else pd.to_numeric(math_df[math_y_col], errors="coerce").to_numpy(dtype=float)
 
@@ -6296,8 +6557,8 @@ elif tab_selection == "📊 Dashboard":
                     st.error("Expression must return an array with the same length as the log.")
                 else:
                     math_df["__math_result__"] = math_res
-                    math_plot_df = math_df.dropna(subset=[x_axis, "__math_result__"]).sort_values(by=x_axis)
-                    fig_math = px.line(math_plot_df, x=x_axis, y="__math_result__", markers=False, title=f"Math Lab: f(x,y) vs {x_axis}")
+                    math_plot_df = math_df.dropna(subset=[x_axis_display, "__math_result__"]).sort_values(by=x_axis_display)
+                    fig_math = px.line(math_plot_df, x=x_axis_display, y="__math_result__", markers=False, title=f"Math Lab: f(x,y) vs {x_axis_display}")
                     st.plotly_chart(fig_math, use_container_width=True)
             except Exception as e:
                 st.error(f"Math Lab error: {e}")
