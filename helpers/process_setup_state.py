@@ -21,8 +21,11 @@ def apply_order_row_to_process_setup_state(order_row: dict, overwrite: bool = Tr
         "Secondary Coating Temperature (°C)": ("order_sec_coat_temp_c", float),
 
         "Fiber Diameter (µm)": ("order_fiber_diam", float),
+        "Fiber Diameter Tol (± µm)": ("order_fiber_diam_tol", float),
         "Main Coating Diameter (µm)": ("order_main_diam", float),
+        "Main Coating Diameter Tol (± µm)": ("order_main_diam_tol", float),
         "Secondary Coating Diameter (µm)": ("order_sec_diam", float),
+        "Secondary Coating Diameter Tol (± µm)": ("order_sec_diam_tol", float),
         "Tension (g)": ("order_tension", float),
         "Draw Speed (m/min)": ("order_speed", float),
 

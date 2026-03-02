@@ -129,8 +129,11 @@ def render_save_all_block(
     coating_cfg = load_json(P.coating_config_json)
 
     entry_um = st.session_state.get("order_fiber_diam", "")
+    entry_tol_um = st.session_state.get("order_fiber_diam_tol", "")
     tgt1_um = st.session_state.get("order_main_diam", "")
+    tgt1_tol_um = st.session_state.get("order_main_diam_tol", "")
     tgt2_um = st.session_state.get("order_sec_diam", "")
+    tgt2_tol_um = st.session_state.get("order_sec_diam_tol", "")
 
     coat1 = safe_str(st.session_state.get("order_coating_main", ""))
     coat2 = safe_str(st.session_state.get("order_coating_secondary", ""))
@@ -160,8 +163,11 @@ def render_save_all_block(
 
     has_any_coating = any([
         str(entry_um).strip(),
+        str(entry_tol_um).strip(),
         str(tgt1_um).strip(),
+        str(tgt1_tol_um).strip(),
         str(tgt2_um).strip(),
+        str(tgt2_tol_um).strip(),
         coat1.strip(),
         coat2.strip(),
         str(t1_c).strip(),
@@ -182,8 +188,11 @@ def render_save_all_block(
     if has_any_coating:
         rows += [
             {"Parameter Name": _proc("Entry Fiber Diameter"), "Value": _val(entry_um), "Units": "µm"},
+            {"Parameter Name": _proc("Entry Fiber Diameter Tol"), "Value": _val(entry_tol_um), "Units": "µm"},
             {"Parameter Name": _proc("Target First Coating Diameter"), "Value": _val(tgt1_um), "Units": "µm"},
+            {"Parameter Name": _proc("Target First Coating Diameter Tol"), "Value": _val(tgt1_tol_um), "Units": "µm"},
             {"Parameter Name": _proc("Target Second Coating Diameter"), "Value": _val(tgt2_um), "Units": "µm"},
+            {"Parameter Name": _proc("Target Second Coating Diameter Tol"), "Value": _val(tgt2_tol_um), "Units": "µm"},
 
             {"Parameter Name": _proc("First Coating Diameter (Theoretical)"), "Value": _val(pred_fc_um), "Units": "µm"},
             {"Parameter Name": _proc("Second Coating Diameter (Theoretical)"), "Value": _val(pred_sc_um), "Units": "µm"},

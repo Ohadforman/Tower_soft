@@ -14,6 +14,54 @@ def _abs(*parts: str) -> str:
     return os.path.join(DEFAULT_ROOT, *parts)
 
 
+def _resolve_user_data_dir(app_name: str = "Tower_work") -> str:
+    """
+    Return a cross-platform per-user data directory.
+    macOS   : ~/Library/Application Support/<app_name>
+    Windows : %LOCALAPPDATA%\\<app_name> (fallback: %APPDATA%\\<app_name>)
+    Linux   : $XDG_DATA_HOME/<app_name> (fallback: ~/.local/share/<app_name>)
+    """
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.join(home, "AppData", "Local")
+        return os.path.join(base, app_name)
+    if sys_platform_is_macos():
+        return os.path.join(home, "Library", "Application Support", app_name)
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    return os.path.join(base, app_name)
+
+
+def sys_platform_is_macos() -> bool:
+    return os.uname().sysname == "Darwin" if hasattr(os, "uname") else False
+
+
+def _local_duckdb_path(filename: str = "tower.duckdb") -> str:
+    """
+    Prefer a user-local DB file to avoid file locking across users/sessions.
+    Optional override: TOWER_LOCAL_DB_DIR
+    Optional mode:
+      - TOWER_DUCKDB_SHARED=1  -> shared per-user file (tower.duckdb)
+      - default                -> isolated per-process file (tower_<pid>.duckdb)
+    Falls back to project data folder if local user dir cannot be created.
+    """
+    shared = os.environ.get("TOWER_DUCKDB_SHARED", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
+    if shared:
+        db_name = filename
+    else:
+        stem, ext = os.path.splitext(filename)
+        db_name = f"{stem}_{os.getpid()}{ext or '.duckdb'}"
+
+    local_dir = os.environ.get("TOWER_LOCAL_DB_DIR") or _resolve_user_data_dir("Tower_work")
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+        if not os.access(local_dir, os.W_OK):
+            raise PermissionError(f"Local DB dir not writable: {local_dir}")
+        return os.path.join(local_dir, db_name)
+    except Exception:
+        # Last-resort fallback keeps app functional even on restricted hosts.
+        return _abs("data", db_name)
+
+
 def _pick_path(*candidates: str) -> str:
     """
     Return first existing path; if none exist, return the first candidate.
@@ -100,6 +148,7 @@ class Paths:
     # ✅ Reports (all reports live here)
     reports_dir: str = _abs("reports")
     gas_reports_dir: str = _abs("reports", "gas")
+    backups_dir: str = _abs("backups")
 
     # ✅ Gas periodic scheduler state
     gas_reports_state_json: str = _abs("reports", "gas", "_gas_reports_state.json")
@@ -116,7 +165,7 @@ class Paths:
     # =========================
     # DB
     # =========================
-    duckdb_path: str = _abs("data", "tower.duckdb")
+    duckdb_path: str = _local_duckdb_path("tower.duckdb")
 
     # =========================
     # Hook outputs
@@ -223,6 +272,10 @@ def gas_report_path(filename: str) -> str:
     """
     ensure_gas_reports_dir()
     return os.path.join(P.gas_reports_dir, safe_filename(filename))
+
+
+def ensure_backups_dir() -> str:
+    return ensure_dir(P.backups_dir)
 
 
 # ==========================================================

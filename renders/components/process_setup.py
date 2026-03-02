@@ -152,8 +152,11 @@ def render_scheduled_quick_start(
         "Required Length (m) (for T&M+costumer)": "",
         "Good Zones Count (required length zones)": "",
         "Fiber Diameter (µm)": "",
+        "Fiber Diameter Tol (± µm)": "",
         "Main Coating Diameter (µm)": "",
+        "Main Coating Diameter Tol (± µm)": "",
         "Secondary Coating Diameter (µm)": "",
+        "Secondary Coating Diameter Tol (± µm)": "",
         "Tension (g)": "",
         "Draw Speed (m/min)": "",
         "Main Coating": "",
@@ -192,9 +195,9 @@ def render_scheduled_quick_start(
             st.write(f"Priority: {row.get('Priority','')}")
         with colB:
             st.markdown("**Targets**")
-            st.write(f"Fiber Ø: {row.get('Fiber Diameter (µm)','')} µm")
-            st.write(f"Coat1 Ø: {row.get('Main Coating Diameter (µm)','')} µm")
-            st.write(f"Coat2 Ø: {row.get('Secondary Coating Diameter (µm)','')} µm")
+            st.write(f"Fiber Ø: {row.get('Fiber Diameter (µm)','')} µm  (± {row.get('Fiber Diameter Tol (± µm)','')} µm)")
+            st.write(f"Coat1 Ø: {row.get('Main Coating Diameter (µm)','')} µm  (± {row.get('Main Coating Diameter Tol (± µm)','')} µm)")
+            st.write(f"Coat2 Ø: {row.get('Secondary Coating Diameter (µm)','')} µm  (± {row.get('Secondary Coating Diameter Tol (± µm)','')} µm)")
             st.write(f"Tension: {row.get('Tension (g)','')} g | Speed: {row.get('Draw Speed (m/min)','')} m/min")
         with colC:
             st.markdown("**Output**")
@@ -295,8 +298,11 @@ def render_scheduled_quick_start(
                 _add_order(base_rows, "Good Zones Count (required length zones)", row.get("Good Zones Count (required length zones)", ""), "count")
 
                 _add_order(base_rows, "Fiber Diameter (µm)", row.get("Fiber Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Fiber Diameter Tol (± µm)", row.get("Fiber Diameter Tol (± µm)", ""), "µm")
                 _add_order(base_rows, "Main Coating Diameter (µm)", row.get("Main Coating Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Main Coating Diameter Tol (± µm)", row.get("Main Coating Diameter Tol (± µm)", ""), "µm")
                 _add_order(base_rows, "Secondary Coating Diameter (µm)", row.get("Secondary Coating Diameter (µm)", ""), "µm")
+                _add_order(base_rows, "Secondary Coating Diameter Tol (± µm)", row.get("Secondary Coating Diameter Tol (± µm)", ""), "µm")
                 _add_order(base_rows, "Tension (g)", row.get("Tension (g)", ""), "g")
                 _add_order(base_rows, "Draw Speed (m/min)", row.get("Draw Speed (m/min)", ""), "m/min")
 
