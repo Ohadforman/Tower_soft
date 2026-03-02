@@ -1,7 +1,8 @@
 # helpers/coating_config.py
 import json
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from app_io.paths import P
 
 
 def load_config_coating_json(path: str) -> Dict[str, Any]:
@@ -18,9 +19,10 @@ def coating_options_from_cfg(cfg: Dict[str, Any]) -> List[str]:
         return [str(k).strip() for k in coats.keys() if str(k).strip()]
     return []
 
-def load_coating_config(path: str = "config_coating.json") -> Dict[str, Any]:
+def load_coating_config(path: Optional[str] = None) -> Dict[str, Any]:
     """
     Backward-compatible alias used by renders/coating.py and Process Setup.
     If you pass a path (recommended: P.coating_config_json), it will use it.
     """
+    path = path or P.coating_config_json
     return load_config_coating_json(path)

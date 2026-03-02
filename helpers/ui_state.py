@@ -1,8 +1,3 @@
-import streamlit as st
+from renders.support.ui_state import safe_str_from_state
 
-def safe_str_from_state(key: str, default="") -> str:
-    """
-    Safely read a string value from st.session_state.
-    Always returns a stripped string.
-    """
-    return str(st.session_state.get(key, default) or "").strip()
+__all__ = ["safe_str_from_state"]

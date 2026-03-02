@@ -4,13 +4,25 @@
 import os
 from dataclasses import dataclass
 
-# If you ever want to relocate everything, set TOWER_ROOT env var
-# Example: export TOWER_ROOT="/Users/ohadformanair/PycharmProjects/Tower_work"
-DEFAULT_ROOT = os.environ.get("TOWER_ROOT", os.getcwd())
+# If you ever want to relocate everything, set TOWER_ROOT env var.
+# Fall back to project root (stable), not os.getcwd() (can vary by launcher).
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_ROOT = os.environ.get("TOWER_ROOT", PROJECT_ROOT)
 
 
 def _abs(*parts: str) -> str:
     return os.path.join(DEFAULT_ROOT, *parts)
+
+
+def _pick_path(*candidates: str) -> str:
+    """
+    Return first existing path; if none exist, return the first candidate.
+    This keeps compatibility during folder migrations.
+    """
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return candidates[0] if candidates else ""
 
 
 def ensure_dir(path: str) -> str:
@@ -32,37 +44,49 @@ def safe_filename(name: str) -> str:
 @dataclass(frozen=True)
 class Paths:
     # =========================
+    # Base directories
+    # =========================
+    root_dir: str = DEFAULT_ROOT
+    data_dir: str = _abs("data")
+    config_dir: str = _abs("config")
+    state_dir: str = _abs("state")
+    assets_dir: str = _abs("assets")
+    images_dir: str = _abs("assets", "images")
+    protocols_assets_dir: str = _abs("protocols_assets")
+
+    # =========================
     # Core "top-level" files
     # =========================
-    orders_csv: str = _abs("draw_orders.csv")
-    history_csv: str = _abs("history_log.csv")
-    selected_csv_json: str = _abs("selected_csv.json")
+    orders_csv: str = _abs("data", "draw_orders.csv")
+    history_csv: str = _abs("data", "history_log.csv")
+    selected_csv_json: str = _abs("data", "selected_csv.json")
 
     # schedule
-    schedule_csv: str = _abs("tower_schedule.csv")
+    schedule_csv: str = _abs("data", "tower_schedule.csv")
 
     # development / experiments
-    development_csv: str = _abs("development_process.csv")
-    experiment_updates_csv: str = _abs("experiment_updates.csv")
+    development_csv: str = _abs("data", "development_process.csv")
+    experiment_updates_csv: str = _abs("data", "experiment_updates.csv")
 
     # parts
-    parts_orders_csv: str = _abs("part_orders.csv")
-    parts_archived_csv: str = _abs("archived_orders.csv")
+    parts_orders_csv: str = _abs("data", "part_orders.csv")
+    parts_archived_csv: str = _abs("data", "archived_orders.csv")
 
     # inventory / consumables
-    sap_rods_inventory_csv: str = _abs("sap_rods_inventory.csv")
-    consumables_csv: str = _abs("consumables.csv")  # optional
-    preform_inventory_csv: str = _abs("preforms_inventory.csv")
+    sap_rods_inventory_csv: str = _abs("data", "sap_rods_inventory.csv")
+    consumables_csv: str = _abs("data", "consumables.csv")  # optional
+    preform_inventory_csv: str = _abs("data", "preforms_inventory.csv")
 
     # ✅ NEW: live tower temperatures (wide 1-row csv)
-    tower_temps_csv: str = _abs("tower_temps.csv")
-    tower_containers_csv: str = _abs("tower_containers.csv")
+    tower_temps_csv: str = _abs("data", "tower_temps.csv")
+    tower_containers_csv: str = _abs("data", "tower_containers.csv")
     # projects
-    projects_fiber_csv: str = _abs("projects_fiber.csv")
-    projects_fiber_templates_csv: str = _abs("projects_fiber_templates.csv")
+    projects_fiber_csv: str = _abs("data", "projects_fiber.csv")
+    projects_fiber_templates_csv: str = _abs("data", "projects_fiber_templates.csv")
 
     # protocols
-    protocols_csv: str = _abs("protocols.csv")  # optional if you use one
+    protocols_csv: str = _abs("data", "protocols.csv")  # optional if you use one
+    protocols_json: str = _abs("config", "protocols.json")
 
     # =========================
     # Directories
@@ -81,22 +105,32 @@ class Paths:
     gas_reports_state_json: str = _abs("reports", "gas", "_gas_reports_state.json")
 
     # configs (json/csv that act like configuration)
-    config_dir: str = _abs(".")  # you keep configs in project root
-    coating_config_json: str = _abs("config_coating.json")
-    directory_config_json: str = _abs("directory_config.json")
-    container_config_json: str = _abs("container_config.json")
-    pid_config_json: str = _abs("pid_config.json")
+    coating_config_json: str = _abs("config", "config_coating.json")
+    directory_config_json: str = _abs("config", "directory_config.json")
+    container_config_json: str = _abs("config", "container_config.json")
+    pid_config_json: str = _abs("config", "pid_config.json")
+    heater_config_json: str = _abs("config", "heater_config.json")
+    dies_config_json: str = _abs("config", "dies_6station.json")
+    coating_data_json: str = _abs("config", "coating_data.json")
 
     # =========================
     # DB
     # =========================
-    duckdb_path: str = _abs("tower.duckdb")
+    duckdb_path: str = _abs("data", "tower.duckdb")
 
     # =========================
     # Hook outputs
     # =========================
     done_snapshots_dir: str = _abs("hooks", "done_csv_snapshots")
     after_done_log: str = _abs("hooks", "after_done_last_run.txt")
+
+    # =========================
+    # Assets / state
+    # =========================
+    home_bg_image: str = _abs("assets", "images", "IMG_1094.JPEG")
+    logo_image: str = _abs("assets", "images", "icap.png")
+    coating_stock_json: str = _abs("state", "coating_type_stock.json")
+    container_levels_prev_json: str = _abs("state", "container_levels_prev.json")
 
 
 P = Paths()

@@ -1,0 +1,38 @@
+{
+    "Station 1": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    },
+    "Station 2": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    },
+    "Station 3": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    },
+    "Station 4": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    },
+    "Station 5": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    },
+    "Station 6": {
+        "entry_die_um": 0.0,
+        "primary_die_um": 0.0,
+        "primary_on_tower": false,
+        "secondary_on_tower": false
+    }
+}

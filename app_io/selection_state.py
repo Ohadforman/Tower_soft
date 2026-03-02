@@ -1,7 +1,8 @@
 import json
 import os
+from app_io.paths import P
 
-CSV_SELECTION_FILE = "selected_csv.json"
+CSV_SELECTION_FILE = P.selected_csv_json
 
 
 def save_selected_csv(selected_csv: str, path: str = CSV_SELECTION_FILE):

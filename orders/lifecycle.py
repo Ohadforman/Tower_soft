@@ -1,6 +1,8 @@
 import os
 import datetime as dt
 import pandas as pd
+from helpers.constants import FAILED_DESC_COL
+from app_io.paths import P
 
 
 def _now_str():
@@ -21,7 +23,7 @@ def ensure_orders_cols(
     df: pd.DataFrame,
     status_col: str = "Status",
     status_updated_col: str = "Status Updated At",
-    failed_reason_col: str = "Failed Reason",
+    failed_reason_col: str = FAILED_DESC_COL,
 ) -> pd.DataFrame:
     """Ensure required columns exist (non-breaking)."""
     if status_col not in df.columns:
@@ -35,7 +37,7 @@ def ensure_orders_cols(
 
 def auto_move_failed_to_pending_after_days(
     days: int = 4,
-    orders_file: str = "draw_orders.csv",
+    orders_file: str = P.orders_csv,
     status_col: str = "Status",
     status_updated_col: str = "Status Updated At",
 ):
