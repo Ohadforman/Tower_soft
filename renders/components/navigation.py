@@ -22,7 +22,6 @@ def render_navigation(NAV_GROUPS, TAB_TO_GROUP):
     group = st.selectbox(
         "📁 Group",
         GROUPS,
-        index=GROUPS.index(st.session_state["nav_group_select"]),
         key="nav_group_select",
         on_change=_on_group_change,
     )

@@ -1,18 +1,18 @@
 {
     "A": {
-        "level": 3.0,
+        "level": 1.1,
         "type": "DP-1032"
     },
     "B": {
-        "level": 0.8,
+        "level": 2.8,
         "type": "DS-2015"
     },
     "C": {
-        "level": 1.7,
+        "level": 3.2,
         "type": "Coating_OF_136"
     },
     "D": {
-        "level": 2.5,
+        "level": 3.0,
         "type": "Coating_KS_2-002"
     }
 }

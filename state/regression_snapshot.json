@@ -1,0 +1,15 @@
+{
+  "orders_total": 6,
+  "orders_status": {
+    "done": 5,
+    "in progress": 1
+  },
+  "parts_total": 4,
+  "parts_status": {
+    "opened": 2,
+    "received": 1,
+    "shipped": 1
+  },
+  "schedule_total": 84,
+  "latest_log_rows": 1440
+}

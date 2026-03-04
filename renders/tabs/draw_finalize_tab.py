@@ -27,8 +27,46 @@ def render_draw_finalize_tab(P):
     )
     from hooks.after_done import run_after_done_hook
 
-    st.title("✅ Draw Finalize")
-    st.caption("Mark orders as ✅ Done / ❌ Failed from a selected dataset CSV. (Moved out of Dashboard)")
+    st.markdown(
+        """
+        <style>
+          .fin-top-spacer{ height: 8px; }
+          .fin-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .fin-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .fin-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .fin-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="fin-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="fin-title">✅ Draw Finalize</div>', unsafe_allow_html=True)
+    st.markdown('<div class="fin-sub">Mark selected dataset draw as Done or Failed and log linked actions.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="fin-line"></div>', unsafe_allow_html=True)
 
     # ==========================================================
     # Constants
@@ -494,7 +532,7 @@ def render_draw_finalize_tab(P):
     # Dataset picker (shared UI)
     # ==========================================================
     st.markdown("---")
-    st.subheader("🎯 Select Target Dataset CSV")
+    st.markdown('<div class="fin-section">🎯 Select Target Dataset CSV</div>', unsafe_allow_html=True)
 
     pick_mode = st.radio(
         "Target selection",
@@ -547,7 +585,7 @@ def render_draw_finalize_tab(P):
     tab_done, tab_failed = st.tabs(["✅ Done", "❌ Failed"])
 
     with tab_done:
-        st.subheader("✅ Mark Done")
+        st.markdown('<div class="fin-section">✅ Mark Done</div>', unsafe_allow_html=True)
 
         done_desc = st.text_area(
             "Done description (what happened / notes)",
@@ -679,7 +717,7 @@ def render_draw_finalize_tab(P):
             st.rerun()
 
     with tab_failed:
-        st.subheader("❌ Mark Failed")
+        st.markdown('<div class="fin-section">❌ Mark Failed</div>', unsafe_allow_html=True)
 
         failed_desc = st.text_area(
             "Failed description (why it failed)",

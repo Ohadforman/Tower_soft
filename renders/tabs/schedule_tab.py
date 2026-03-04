@@ -4,7 +4,46 @@ def render_schedule_tab(P):
     import streamlit as st
     import plotly.express as px
     
-    st.title("📅 Tower Schedule")
+    st.markdown(
+        """
+        <style>
+          .sched-top-spacer{ height: 8px; }
+          .sched-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .sched-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .sched-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .sched-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="sched-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sched-title">📅 Tower Schedule</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sched-sub">Plan, view, and manage recurring/non-recurring tower events.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sched-line"></div>', unsafe_allow_html=True)
     
     SCHEDULE_FILE = P.schedule_csv
     required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
@@ -77,7 +116,7 @@ def render_schedule_tab(P):
     # =========================================================
     # Main-page Filters
     # =========================================================
-    st.subheader("🗓️ View Range")
+    st.markdown('<div class="sched-section">🗓️ View Range</div>', unsafe_allow_html=True)
     
     f1, f2, f3 = st.columns([1.1, 1.1, 1.4])
     
@@ -187,7 +226,7 @@ def render_schedule_tab(P):
     #   px.timeline does NOT support %{x_end|...} in hovertemplate.
     #   So we precompute formatted strings and show them via custom_data.
     # =========================================================
-    st.subheader("📈 Timeline")
+    st.markdown('<div class="sched-section">📈 Timeline</div>', unsafe_allow_html=True)
     
     event_colors = {
         "Maintenance": "blue",
@@ -242,7 +281,7 @@ def render_schedule_tab(P):
     # =========================================================
     # Management area (Main page, no sidebar)
     # =========================================================
-    st.subheader("🧩 Manage Schedule")
+    st.markdown('<div class="sched-section">🧩 Manage Schedule</div>', unsafe_allow_html=True)
     
     left, right = st.columns([1.05, 0.95], gap="large")
     

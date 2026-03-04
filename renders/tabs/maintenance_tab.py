@@ -7,12 +7,119 @@ def render_maintenance_tab(P):
     import streamlit as st
     import plotly.graph_objects as go
     import duckdb
-    
-    st.title("🧰 Maintenance")
-    st.caption(
-        "Auto-loads ALL maintenance files from /maintenance. "
-        "Furnace + UV1 + UV2 hours are persisted to maintenance/_app_state.json. "
-        "New draw detection shows an inline Pre/Post checklist."
+
+    st.markdown(
+        """
+        <style>
+          .maint-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0 0 2px 0;
+            padding-top: 6px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .maint-sub{
+            margin: 0 0 8px 0;
+            font-size: 0.90rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .maint-top-spacer{
+            height: 6px;
+          }
+          .maint-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .maint-help{
+            border: 1px solid rgba(128,206,255,0.22);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(14,32,56,0.30), rgba(8,16,28,0.22));
+            padding: 8px 10px;
+            margin: 4px 0 12px 0;
+            color: rgba(201,230,249,0.90);
+            font-size: 0.84rem;
+          }
+          .maint-help b{
+            color: rgba(226,245,255,0.97);
+          }
+          .maint-section-title{
+            margin: 10px 0 8px 0;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.22rem;
+            font-weight: 850;
+            color: rgba(230,246,255,0.98);
+            text-shadow: 0 0 10px rgba(84,174,255,0.18);
+          }
+          .st-key-maint_focus_status div[data-baseweb="tag"],
+          .st-key-maint_focus_status span[data-baseweb="tag"]{
+            background: linear-gradient(180deg, rgba(70,160,238,0.94), rgba(32,96,168,0.92)) !important;
+            background-color: rgba(44,124,206,0.94) !important;
+            border: 1px solid rgba(170,232,255,0.82) !important;
+            color: rgba(244,252,255,0.99) !important;
+            box-shadow: 0 0 0 1px rgba(108,198,255,0.26), 0 4px 10px rgba(10,46,84,0.32) !important;
+          }
+          .st-key-maint_focus_status div[data-baseweb="tag"] > *,
+          .st-key-maint_focus_status span[data-baseweb="tag"] > *{
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            color: rgba(244,252,255,0.99) !important;
+          }
+          .st-key-maint_focus_status div[data-baseweb="tag"] svg,
+          .st-key-maint_focus_status span[data-baseweb="tag"] svg{
+            fill: rgba(238,250,255,0.98) !important;
+          }
+          div[data-testid="stButton"] > button{
+            border-radius: 12px !important;
+            border: 1px solid rgba(138,214,255,0.58) !important;
+            background: linear-gradient(180deg, rgba(28,74,120,0.72), rgba(12,36,68,0.66)) !important;
+            color: rgba(236,248,255,0.98) !important;
+            box-shadow: 0 8px 18px rgba(8,30,58,0.32), 0 0 12px rgba(74,170,255,0.18) !important;
+          }
+          div[data-testid="stButton"] > button:hover{
+            border-color: rgba(188,238,255,0.86) !important;
+            box-shadow: 0 12px 24px rgba(8,30,58,0.36), 0 0 16px rgba(96,194,255,0.30) !important;
+          }
+          div[data-testid="stButton"] > button[kind="primary"]{
+            border-color: rgba(170,232,255,0.84) !important;
+            background: linear-gradient(180deg, rgba(76,168,255,0.90), rgba(32,98,172,0.88)) !important;
+            box-shadow: 0 14px 24px rgba(12, 68, 124, 0.40), 0 0 18px rgba(96,194,255,0.34) !important;
+          }
+          div[data-testid="stButton"] > button:disabled{
+            opacity: 0.78 !important;
+            color: rgba(212,238,255,0.92) !important;
+            border-color: rgba(128,206,255,0.32) !important;
+            background: linear-gradient(180deg, rgba(24,62,102,0.52), rgba(12,34,64,0.48)) !important;
+          }
+          div[data-testid="stExpander"] details{
+            border: 1px solid rgba(132,214,255,0.22) !important;
+            border-radius: 12px !important;
+            background: linear-gradient(165deg, rgba(12,24,42,0.56), rgba(10,18,30,0.40)) !important;
+          }
+          div[data-testid="stDataFrame"]{
+            border: 1px solid rgba(132,214,255,0.22) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="maint-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="maint-title">🧰 Maintenance</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="maint-sub">Maintenance planning, fault handling, usage analytics, and manuals in one place.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="maint-line"></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="maint-help"><b>Tip:</b> Update status inputs first, then use Dashboard/Future Schedule and mark tasks done.</div>',
+        unsafe_allow_html=True,
     )
     
     # =========================================================
@@ -872,8 +979,8 @@ def render_maintenance_tab(P):
     # Done editor + apply done (updates + logs DB + CSV)
     # =========================================================
     def render_maintenance_done_editor(dfm):
-        st.subheader("Mark tasks as done")
-    
+        st.markdown('<div class="maint-section-title">Mark tasks as done</div>', unsafe_allow_html=True)
+
         focus_default = ["OVERDUE", "DUE SOON", "ROUTINE"]
         focus_status = st.multiselect(
             "Work on these statuses",

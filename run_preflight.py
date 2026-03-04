@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 
 from helpers.csv_schema import REQUIRED_CSV_COLUMNS, validate_csv_schema
+from helpers.app_logger import log_event
 from app_io.paths import P
 
 
@@ -115,14 +116,7 @@ def run() -> int:
         ("CSV schemas", check_csv_schemas),
     ]
 
-    results: list[CheckResult] = []
-    for name, fn in checks:
-        try:
-            fn()
-            results.append(CheckResult(name=name, ok=True))
-        except Exception as e:
-            results.append(CheckResult(name=name, ok=False, details=f"{type(e).__name__}: {e}"))
-
+    results = run_checks()
     failed = 0
     print("=== Preflight Check ===")
     for r in results:
@@ -137,10 +131,31 @@ def run() -> int:
 
     if failed:
         print(f"Result: FAILED ({failed} checks)")
+        log_event("preflight_run", ok=False, failed=failed, elapsed_s=round(elapsed, 2))
         return 1
 
     print("Result: OK")
+    log_event("preflight_run", ok=True, failed=0, elapsed_s=round(elapsed, 2))
     return 0
+
+
+def run_checks() -> list[CheckResult]:
+    checks = [
+        ("Folder layout", check_folder_layout),
+        ("Required files", check_required_files),
+        ("Backup dir", check_backup_dir),
+        ("JSON parse", check_json_parse),
+        ("DuckDB local policy", check_duckdb_local_policy),
+        ("CSV schemas", check_csv_schemas),
+    ]
+    results: list[CheckResult] = []
+    for name, fn in checks:
+        try:
+            fn()
+            results.append(CheckResult(name=name, ok=True))
+        except Exception as e:
+            results.append(CheckResult(name=name, ok=False, details=f"{type(e).__name__}: {e}"))
+    return results
 
 
 if __name__ == "__main__":

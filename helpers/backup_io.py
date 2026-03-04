@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
 
+from helpers.app_logger import log_event
 
 INCLUDE_EXTENSIONS = {
     ".csv",
@@ -112,6 +113,14 @@ def create_backup_snapshot(P) -> BackupResult:
     manifest_path = os.path.join(snapshot_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
+
+    log_event(
+        "backup_snapshot_created",
+        snapshot_dir=snapshot_dir,
+        copied_files=copied_files,
+        copied_bytes=copied_bytes,
+        errors=len(errors),
+    )
 
     return BackupResult(
         snapshot_dir=snapshot_dir,

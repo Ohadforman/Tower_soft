@@ -1,3 +1,8 @@
+import os
+import html
+
+import streamlit as st
+
 from app_io.legacy_path_compat import install_legacy_path_compat
 from app_io.paths import P
 
@@ -7,12 +12,85 @@ install_legacy_path_compat(P)
 from app.bootstrap import build_runtime, configure_page, ensure_coating_config
 from app.navigation import init_session_state, render_sidebar_navigation
 from app.router import render_selected_tab
+from helpers.app_logger import log_event
+from renders.support.style_utils import apply_blue_clean_base_theme
+from run_preflight import run_checks
 
 configure_page()
+apply_blue_clean_base_theme()
+safe_mode = os.environ.get("TOWER_SAFE_MODE", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
+startup_results = run_checks()
+startup_failures = [r for r in startup_results if not r.ok]
+
+if startup_failures and not safe_mode:
+    log_event("startup_checks_failed", safe_mode=False, failures=len(startup_failures))
+    st.error("Startup checks failed. Fix the following issues before running the app:")
+    lines = [f"- {r.name}: {r.details}" for r in startup_failures]
+    st.code("\n".join(lines), language="text")
+    st.info("Tip: set `TOWER_SAFE_MODE=1` to open only safe tabs for debugging.")
+    st.stop()
+
+if startup_failures and safe_mode:
+    log_event("startup_checks_failed", safe_mode=True, failures=len(startup_failures))
+    st.warning("Startup checks failed. Running in SAFE MODE with limited tabs.")
+    lines = [f"- {r.name}: {r.details}" for r in startup_failures]
+    st.code("\n".join(lines), language="text")
+
 ensure_coating_config(P)
 runtime = build_runtime(P)
 init_session_state()
-selected_tab = render_sidebar_navigation()
+selected_tab = render_sidebar_navigation(safe_mode=safe_mode and bool(startup_failures))
+
+# One-time startup popup on first page only (Home).
+if (
+    selected_tab == "🏠 Home"
+    and not startup_failures
+    and not st.session_state.get("startup_popup_shown", False)
+):
+    checks_html = "".join(
+        f"<li>{html.escape(r.name)}: <b>PASS</b></li>" for r in startup_results
+    )
+    st.markdown(
+        f"""
+        <style>
+          .startup-popup {{
+            position: fixed;
+            top: 78px;
+            right: 18px;
+            z-index: 9999;
+            width: min(520px, 92vw);
+            background: rgba(12, 22, 36, 0.95);
+            border: 1px solid rgba(120, 200, 255, 0.45);
+            border-radius: 14px;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+            color: #e8f4ff;
+            padding: 14px 16px;
+            animation: fadeOutStartup 8s forwards;
+          }}
+          .startup-popup h4 {{
+            margin: 0 0 8px 0;
+            font-size: 16px;
+          }}
+          .startup-popup ul {{
+            margin: 0;
+            padding-left: 20px;
+            max-height: 180px;
+            overflow: auto;
+            font-size: 13px;
+          }}
+          @keyframes fadeOutStartup {{
+            0%, 80% {{ opacity: 1; transform: translateY(0); }}
+            100% {{ opacity: 0; transform: translateY(-8px); visibility: hidden; }}
+          }}
+        </style>
+        <div class="startup-popup">
+          <h4>✅ Startup Checks Passed</h4>
+          <ul>{checks_html}</ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.session_state["startup_popup_shown"] = True
 
 render_selected_tab(
     tab_selection=selected_tab,
@@ -21,3 +99,6 @@ render_selected_tab(
     failed_reason_col=runtime.failed_reason_col,
     orders_file=runtime.orders_file,
 )
+
+# Re-apply after tab render so per-tab CSS cannot override the global look.
+apply_blue_clean_base_theme(force=True)

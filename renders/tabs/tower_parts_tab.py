@@ -4,7 +4,58 @@ def render_tower_parts_tab(P):
     import pandas as pd
     import streamlit as st
     
-    st.title("🛠️ Tower Parts Management")
+    st.markdown(
+        """
+        <style>
+          .tp-top-spacer{ height: 8px; }
+          .tp-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .tp-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .tp-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .tp-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+          .tp-action-card{
+            border: 1px solid rgba(128,206,255,0.22);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(14,32,56,0.26), rgba(8,16,28,0.20));
+            padding: 10px 12px;
+            margin-bottom: 12px;
+          }
+          .tp-action-help{
+            color: rgba(194,228,248,0.90);
+            font-size: 0.84rem;
+            margin-top: 6px;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="tp-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="tp-title">🛠️ Tower Parts Management</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tp-sub">Track parts orders, update statuses, archive installed items, and browse docs.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tp-line"></div>', unsafe_allow_html=True)
     
     ORDER_FILE = P.parts_orders_csv
     archive_file = P.parts_archived_csv
@@ -68,7 +119,7 @@ def render_tower_parts_tab(P):
     # =========================
     # TABLE (FIRST)
     # =========================
-    st.write("### 📋 Orders Table")
+    st.markdown('<div class="tp-section">📋 Orders Table</div>', unsafe_allow_html=True)
     
     column_order = [
         "Status",
@@ -93,22 +144,33 @@ def render_tower_parts_tab(P):
     tmp["__status_sort__"] = pd.Categorical(tmp["Status"], categories=STATUS_ORDER, ordered=True)
     tmp = tmp.sort_values(["__status_sort__", "Part Name"], na_position="last").drop(columns="__status_sort__")
     
-    # Color status cell only
+    # Color status cell only (cleaner dark-friendly colors)
     def highlight_status(row):
         color_map = {
-            "Opened": "background-color: lightcoral; color: black; font-weight: 900;",
-            "Approved": "background-color: lightgreen; color: black; font-weight: 900;",
-            "Ordered": "background-color: lightyellow; color: black; font-weight: 900;",
-            "Shipped": "background-color: lightblue; color: black; font-weight: 900;",
-            "Received": "background-color: green; color: black; font-weight: 900;",
-            "Installed": "background-color: lightgray; color: black; font-weight: 900;",
+            "Opened": "background-color: rgba(255,102,102,0.28); color: #ffd4d4; font-weight: 800;",
+            "Approved": "background-color: rgba(105,240,174,0.24); color: #c8ffd8; font-weight: 800;",
+            "Ordered": "background-color: rgba(255,214,102,0.24); color: #ffe9b8; font-weight: 800;",
+            "Shipped": "background-color: rgba(126,182,255,0.24); color: #d5e8ff; font-weight: 800;",
+            "Received": "background-color: rgba(92,214,122,0.30); color: #d7ffe1; font-weight: 800;",
+            "Installed": "background-color: rgba(190,198,210,0.22); color: #ecf0f6; font-weight: 800;",
         }
         s = str(row.get("Status", "")).strip()
-        return [color_map.get(s, "")] + [""] * (len(row) - 1)
+        styles = [""] * len(row)
+        # Status column index after adding row number
+        if "Status" in row.index:
+            styles[list(row.index).index("Status")] = color_map.get(s, "")
+        return styles
     
     if not tmp.empty:
+        tmp_display = tmp[column_order].fillna("").copy()
+        tmp_display.insert(0, "#", range(1, len(tmp_display) + 1))
+        styled = (
+            tmp_display.style
+            .apply(highlight_status, axis=1)
+            .set_properties(subset=["#"], **{"color": "rgba(180,210,230,0.90)", "font-weight": "700"})
+        )
         st.dataframe(
-            tmp[column_order].fillna("").style.apply(highlight_status, axis=1),
+            styled,
             height=420,
             use_container_width=True,
         )
@@ -120,18 +182,51 @@ def render_tower_parts_tab(P):
     # =========================
     # CLEAN POP AREA (AFTER TABLE)
     # =========================
-    st.write("### ✍️ Manage Orders")
-    
-    action = st.radio(
-        "Choose action",
-        ["Add New Order", "Update Existing Order"],
-        horizontal=True,
-        key="order_action_main",
+    st.markdown('<div class="tp-section">✍️ Manage Orders</div>', unsafe_allow_html=True)
+
+    if "parts_manage_action" not in st.session_state:
+        st.session_state["parts_manage_action"] = ""
+
+    st.markdown('<div class="tp-action-card">', unsafe_allow_html=True)
+    a1, a2 = st.columns(2, gap="small")
+    with a1:
+        if st.button(
+            "➕ Open New Order",
+            use_container_width=True,
+            type="primary" if st.session_state["parts_manage_action"] == "Add New Order" else "secondary",
+            key="parts_open_add_btn",
+        ):
+            if st.session_state["parts_manage_action"] == "Add New Order":
+                st.session_state["parts_manage_action"] = ""
+            else:
+                st.session_state["parts_manage_action"] = "Add New Order"
+            st.rerun()
+    with a2:
+        if st.button(
+            "🛠️ Open Edit Order",
+            use_container_width=True,
+            type="primary" if st.session_state["parts_manage_action"] == "Update Existing Order" else "secondary",
+            key="parts_open_edit_btn",
+        ):
+            if st.session_state["parts_manage_action"] == "Update Existing Order":
+                st.session_state["parts_manage_action"] = ""
+            else:
+                st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.rerun()
+    st.markdown(
+        f"<div class='tp-action-help'>Active panel: <b>{st.session_state['parts_manage_action'] or 'None'}</b></div>",
+        unsafe_allow_html=True,
     )
+    st.markdown("</div>", unsafe_allow_html=True)
+    action = st.session_state["parts_manage_action"]
     
+    if action == "":
+        st.info("Choose `Open New Order` or `Open Edit Order` to expand a panel.")
+
     # ---------- Add New ----------
     if action == "Add New Order":
-        with st.expander("➕ Add New Order", expanded=True):
+        st.markdown("#### ➕ Add New Order")
+        with st.container(border=True):
             with st.form("add_new_order_form", clear_on_submit=True):
                 c1, c2, c3 = st.columns([1.2, 1.2, 1.2])
     
@@ -178,8 +273,9 @@ def render_tower_parts_tab(P):
                         st.rerun()
     
     # ---------- Update Existing ----------
-    else:
-        with st.expander("🛠️ Update Existing Order", expanded=True):
+    elif action == "Update Existing Order":
+        st.markdown("#### 🛠️ Update Existing Order")
+        with st.container(border=True):
             if orders_df.empty:
                 st.warning("No orders to update.")
             else:
@@ -262,7 +358,7 @@ def render_tower_parts_tab(P):
     # =========================
     # ARCHIVE / VIEW ARCHIVE
     # =========================
-    st.write("### 🗃️ Archive")
+    st.markdown('<div class="tp-section">🗃️ Archive</div>', unsafe_allow_html=True)
     cA, cB = st.columns([1, 1])
     
     with cA:
@@ -312,7 +408,7 @@ def render_tower_parts_tab(P):
     # =========================
     # DELETE
     # =========================
-    st.write("### 🗑️ Delete")
+    st.markdown('<div class="tp-section">🗑️ Delete</div>', unsafe_allow_html=True)
     if orders_df.empty:
         st.info("Nothing to delete.")
     else:
@@ -333,7 +429,7 @@ def render_tower_parts_tab(P):
     # =========================
     # Parts Datasheet (OLD FLOW) + NICE VIEWER
     # =========================
-    st.write("### 📚 Parts Datasheet (Hierarchical View)")
+    st.markdown('<div class="tp-section">📚 Parts Datasheet (Hierarchical View)</div>', unsafe_allow_html=True)
     
     # NOTE: PARTS_DIRECTORY must exist in your app globals/config.
     # Example: PARTS_DIRECTORY = "tower_parts_docs"

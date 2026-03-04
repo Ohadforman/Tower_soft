@@ -1,5 +1,5 @@
 === AFTER DONE PRINT ===
-2026-02-25 11:19:23
+2026-03-03 01:05:56
 
-Wrote file: /Users/ohadformanair/PycharmProjects/Tower_work/hooks/TEST1111F_1_PRINT.txt
+Wrote file: /Users/ohadformanair/PycharmProjects/Tower_work/hooks/P0trtewtewrewrF_1_PRINT.txt
 Sent to printer.

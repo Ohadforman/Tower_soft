@@ -8,7 +8,46 @@ def render_order_draw_tab(P):
     from renders.support.style_utils import color_priority, color_status
     from renders.support.ui_state import safe_str_from_state
     
-    st.title("📦 Order Draw")
+    st.markdown(
+        """
+        <style>
+          .od-top-spacer{ height: 8px; }
+          .od-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .od-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .od-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .od-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="od-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="od-title">📦 Order Draw</div>', unsafe_allow_html=True)
+    st.markdown('<div class="od-sub">Create, review, schedule, and manage draw orders.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="od-line"></div>', unsafe_allow_html=True)
     
     orders_file = P.orders_csv
     SCHEDULE_FILE = P.schedule_csv
@@ -303,7 +342,7 @@ def render_order_draw_tab(P):
     # =========================================================
     # 1) TABLE FIRST (with colors)
     # =========================================================
-    st.subheader("📋 Existing Draw Orders")
+    st.markdown('<div class="od-section">📋 Existing Draw Orders</div>', unsafe_allow_html=True)
     
     if not os.path.exists(orders_file):
         st.info("No orders submitted yet.")
@@ -369,7 +408,7 @@ def render_order_draw_tab(P):
     # ✅ Pending → Schedule (quick)
     # =========================================================
     st.markdown("---")
-    st.subheader("🕒 Pending → Schedule (quick)")
+    st.markdown('<div class="od-section">🕒 Pending → Schedule (quick)</div>', unsafe_allow_html=True)
     
     if df_visible is None or df_visible.empty:
         st.info("No orders to schedule.")
@@ -547,33 +586,78 @@ def render_order_draw_tab(P):
     #   IMPORTANT FIX: Schedule UI is OUTSIDE the form
     # =========================================================
     st.markdown("---")
-    st.markdown("### ➕ Create New Order")
-    
+    st.markdown('<div class="od-section">➕ Create New Order</div>', unsafe_allow_html=True)
+    st.markdown(
+        "<div style='margin:2px 0 10px 0; color:rgba(194,228,248,0.90); font-size:0.87rem;'>"
+        "Build order in 4 steps: Required -> Targets -> Materials -> Template, then submit.</div>",
+        unsafe_allow_html=True,
+    )
+
     if "show_new_order_form" not in st.session_state:
         st.session_state["show_new_order_form"] = False
-    
-    show_form = st.checkbox(
-        "Create new order",
-        value=bool(st.session_state["show_new_order_form"]),
-        key="order_create_new_cb",
-    )
-    st.session_state["show_new_order_form"] = bool(show_form)
-    
+
+    b1, b2, b3 = st.columns([1.3, 1.1, 2.6], vertical_alignment="center")
+    with b1:
+        if not st.session_state["show_new_order_form"]:
+            if st.button("➕ Start New Order", key="order_start_builder_btn", use_container_width=True, type="primary"):
+                st.session_state["show_new_order_form"] = True
+                st.rerun()
+    with b2:
+        if st.session_state["show_new_order_form"]:
+            if st.button("✖ Close Builder", key="order_close_builder_btn", use_container_width=True):
+                st.session_state["show_new_order_form"] = False
+                st.rerun()
+    with b3:
+        st.caption("Use the builder to create and optionally schedule a draw order.")
+
     if st.session_state["show_new_order_form"]:
         st.markdown(
             """
             <style>
             div[data-testid="stForm"] { padding-top: 0.25rem; }
+            .od-order-shell{
+              border: 1px solid rgba(128,206,255,0.24);
+              border-radius: 14px;
+              background: linear-gradient(180deg, rgba(14,32,56,0.26), rgba(8,16,28,0.20));
+              padding: 10px 12px 8px 12px;
+              margin-bottom: 8px;
+            }
+            .od-order-help{
+              border: 1px solid rgba(128,206,255,0.20);
+              border-radius: 10px;
+              background: rgba(10,20,36,0.34);
+              padding: 7px 9px;
+              font-size: 0.84rem;
+              color: rgba(201,230,249,0.90);
+              margin-bottom: 8px;
+            }
+            .od-order-help b{
+              color: rgba(230,246,255,0.97);
+            }
+            .od-order-subhead{
+              margin: 4px 0 8px 0;
+              padding-left: 8px;
+              border-left: 3px solid rgba(120,200,255,0.52);
+              font-weight: 760;
+              color: rgba(226,244,255,0.96);
+              font-size: 0.92rem;
+            }
             </style>
             """,
             unsafe_allow_html=True,
         )
-    
-        with st.container(border=True):
+
+        st.markdown('<div class="od-order-shell">', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="od-order-help"><b>Tip:</b> select project first (template may auto-fill), then complete Required tab before optional tabs.</div>',
+            unsafe_allow_html=True,
+        )
+        with st.container():
             projects = load_projects()
     
             # Project row (outside form to support template auto-apply)
-            selA, selB = st.columns([2.4, 1.0], vertical_alignment="bottom")
+            st.markdown('<div class="od-order-subhead">Project & template source</div>', unsafe_allow_html=True)
+            selA, selB = st.columns([2.6, 1.0], vertical_alignment="bottom")
             with selA:
                 selected_project = st.selectbox(
                     "Project * (auto-fills if template exists)",
@@ -612,14 +696,15 @@ def render_order_draw_tab(P):
             save_tpl = False
             submit = False
             cancel = False
-    
+
             with st.form("order_create_form", clear_on_submit=False):
                 tab_req, tab_targets, tab_materials, tab_template = st.tabs(
-                    ["✅ Required", "🧪 Targets", "🧴 Materials", "💾 Template"]
+                    ["1) ✅ Required", "2) 🧪 Targets", "3) 🧴 Materials", "4) 💾 Template"]
                 )
     
                 # ✅ REQUIRED TAB
                 with tab_req:
+                    st.caption("Mandatory fields for valid order creation.")
                     c1, c2, c3, c4 = st.columns([1.2, 1.6, 1.0, 1.4], vertical_alignment="bottom")
                     with c1:
                         st.text_input(
@@ -706,7 +791,6 @@ def render_order_draw_tab(P):
                     with r7:
                         st.text_input("Order Opened By *", key="order_opener", placeholder="Name / initials")
     
-                    # Notes shown in required, recommended but NOT blocking submit
                     st.markdown("##### Notes (recommended)")
                     st.text_area(
                         "Additional Notes / Instructions",
@@ -717,7 +801,7 @@ def render_order_draw_tab(P):
     
                 # 🧪 TARGETS TAB
                 with tab_targets:
-                    st.caption("Optional targets. Leave 0 if unknown.")
+                    st.caption("Optional engineering targets. Leave 0 when unknown.")
                     d1, d2, d3 = st.columns(3, vertical_alignment="bottom")
                     with d1:
                         st.number_input("Fiber Diameter (µm)", min_value=0.0, key="order_fiber_diam")
@@ -738,7 +822,7 @@ def render_order_draw_tab(P):
     
                 # 🧴 MATERIALS TAB
                 with tab_materials:
-                    st.caption("Coating names are loaded from config_coating.json.")
+                    st.caption("Materials and temperatures for coating setup.")
                     m1, m2 = st.columns(2, vertical_alignment="bottom")
                     with m1:
                         st.selectbox("Main Coating", options=[""] + COATING_OPTIONS, index=0, key="order_coating_main")
@@ -777,9 +861,9 @@ def render_order_draw_tab(P):
                         st.caption("Saves geometry + tiger/f2f + diameters+tolerances + tension + speed + coatings + temps + notes.")
     
                 st.markdown("---")
-                a1, a2 = st.columns([1, 1], vertical_alignment="center")
+                a1, a2 = st.columns([1.4, 1.0], vertical_alignment="center")
                 with a1:
-                    submit = st.form_submit_button("📤 Submit Draw Order", use_container_width=True)
+                    submit = st.form_submit_button("📤 Submit Draw Order", use_container_width=True, type="primary")
                 with a2:
                     cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
     
@@ -1038,4 +1122,7 @@ def render_order_draw_tab(P):
                 st.session_state["show_new_order_form"] = False
                 st.success("✅ Draw order submitted!")
                 st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.caption("Click `Start New Order` to open the builder.")
     # ------------------ Tower Parts Tab ------------------

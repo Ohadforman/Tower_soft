@@ -16,6 +16,8 @@ from typing import Callable, List
 import pandas as pd
 
 from helpers.csv_schema import REQUIRED_CSV_COLUMNS, validate_csv_schema
+from helpers.app_logger import log_event
+from helpers.regression_snapshot import compute_snapshot, load_baseline
 from app_io.paths import P
 from app_io.path_health import build_path_health_report
 
@@ -248,6 +250,16 @@ def test_module_imports() -> None:
         importlib.import_module(m)
 
 
+def test_regression_snapshot() -> None:
+    baseline_path = os.path.join(P.state_dir, "regression_snapshot.json")
+    baseline = load_baseline(baseline_path)
+    if not baseline:
+        raise RuntimeError(f"baseline missing: {baseline_path} (run run_update_regression_snapshot.py)")
+    current = compute_snapshot(P)
+    if current != baseline:
+        raise RuntimeError("snapshot mismatch (run run_update_regression_snapshot.py to refresh baseline)")
+
+
 def test_dash_try_compiles() -> None:
     with open("dash_try.py", "r", encoding="utf-8") as f:
         src = f.read()
@@ -376,13 +388,16 @@ def main() -> int:
     r.check("Legacy redirect runtime", test_legacy_redirect_runtime)
     r.check("dash_try compile", test_dash_try_compiles)
     r.check("Module import smoke", test_module_imports)
+    r.check("Regression snapshot", test_regression_snapshot, warning=True)
     r.check("Path script single source guardrail", test_path_script_single_source)
     if args.ui_smoke:
         r.check("UI smoke (streamlit.testing)", test_ui_smoke, warning=not args.ui_strict)
     if args.ui_tabs:
         r.check("UI tab switch smoke", test_ui_tab_switch_smoke, warning=not args.ui_strict)
 
-    return r.summary()
+    code = r.summary()
+    log_event("app_tests_run", exit_code=code, strict_warnings=bool(args.strict_warnings), ui_smoke=bool(args.ui_smoke))
+    return code
 
 
 if __name__ == "__main__":

@@ -18,40 +18,47 @@ def render_protocols_tab(base_dir: str = None):
     st.markdown(
         """
     <style>
-      .block-container { padding-top: 2.2rem; }
+      .block-container { padding-top: 2.5rem; }
 
       .proto-topbar {
         display:flex; align-items:flex-end; justify-content:space-between;
-        gap: 12px; margin-bottom: 10px;
+        gap: 12px; margin-bottom: 8px; padding-top: 8px;
       }
-      .proto-title h1 { margin: 0; padding: 0; line-height: 1.1; }
-      .proto-sub { opacity: 0.75; margin-top: 4px; font-size: 0.95rem; }
+      .proto-title h1 { margin: 0; padding: 4px 0 0 0; line-height: 1.2; }
+      .proto-sub { opacity: 0.85; margin-top: 5px; font-size: 0.95rem; color: rgba(192,228,248,0.90); }
+      .proto-line{
+        height: 1px;
+        margin: 0 0 10px 0;
+        background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+      }
 
       .chips { display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-start; margin: 10px 0 14px; }
       .chip {
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(128,206,255,0.26);
+        background: linear-gradient(180deg, rgba(25,62,102,0.36), rgba(10,28,50,0.28));
         padding: 6px 10px;
         border-radius: 999px;
         font-size: 0.85rem;
         line-height: 1;
         white-space: nowrap;
+        color: rgba(228,246,255,0.96);
       }
 
       .section-card {
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(128,206,255,0.22);
+        background: linear-gradient(180deg, rgba(14,32,56,0.28), rgba(8,16,28,0.22));
         padding: 14px 14px;
         border-radius: 14px;
         margin-bottom: 14px;
       }
 
       .proto-card {
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(128,206,255,0.22);
+        background: linear-gradient(180deg, rgba(14,32,56,0.28), rgba(8,16,28,0.22));
         padding: 12px 12px;
         border-radius: 14px;
         margin-bottom: 10px;
+        box-shadow: 0 8px 18px rgba(8,30,58,0.20);
       }
       .proto-card .row1 {
         display:flex; align-items:center; justify-content:space-between; gap:10px;
@@ -67,21 +74,52 @@ def render_protocols_tab(base_dir: str = None):
       }
       .pill {
         font-size: 0.78rem;
-        border: 1px solid rgba(255,255,255,0.12);
+        border: 1px solid rgba(128,206,255,0.26);
         padding: 3px 8px;
         border-radius: 999px;
-        background: rgba(255,255,255,0.03);
+        background: linear-gradient(180deg, rgba(26,70,116,0.34), rgba(10,28,52,0.28));
+        color: rgba(226,244,255,0.96);
       }
-      .hr-lite { height: 1px; background: rgba(255,255,255,0.08); margin: 10px 0; border-radius: 2px; }
+      .hr-lite { height: 1px; background: rgba(120,200,255,0.28); margin: 10px 0; border-radius: 2px; }
       .muted { opacity: 0.75; }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
       .small-note { font-size: 0.85rem; opacity: 0.75; }
 
       details[data-testid="stExpander"] {
         border-radius: 14px !important;
-        border: 1px solid rgba(255,255,255,0.10) !important;
-        background: rgba(255,255,255,0.03) !important;
+        border: 1px solid rgba(128,206,255,0.24) !important;
+        background: linear-gradient(180deg, rgba(14,32,56,0.28), rgba(8,16,28,0.22)) !important;
         padding: 6px 10px !important;
+      }
+      details[data-testid="stExpander"][open]{
+        box-shadow: 0 12px 22px rgba(0,0,0,0.24), 0 0 14px rgba(82,182,255,0.20) !important;
+      }
+
+      div[data-testid="stButton"] > button{
+        border-radius: 12px !important;
+        border: 1px solid rgba(138,214,255,0.58) !important;
+        background: linear-gradient(180deg, rgba(28,74,120,0.72), rgba(12,36,68,0.66)) !important;
+        color: rgba(236,248,255,0.98) !important;
+        box-shadow: 0 8px 18px rgba(8,30,58,0.32), 0 0 12px rgba(74,170,255,0.18) !important;
+      }
+      div[data-testid="stButton"] > button:hover{
+        border-color: rgba(188,238,255,0.86) !important;
+        box-shadow: 0 12px 24px rgba(8,30,58,0.36), 0 0 16px rgba(96,194,255,0.30) !important;
+      }
+      div[data-testid="stButton"] > button[kind="primary"]{
+        border-color: rgba(170,232,255,0.84) !important;
+        background: linear-gradient(180deg, rgba(76,168,255,0.90), rgba(32,98,172,0.88)) !important;
+        box-shadow: 0 14px 24px rgba(12, 68, 124, 0.40), 0 0 18px rgba(96,194,255,0.34) !important;
+      }
+
+      div[data-baseweb="tag"], span[data-baseweb="tag"]{
+        background: linear-gradient(180deg, rgba(70,160,238,0.92), rgba(32,96,168,0.90)) !important;
+        border: 1px solid rgba(170,232,255,0.78) !important;
+        color: rgba(244,252,255,0.99) !important;
+      }
+      div[data-baseweb="tag"] *, span[data-baseweb="tag"] *{
+        color: rgba(244,252,255,0.99) !important;
+        fill: rgba(238,250,255,0.98) !important;
       }
 
       textarea {
@@ -102,6 +140,7 @@ def render_protocols_tab(base_dir: str = None):
         <div class="proto-sub">Browse, run checklists, attach photos, and manage tower protocols.</div>
       </div>
     </div>
+    <div class="proto-line"></div>
     """,
         unsafe_allow_html=True,
     )

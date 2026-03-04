@@ -7,6 +7,7 @@ def render_consumables_tab(P):
 
     import pandas as pd
     import streamlit as st
+    import streamlit.components.v1 as components
 
     # ✅ Your project imports
     from app_io.paths import ensure_logs_dir, ensure_gas_reports_dir, ensure_dir
@@ -19,14 +20,104 @@ def render_consumables_tab(P):
     # ==========================================================
     st.markdown("""
     <style>
-      .block-container { padding-top: 1.55rem; }
+      .block-container { padding-top: 2.35rem; }
+      .cons-top-spacer{ height: 6px; }
+      .cons-title{
+        font-size: 1.62rem;
+        font-weight: 900;
+        margin: 0;
+        padding-top: 4px;
+        line-height: 1.2;
+        color: rgba(236,248,255,0.98);
+        text-shadow: 0 0 14px rgba(86,178,255,0.22);
+      }
+      .cons-sub{
+        margin: 4px 0 8px 0;
+        font-size: 0.92rem;
+        color: rgba(188,224,248,0.88);
+      }
+      .cons-line{
+        height: 1px;
+        margin: 0 0 12px 0;
+        background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+      }
+      .cons-section{
+        margin-top: 6px;
+        margin-bottom: 8px;
+        padding-left: 8px;
+        border-left: 3px solid rgba(120,200,255,0.62);
+        font-size: 1.04rem;
+        font-weight: 820;
+        color: rgba(230,246,255,0.98);
+      }
+      .cons-csv-label{
+        margin-bottom: 2px;
+        color: rgba(196,226,246,0.92);
+        font-size: 0.90rem;
+        font-weight: 700;
+      }
+      .cons-csv-path{
+        min-height: 24px;
+        max-height: 24px;
+        line-height: 24px;
+        padding: 0 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(120,200,255,0.20);
+        background: rgba(10,20,36,0.30);
+        color: rgba(120,230,170,0.95);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.80rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
 
       .section-card {
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(128,206,255,0.22);
+        background: linear-gradient(180deg, rgba(14,32,56,0.28), rgba(8,16,28,0.22));
         padding: 14px 14px;
         border-radius: 14px;
         margin-bottom: 14px;
+      }
+      .cons-nav-wrap { margin: 2px 0 8px 0; }
+      .cons-manifest-nav{
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding-top: 4px;
+        align-items: center;
+      }
+      .cons-manifest-nav > label{
+        display: inline-flex !important;
+        width: auto !important;
+        border: 1px solid rgba(126,208,255,0.42);
+        border-radius: 999px;
+        background: linear-gradient(145deg, rgba(16,30,48,0.78), rgba(10,20,34,0.60));
+        color: rgba(236,248,255,0.98);
+        box-shadow: 0 10px 22px rgba(0,0,0,0.26);
+        transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+        padding: 8px 10px;
+      }
+      .cons-manifest-nav > label:hover{
+        transform: translateY(-2px) scale(1.04);
+        border-color: rgba(170,232,255,0.78);
+        box-shadow: 0 14px 28px rgba(0,0,0,0.32), 0 0 16px rgba(94,186,255,0.28);
+      }
+      .cons-manifest-nav > label.cons-chip-active{
+        border-color: rgba(180,236,255,0.92);
+        box-shadow: 0 16px 30px rgba(18,80,126,0.40), 0 0 22px rgba(92,190,255,0.44);
+      }
+      .cons-manifest-nav > label [role="radio"],
+      .cons-manifest-nav > label input[type="radio"]{
+        position: absolute !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+        pointer-events: none !important;
+      }
+      .cons-manifest-nav > label.cons-hidden-option{
+        display: none !important;
       }
 
       .vessel {
@@ -44,7 +135,89 @@ def render_consumables_tab(P):
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("🍃 Tower state — Consumables & Dies")
+    st.markdown('<div class="cons-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cons-title">🍃 Tower state — Consumables & Dies</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cons-sub">Containers, warehouse stock, temperatures, dies, and monthly argon reports.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cons-line"></div>', unsafe_allow_html=True)
+
+    st.session_state.setdefault("cons_focus_panel", "__none__")
+    st.markdown('<div class="cons-nav-wrap">', unsafe_allow_html=True)
+    st.radio(
+        "Consumables Sections",
+        [
+            "🧪 Containers",
+            "📦 Warehouse",
+            "🏷️ Stock by Type",
+            "🌡️ Temperatures",
+            "🔩 Dies",
+            "🧯 Argon Report",
+            "__none__",
+        ],
+        horizontal=True,
+        key="cons_focus_panel",
+        label_visibility="collapsed",
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+    components.html(
+        """
+        <script>
+        (function() {
+          const expected = [
+            "🧪 Containers","📦 Warehouse","🏷️ Stock by Type","🌡️ Temperatures","🔩 Dies","🧯 Argon Report"
+          ];
+          function bindHoverSwitch() {
+            const root = window.parent?.document || document;
+            const groups = root.querySelectorAll('div[role="radiogroup"]');
+            for (const group of groups) {
+              const labels = Array.from(group.querySelectorAll("label"));
+              if (!labels.length) continue;
+              const texts = labels.map(l => (l.textContent || "").trim());
+              const matches = expected.filter(e => texts.includes(e)).length;
+              if (matches < 6) continue;
+              const noneLabel = labels[labels.length - 1];
+              if (noneLabel) noneLabel.classList.add("cons-hidden-option");
+              group.classList.add("cons-manifest-nav");
+              if (group.dataset.consHoverBound === "1") {
+                labels.forEach((l) => {
+                  if (l.classList.contains("cons-hidden-option")) return;
+                  const input = l.querySelector('input[type="radio"]');
+                  if (input && input.checked) l.classList.add("cons-chip-active");
+                  else l.classList.remove("cons-chip-active");
+                });
+                return true;
+              }
+              labels.forEach((label) => {
+                if (label.classList.contains("cons-hidden-option")) return;
+                label.addEventListener("mouseenter", () => {
+                  try { label.click(); } catch (e) {}
+                });
+                label.addEventListener("click", () => {
+                  labels.forEach((l) => {
+                    if (l.classList.contains("cons-hidden-option")) return;
+                    l.classList.remove("cons-chip-active");
+                  });
+                  label.classList.add("cons-chip-active");
+                });
+              });
+              group.dataset.consHoverBound = "1";
+              return true;
+            }
+            return false;
+          }
+          setInterval(bindHoverSwitch, 140);
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+    focus_panel = st.session_state.get("cons_focus_panel", "__none__")
+    show_containers = focus_panel == "🧪 Containers"
+    show_warehouse = focus_panel == "📦 Warehouse"
+    show_stock = focus_panel == "🏷️ Stock by Type"
+    show_temps = focus_panel == "🌡️ Temperatures"
+    show_dies = focus_panel == "🔩 Dies"
+    show_argon = focus_panel == "🧯 Argon Report"
 
     # ==========================================================
     # Constants / Files
@@ -109,6 +282,22 @@ def render_consumables_tab(P):
         row["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pd.DataFrame([row], columns=cols).to_csv(path, index=False)
 
+    def _row_signature(row: dict, keys: list[str]) -> str:
+        parts = []
+        for k in keys:
+            v = row.get(k, "")
+            parts.append(f"{k}={v}")
+        return "|".join(parts)
+
+    st.session_state.setdefault("cons_temps_dirty", False)
+    st.session_state.setdefault("cons_containers_dirty", False)
+
+    def _mark_temps_dirty():
+        st.session_state["cons_temps_dirty"] = True
+
+    def _mark_containers_dirty():
+        st.session_state["cons_containers_dirty"] = True
+
     def _list_files_recursive(root: str, exts=(".csv",)):
         out = []
         try:
@@ -158,13 +347,32 @@ def render_consumables_tab(P):
         "D_pipe_c": "temp_D_pipe_state",
     }
 
+    def _file_mtime(path: str):
+        try:
+            return os.path.getmtime(path)
+        except Exception:
+            return None
+
     wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
-    for col, skey in TEMP_STATE_KEYS.items():
-        if skey not in st.session_state:
+    temps_mtime = _file_mtime(TOWER_TEMPS_CSV)
+    last_temps_mtime = st.session_state.get("cons_temps_source_mtime")
+    temps_sig = _row_signature(wide_temps, list(TEMP_STATE_KEYS.keys()))
+    last_temps_sig = st.session_state.get("cons_temps_source_sig")
+    # CSV is the source of truth unless user is currently editing temps.
+    should_hydrate_temps = not st.session_state.get("cons_temps_dirty", False)
+    # Hydrate from CSV on first load and whenever CSV changed on disk.
+    if should_hydrate_temps:
+        for col, skey in TEMP_STATE_KEYS.items():
             if col in wide_temps and str(wide_temps.get(col, "")).strip() != "":
                 st.session_state[skey] = float(_safe_float(wide_temps[col], 25.0))
             else:
-                st.session_state[skey] = 25.0
+                st.session_state[skey] = float(st.session_state.get(skey, 25.0) if skey in st.session_state else 25.0)
+        st.session_state["cons_temps_hydrated"] = True
+        st.session_state["cons_temps_source_mtime"] = temps_mtime
+        st.session_state["cons_temps_source_sig"] = temps_sig
+    else:
+        for _, skey in TEMP_STATE_KEYS.items():
+            st.session_state.setdefault(skey, 25.0)
 
     # ==========================================================
     # 2) CONTAINERS CSV (wide)
@@ -185,50 +393,69 @@ def render_consumables_tab(P):
     if not isinstance(legacy_cfg, dict):
         legacy_cfg = {}
 
-    for lab in container_labels:
-        default_level = 0.0
-        default_type = coating_types[0] if coating_types else ""
+    cont_mtime = _file_mtime(TOWER_CONTAINERS_CSV)
+    last_cont_mtime = st.session_state.get("cons_containers_source_mtime")
+    cont_sig_keys = ["A_level_kg", "A_type", "B_level_kg", "B_type", "C_level_kg", "C_type", "D_level_kg", "D_type"]
+    cont_sig = _row_signature(wide_cont, cont_sig_keys)
+    last_cont_sig = st.session_state.get("cons_containers_source_sig")
+    # CSV is the source of truth unless user is currently editing containers.
+    should_hydrate_containers = not st.session_state.get("cons_containers_dirty", False)
 
-        lvl_col = f"{lab}_level_kg"
-        typ_col = f"{lab}_type"
+    if should_hydrate_containers:
+        for lab in container_labels:
+            default_level = 0.0
+            default_type = coating_types[0] if coating_types else ""
 
-        if lvl_col in wide_cont and str(wide_cont.get(lvl_col, "")).strip() != "":
-            default_level = _safe_float(wide_cont.get(lvl_col), default_level)
-        else:
-            if isinstance(legacy_cfg.get(lab, {}), dict):
-                default_level = _safe_float(legacy_cfg.get(lab, {}).get("level", default_level), default_level)
+            lvl_col = f"{lab}_level_kg"
+            typ_col = f"{lab}_type"
 
-        if typ_col in wide_cont and str(wide_cont.get(typ_col, "")).strip() != "":
-            default_type = str(wide_cont.get(typ_col))
-        else:
-            if isinstance(legacy_cfg.get(lab, {}), dict):
-                default_type = str(legacy_cfg.get(lab, {}).get("type", default_type))
+            if lvl_col in wide_cont and str(wide_cont.get(lvl_col, "")).strip() != "":
+                default_level = _safe_float(wide_cont.get(lvl_col), default_level)
+            else:
+                if isinstance(legacy_cfg.get(lab, {}), dict):
+                    default_level = _safe_float(legacy_cfg.get(lab, {}).get("level", default_level), default_level)
 
-        if coating_types and default_type not in coating_types:
-            default_type = coating_types[0]
+            if typ_col in wide_cont and str(wide_cont.get(typ_col, "")).strip() != "":
+                default_type = str(wide_cont.get(typ_col))
+            else:
+                if isinstance(legacy_cfg.get(lab, {}), dict):
+                    default_type = str(legacy_cfg.get(lab, {}).get("type", default_type))
 
-        st.session_state.setdefault(_lvl_key(lab), float(default_level))
-        st.session_state.setdefault(_type_key(lab), default_type)
+            if coating_types and default_type not in coating_types:
+                default_type = coating_types[0]
+
+            st.session_state[_lvl_key(lab)] = float(default_level)
+            st.session_state[_type_key(lab)] = default_type
+        st.session_state["cons_containers_hydrated"] = True
+        st.session_state["cons_containers_source_mtime"] = cont_mtime
+        st.session_state["cons_containers_source_sig"] = cont_sig
+    else:
+        for lab in container_labels:
+            st.session_state.setdefault(_lvl_key(lab), 0.0)
+            st.session_state.setdefault(_type_key(lab), coating_types[0] if coating_types else "")
+
 
     # ==========================================================
     # Top toolbar: Refresh buttons
     # ==========================================================
-    tL, tM, tR = st.columns([1.3, 1.3, 1])
+    tL, tM = st.columns(2, gap="medium")
     with tL:
-        st.caption(f"Temps CSV: `{TOWER_TEMPS_CSV}`")
+        st.markdown('<div class="cons-csv-label">Temps CSV:</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cons-csv-path">{TOWER_TEMPS_CSV}</div>', unsafe_allow_html=True)
         refresh_temps = st.button("🔄 Refresh temps", use_container_width=True, key="refresh_temps_btn")
     with tM:
-        st.caption(f"Containers CSV: `{TOWER_CONTAINERS_CSV}`")
+        st.markdown('<div class="cons-csv-label">Containers CSV:</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cons-csv-path">{TOWER_CONTAINERS_CSV}</div>', unsafe_allow_html=True)
         refresh_containers = st.button("🔄 Refresh containers", use_container_width=True, key="refresh_containers_btn")
-    with tR:
-        st.caption(" ")
-        st.caption(" ")
 
     if refresh_temps:
         wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
         for col, skey in TEMP_STATE_KEYS.items():
             if col in wide_temps and str(wide_temps.get(col, "")).strip() != "":
                 st.session_state[skey] = float(_safe_float(wide_temps[col], st.session_state.get(skey, 25.0)))
+        st.session_state["cons_temps_source_mtime"] = _file_mtime(TOWER_TEMPS_CSV)
+        st.session_state["cons_temps_source_sig"] = _row_signature(wide_temps, list(TEMP_STATE_KEYS.keys()))
+        st.session_state["cons_temps_dirty"] = False
         st.success("Temps reloaded from CSV.")
         st.rerun()
 
@@ -244,6 +471,9 @@ def render_consumables_tab(P):
                 if coating_types and t not in coating_types:
                     t = coating_types[0]
                 st.session_state[_type_key(lab)] = t
+        st.session_state["cons_containers_source_mtime"] = _file_mtime(TOWER_CONTAINERS_CSV)
+        st.session_state["cons_containers_source_sig"] = _row_signature(wide_cont, cont_sig_keys)
+        st.session_state["cons_containers_dirty"] = False
         st.success("Containers reloaded from CSV.")
         st.rerun()
 
@@ -268,96 +498,74 @@ def render_consumables_tab(P):
     # ==========================================================
     # UI: Containers
     # ==========================================================
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("🧪 Coating Containers (A–D)")
-    st.caption("Rule: level ↑ = refill (auto subtract from warehouse). level ↓ = consumption.")
+    current_container_state = {
+        lab: {
+            "level": float(st.session_state.get(_lvl_key(lab), 0.0)),
+            "type": str(st.session_state.get(_type_key(lab), coating_types[0] if coating_types else "")),
+        }
+        for lab in container_labels
+    }
+    if show_containers:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">🧪 Coating Containers (A–D)</div>', unsafe_allow_html=True)
+        st.caption("Rule: level ↑ = refill (auto subtract from warehouse). level ↓ = consumption.")
 
-    cols = st.columns(4)
-    current_container_state = {}
+        cols = st.columns(4)
+        for col, lab in zip(cols, container_labels):
+            with col:
+                st.markdown(f"**Container {lab}**")
 
-    for col, lab in zip(cols, container_labels):
-        with col:
-            st.markdown(f"**Container {lab}**")
-
-            lvl = st.slider(
-                f"Fill Level {lab} (kg)",
-                0.0, 4.0,
-                float(st.session_state[_lvl_key(lab)]),
-                0.1,
-                key=_lvl_key(lab)
-            )
-
-            if coating_types:
-                cur_t = st.session_state[_type_key(lab)]
-                if cur_t not in coating_types:
-                    cur_t = coating_types[0]
-                idx_t = coating_types.index(cur_t)
-                ctype = st.selectbox(
-                    f"Coating Type {lab}",
-                    options=coating_types,
-                    index=idx_t,
-                    key=_type_key(lab)
-                )
-            else:
-                ctype = ""
-                st.info("No coating types configured.")
-
-            fill_height = int((float(lvl) / 4.0) * 100.0)
-            st.markdown(
-                f"""
-                <div class="vessel"><div class="vessel-fill" style="height:{fill_height}%;"></div></div>
-                <div style="text-align:center; margin-top:6px;"><b>{float(lvl):.2f} kg</b></div>
-                """,
-                unsafe_allow_html=True
-            )
-
-            current_container_state[lab] = {"level": float(lvl), "type": str(ctype)}
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # ==========================================================
-    # Apply refill delta to warehouse (snapshot-based)
-    # ==========================================================
-    refill_events = []
-    for lab in container_labels:
-        prev_level = _safe_float(prev_snapshot.get(lab, {}).get("level", 0.0), 0.0)
-        cur_level = _safe_float(current_container_state[lab]["level"], 0.0)
-        cur_type = str(current_container_state[lab]["type"])
-        delta = cur_level - prev_level
-
-        if delta > 1e-9 and cur_type in warehouse_stock:
-            before = _safe_float(warehouse_stock.get(cur_type, 0.0), 0.0)
-            after = max(0.0, before - float(delta))
-            warehouse_stock[cur_type] = after
-            refill_events.append((lab, cur_type, float(delta), before, after))
-
-        prev_snapshot[lab] = {"level": float(cur_level), "type": cur_type}
-
-    try:
-        _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
-        _write_json(CONTAINER_SNAPSHOT_FILE, prev_snapshot)
-    except Exception as e:
-        st.error(f"Auto-save failed: {e}")
-
-    if refill_events:
-        with st.expander("🧾 Detected refills (auto)", expanded=False):
-            for lab, ctype, delta, before, after in refill_events:
-                st.write(
-                    f"Container **{lab}** refilled **+{delta:.2f} kg** of **{ctype}** → "
-                    f"Warehouse: {before:.2f} → {after:.2f} kg"
+                lvl = st.slider(
+                    f"Fill Level {lab} (kg)",
+                    min_value=0.0,
+                    max_value=4.0,
+                    step=0.1,
+                    key=_lvl_key(lab),
+                    on_change=_mark_containers_dirty,
                 )
 
-    # ==========================================================
-    # Auto-save containers to CSV
-    # ==========================================================
-    last_cont_saved = st.session_state.get("containers_last_saved_snapshot", {})
-    cur_cont_snapshot = {lab: (current_container_state[lab]["level"], current_container_state[lab]["type"]) for lab in container_labels}
+                if coating_types:
+                    if st.session_state[_type_key(lab)] not in coating_types:
+                        st.session_state[_type_key(lab)] = coating_types[0]
+                    ctype = st.selectbox(
+                        f"Coating Type {lab}",
+                        options=coating_types,
+                        key=_type_key(lab),
+                        on_change=_mark_containers_dirty,
+                    )
+                else:
+                    ctype = ""
+                    st.info("No coating types configured.")
 
-    if not last_cont_saved:
-        st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
-        last_cont_saved = cur_cont_snapshot
+                fill_height = int((float(lvl) / 4.0) * 100.0)
+                st.markdown(
+                    f"""
+                    <div class="vessel"><div class="vessel-fill" style="height:{fill_height}%;"></div></div>
+                    <div style="text-align:center; margin-top:6px;"><b>{float(lvl):.2f} kg</b></div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
-    if cur_cont_snapshot != last_cont_saved:
+                current_container_state[lab] = {"level": float(lvl), "type": str(ctype)}
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Auto-save containers only after real container edits.
+    if st.session_state.get("cons_containers_dirty", False):
+        refill_events = []
+        for lab in container_labels:
+            prev_level = _safe_float(prev_snapshot.get(lab, {}).get("level", 0.0), 0.0)
+            cur_level = _safe_float(current_container_state[lab]["level"], 0.0)
+            cur_type = str(current_container_state[lab]["type"])
+            delta = cur_level - prev_level
+
+            if delta > 1e-9 and cur_type in warehouse_stock:
+                before = _safe_float(warehouse_stock.get(cur_type, 0.0), 0.0)
+                after = max(0.0, before - float(delta))
+                warehouse_stock[cur_type] = after
+                refill_events.append((lab, cur_type, float(delta), before, after))
+
+            prev_snapshot[lab] = {"level": float(cur_level), "type": cur_type}
+
         out = {}
         for lab in container_labels:
             out[f"{lab}_level_kg"] = float(current_container_state[lab]["level"])
@@ -365,12 +573,14 @@ def render_consumables_tab(P):
 
         try:
             _write_one_row_csv(TOWER_CONTAINERS_CSV, CONTAINER_COLS, out)
-            st.session_state["containers_last_saved_snapshot"] = cur_cont_snapshot
-
-            legacy_out = {lab: {"level": float(current_container_state[lab]["level"]), "type": str(current_container_state[lab]["type"])} for lab in container_labels}
-            _write_json(CONTAINER_CFG_PATH, legacy_out)
+            _write_json(CONTAINER_CFG_PATH, {lab: {"level": float(current_container_state[lab]["level"]), "type": str(current_container_state[lab]["type"])} for lab in container_labels})
+            _write_json(CONTAINER_SNAPSHOT_FILE, prev_snapshot)
+            _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
+            st.session_state["cons_containers_source_mtime"] = _file_mtime(TOWER_CONTAINERS_CSV)
+            st.session_state["cons_containers_source_sig"] = _row_signature(out, ["A_level_kg", "A_type", "B_level_kg", "B_type", "C_level_kg", "C_type", "D_level_kg", "D_type"])
+            st.session_state["cons_containers_dirty"] = False
         except Exception as e:
-            st.error(f"Failed to write containers CSV: {e}")
+            st.error(f"Failed to save containers: {e}")
 
     # ==========================================================
     # Stock by type (warehouse + containers)
@@ -390,136 +600,130 @@ def render_consumables_tab(P):
         for t in coating_types
     }
 
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("🏷️ Coating Stock by Type (Auto)")
-    st.caption("Computed from warehouse + container contents. Red when total < 1 kg.")
+    if show_stock:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">🏷️ Coating Stock by Type (Auto)</div>', unsafe_allow_html=True)
+        st.caption("Computed from warehouse + container contents. Red when total < 1 kg.")
 
-    if coating_types:
-        max_total = max(total_by_type.values()) if total_by_type else 0.0
-        display_max = max(40.0, math.ceil(max_total / 5.0) * 5.0) if max_total > 0 else 40.0
+        if coating_types:
+            max_total = max(total_by_type.values()) if total_by_type else 0.0
+            display_max = max(40.0, math.ceil(max_total / 5.0) * 5.0) if max_total > 0 else 40.0
 
-        rows = [coating_types[i:i + 4] for i in range(0, len(coating_types), 4)]
-        for row in rows:
-            cols = st.columns(len(row))
-            for col, ctype in zip(cols, row):
-                with col:
-                    total_kg = float(total_by_type.get(ctype, 0.0))
-                    ware_kg = float(warehouse_stock.get(ctype, 0.0))
-                    cont_kg = float(container_sums.get(ctype, 0.0))
-                    fill_height = int(min(100.0, (total_kg / display_max) * 100.0)) if display_max > 0 else 0
-                    is_low = total_kg < LOW_STOCK_KG
+            rows = [coating_types[i:i + 4] for i in range(0, len(coating_types), 4)]
+            for row in rows:
+                cols = st.columns(len(row))
+                for col, ctype in zip(cols, row):
+                    with col:
+                        total_kg = float(total_by_type.get(ctype, 0.0))
+                        ware_kg = float(warehouse_stock.get(ctype, 0.0))
+                        cont_kg = float(container_sums.get(ctype, 0.0))
+                        fill_height = int(min(100.0, (total_kg / display_max) * 100.0)) if display_max > 0 else 0
+                        is_low = total_kg < LOW_STOCK_KG
 
-                    st.markdown(f"**{ctype}**")
-                    st.markdown(
-                        f"""
-                        <div class="{'vessel low-card' if is_low else 'vessel'}">
-                          <div class="vessel-fill" style="height:{fill_height}%; {'background: rgba(255, 77, 77, 0.85);' if is_low else ''}"></div>
-                        </div>
-                        <div style="text-align:center; margin-top:6px;">
-                          <div class="{ 'low-num' if is_low else '' }"><b>{total_kg:.2f} kg</b></div>
-                          <div class="muted" style="font-size:0.85rem;">Warehouse {ware_kg:.2f} + Containers {cont_kg:.2f}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-    else:
-        st.info("No coating types found in coating config.")
-    st.markdown("</div>", unsafe_allow_html=True)
+                        st.markdown(f"**{ctype}**")
+                        st.markdown(
+                            f"""
+                            <div class="{'vessel low-card' if is_low else 'vessel'}">
+                              <div class="vessel-fill" style="height:{fill_height}%; {'background: rgba(255, 77, 77, 0.85);' if is_low else ''}"></div>
+                            </div>
+                            <div style="text-align:center; margin-top:6px;">
+                              <div class="{ 'low-num' if is_low else '' }"><b>{total_kg:.2f} kg</b></div>
+                              <div class="muted" style="font-size:0.85rem;">Warehouse {ware_kg:.2f} + Containers {cont_kg:.2f}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+        else:
+            st.info("No coating types found in coating config.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
     # Warehouse editor
     # ==========================================================
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("📦 Warehouse Stock (Edit when new material arrives)")
-    st.caption("Bulk stock not inside containers A–D.")
+    if show_warehouse:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">📦 Warehouse Stock (Edit when new material arrives)</div>', unsafe_allow_html=True)
+        st.caption("Bulk stock not inside containers A–D.")
 
-    if coating_types:
-        edited = False
-        rows = [coating_types[i:i + 3] for i in range(0, len(coating_types), 3)]
-        for row in rows:
-            cols = st.columns(len(row))
-            for col, ctype in zip(cols, row):
-                with col:
-                    k = f"wh_{ctype}"
-                    st.session_state.setdefault(k, float(warehouse_stock.get(ctype, 0.0)))
-                    val = st.number_input(
-                        f"{ctype} (kg)",
-                        min_value=0.0,
-                        step=0.1,
-                        value=float(st.session_state[k]),
-                        key=k
-                    )
-                    if abs(val - float(warehouse_stock.get(ctype, 0.0))) > 1e-9:
-                        warehouse_stock[ctype] = float(val)
-                        edited = True
+        if coating_types:
+            edited = False
+            rows = [coating_types[i:i + 3] for i in range(0, len(coating_types), 3)]
+            for row in rows:
+                cols = st.columns(len(row))
+                for col, ctype in zip(cols, row):
+                    with col:
+                        k = f"wh_{ctype}"
+                        st.session_state.setdefault(k, float(warehouse_stock.get(ctype, 0.0)))
+                        val = st.number_input(
+                            f"{ctype} (kg)",
+                            min_value=0.0,
+                            step=0.1,
+                            key=k,
+                        )
+                        if abs(val - float(warehouse_stock.get(ctype, 0.0))) > 1e-9:
+                            warehouse_stock[ctype] = float(val)
+                            edited = True
 
-        if edited:
-            try:
-                _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
-                st.success("Warehouse stock updated.")
-            except Exception as e:
-                st.error(f"Failed to save warehouse stock: {e}")
-    else:
-        st.info("No coating types configured.")
-    st.markdown("</div>", unsafe_allow_html=True)
+            if edited:
+                try:
+                    _write_json(WAREHOUSE_STOCK_FILE, warehouse_stock)
+                    st.success("Warehouse stock updated.")
+                except Exception as e:
+                    st.error(f"Failed to save warehouse stock: {e}")
+        else:
+            st.info("No coating types configured.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
     # Temps UI
     # ==========================================================
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("🌡️ Temperatures (CSV-based)")
+    if show_temps:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">🌡️ Temperatures (CSV-based)</div>', unsafe_allow_html=True)
 
-    for lab in container_labels:
-        st.markdown(f"**Container {lab} temps**")
-        c1, c2 = st.columns(2)
-        with c1:
+        for lab in container_labels:
+            st.markdown(f"**Container {lab} temps**")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input(
+                    f"Container temp {lab} (°C)",
+                    min_value=0.0,
+                    step=0.1,
+                    key=TEMP_STATE_KEYS[f"{lab}_container_c"],
+                    on_change=_mark_temps_dirty,
+                )
+            with c2:
+                st.number_input(
+                    f"Pipe temp {lab} (°C)",
+                    min_value=0.0,
+                    step=0.1,
+                    key=TEMP_STATE_KEYS[f"{lab}_pipe_c"],
+                    on_change=_mark_temps_dirty,
+                )
+
+        st.markdown("---")
+        st.markdown('<div class="cons-section">🔥 Die Holder Heater (Global)</div>', unsafe_allow_html=True)
+        cH1, cH2 = st.columns(2)
+        with cH1:
             st.number_input(
-                f"Container temp {lab} (°C)",
+                "Primary die holder heater temp (°C)",
                 min_value=0.0,
                 step=0.1,
-                value=float(st.session_state[TEMP_STATE_KEYS[f"{lab}_container_c"]]),
-                key=TEMP_STATE_KEYS[f"{lab}_container_c"]
+                key=TEMP_STATE_KEYS["die_holder_primary_c"],
+                on_change=_mark_temps_dirty,
             )
-        with c2:
+        with cH2:
             st.number_input(
-                f"Pipe temp {lab} (°C)",
+                "Secondary die holder heater temp (°C)",
                 min_value=0.0,
                 step=0.1,
-                value=float(st.session_state[TEMP_STATE_KEYS[f"{lab}_pipe_c"]]),
-                key=TEMP_STATE_KEYS[f"{lab}_pipe_c"]
+                key=TEMP_STATE_KEYS["die_holder_secondary_c"],
+                on_change=_mark_temps_dirty,
             )
 
-    st.markdown("---")
-    st.subheader("🔥 Die Holder Heater (Global)")
-    cH1, cH2 = st.columns(2)
-    with cH1:
-        st.number_input(
-            "Primary die holder heater temp (°C)",
-            min_value=0.0,
-            step=0.1,
-            value=float(st.session_state[TEMP_STATE_KEYS["die_holder_primary_c"]]),
-            key=TEMP_STATE_KEYS["die_holder_primary_c"]
-        )
-    with cH2:
-        st.number_input(
-            "Secondary die holder heater temp (°C)",
-            min_value=0.0,
-            step=0.1,
-            value=float(st.session_state[TEMP_STATE_KEYS["die_holder_secondary_c"]]),
-            key=TEMP_STATE_KEYS["die_holder_secondary_c"]
-        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Auto-save temps to CSV if changed
-    last_temp_saved = st.session_state.get("temps_last_saved_snapshot", {})
-    cur_temp_snapshot = {skey: float(st.session_state.get(skey, 0.0)) for skey in TEMP_STATE_KEYS.values()}
-
-    if not last_temp_saved:
-        st.session_state["temps_last_saved_snapshot"] = cur_temp_snapshot
-        last_temp_saved = cur_temp_snapshot
-
-    if cur_temp_snapshot != last_temp_saved:
+    if st.session_state.get("cons_temps_dirty", False):
         out = {
             "die_holder_primary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_primary_c"]]),
             "die_holder_secondary_c": float(st.session_state[TEMP_STATE_KEYS["die_holder_secondary_c"]]),
@@ -530,81 +734,84 @@ def render_consumables_tab(P):
 
         try:
             _write_one_row_csv(TOWER_TEMPS_CSV, TEMP_COLS, out)
-            st.session_state["temps_last_saved_snapshot"] = cur_temp_snapshot
+            st.session_state["cons_temps_source_mtime"] = _file_mtime(TOWER_TEMPS_CSV)
+            st.session_state["cons_temps_source_sig"] = _row_signature(out, list(TEMP_STATE_KEYS.keys()))
+            st.session_state["cons_temps_dirty"] = False
         except Exception as e:
-            st.error(f"Failed to write temps CSV: {e}")
+            st.error(f"Failed to save temps: {e}")
 
     # ==========================================================
     # Dies system
     # ==========================================================
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("🔩 Dies System")
+    if show_dies:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">🔩 Dies System</div>', unsafe_allow_html=True)
 
-    DIES_CONFIG_PATH = P.dies_config_json
+        DIES_CONFIG_PATH = P.dies_config_json
 
-    default_cfg = {
-        f"Station {i}": {
-            "entry_die_um": 0.0,
-            "primary_die_um": 0.0,
-            "primary_on_tower": False,
-            "secondary_on_tower": False
-        } for i in range(1, 7)
-    }
+        default_cfg = {
+            f"Station {i}": {
+                "entry_die_um": 0.0,
+                "primary_die_um": 0.0,
+                "primary_on_tower": False,
+                "secondary_on_tower": False
+            } for i in range(1, 7)
+        }
 
-    if os.path.exists(DIES_CONFIG_PATH):
-        with open(DIES_CONFIG_PATH, "r") as f:
-            try:
-                dies_cfg = json.load(f)
-                if not isinstance(dies_cfg, dict) or len(dies_cfg) == 0:
+        if os.path.exists(DIES_CONFIG_PATH):
+            with open(DIES_CONFIG_PATH, "r") as f:
+                try:
+                    dies_cfg = json.load(f)
+                    if not isinstance(dies_cfg, dict) or len(dies_cfg) == 0:
+                        dies_cfg = default_cfg
+                except Exception:
                     dies_cfg = default_cfg
-            except Exception:
-                dies_cfg = default_cfg
-    else:
-        dies_cfg = default_cfg
-        with open(DIES_CONFIG_PATH, "w") as f:
-            json.dump(dies_cfg, f, indent=4)
+        else:
+            dies_cfg = default_cfg
+            with open(DIES_CONFIG_PATH, "w") as f:
+                json.dump(dies_cfg, f, indent=4)
 
-    station_names = list(dies_cfg.keys())
+        station_names = list(dies_cfg.keys())
 
-    for name in station_names:
-        safe_key = name.replace(" ", "_").replace("/", "_")
-        st.session_state.setdefault(f"dies_entry_{safe_key}", float(dies_cfg.get(name, {}).get("entry_die_um", 0.0)))
-        st.session_state.setdefault(f"dies_primary_{safe_key}", float(dies_cfg.get(name, {}).get("primary_die_um", 0.0)))
-        st.session_state.setdefault(f"dies_primary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("primary_on_tower", False)))
-        st.session_state.setdefault(f"dies_secondary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("secondary_on_tower", False)))
-
-    rows = [station_names[i:i + 3] for i in range(0, len(station_names), 3)]
-    updated_dies_cfg = {}
-
-    for row in rows:
-        cols = st.columns(len(row))
-        for col, name in zip(cols, row):
+        for name in station_names:
             safe_key = name.replace(" ", "_").replace("/", "_")
-            with col:
-                st.markdown(f"### {name}")
+            st.session_state.setdefault(f"dies_entry_{safe_key}", float(dies_cfg.get(name, {}).get("entry_die_um", 0.0)))
+            st.session_state.setdefault(f"dies_primary_{safe_key}", float(dies_cfg.get(name, {}).get("primary_die_um", 0.0)))
+            st.session_state.setdefault(f"dies_primary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("primary_on_tower", False)))
+            st.session_state.setdefault(f"dies_secondary_on_{safe_key}", bool(dies_cfg.get(name, {}).get("secondary_on_tower", False)))
 
-                entry_um = st.number_input("Entry die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_entry_{safe_key}")
-                primary_um = st.number_input("Primary die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_primary_{safe_key}")
-                primary_on = st.checkbox("Primary on tower", key=f"dies_primary_on_{safe_key}")
-                secondary_on = st.checkbox("Secondary on tower", key=f"dies_secondary_on_{safe_key}")
+        rows = [station_names[i:i + 3] for i in range(0, len(station_names), 3)]
+        updated_dies_cfg = {}
 
-                updated_dies_cfg[name] = {
-                    "entry_die_um": float(entry_um),
-                    "primary_die_um": float(primary_um),
-                    "primary_on_tower": bool(primary_on),
-                    "secondary_on_tower": bool(secondary_on),
-                }
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, name in zip(cols, row):
+                safe_key = name.replace(" ", "_").replace("/", "_")
+                with col:
+                    st.markdown(f"### {name}")
 
-                st.caption(f"Entry: **{entry_um:.1f} µm** | Primary: **{primary_um:.1f} µm**")
+                    entry_um = st.number_input("Entry die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_entry_{safe_key}")
+                    primary_um = st.number_input("Primary die (µm)", min_value=0.0, step=1.0, format="%.1f", key=f"dies_primary_{safe_key}")
+                    primary_on = st.checkbox("Primary on tower", key=f"dies_primary_on_{safe_key}")
+                    secondary_on = st.checkbox("Secondary on tower", key=f"dies_secondary_on_{safe_key}")
 
-    try:
-        with open(DIES_CONFIG_PATH, "w") as f:
-            json.dump(updated_dies_cfg, f, indent=4)
-        st.caption(f"Auto-saved to `{DIES_CONFIG_PATH}`")
-    except Exception as e:
-        st.error(f"Failed to save dies config: {e}")
+                    updated_dies_cfg[name] = {
+                        "entry_die_um": float(entry_um),
+                        "primary_die_um": float(primary_um),
+                        "primary_on_tower": bool(primary_on),
+                        "secondary_on_tower": bool(secondary_on),
+                    }
 
-    st.markdown("</div>", unsafe_allow_html=True)
+                    st.caption(f"Entry: **{entry_um:.1f} µm** | Primary: **{primary_um:.1f} µm**")
+
+        try:
+            with open(DIES_CONFIG_PATH, "w") as f:
+                json.dump(updated_dies_cfg, f, indent=4)
+            st.caption(f"Auto-saved to `{DIES_CONFIG_PATH}`")
+        except Exception as e:
+            st.error(f"Failed to save dies config: {e}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================================
     # 🧯 GAS REPORTS (AUTO MONTHLY CSV) ✅ ALL MFCs = ARGON
@@ -612,9 +819,12 @@ def render_consumables_tab(P):
     #   - NO daily/weekly
     #   - outputs one CSV: argon_monthly_report.csv
     # ==========================================================
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("🧯 Argon Report — Monthly (AUTO from logs)")
-    st.caption("Auto-builds a single monthly CSV report from logs. All Furnace MFC1–4 Actual are summed as Argon.")
+    if show_argon:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown('<div class="cons-section">🧯 Argon Report — Monthly (AUTO from logs)</div>', unsafe_allow_html=True)
+        st.caption("Auto-builds a single monthly CSV report from logs. All Furnace MFC1–4 Actual are summed as Argon.")
+    else:
+        return
 
     GAS_DIR = P.gas_reports_dir
     LOGS_DIR = P.logs_dir

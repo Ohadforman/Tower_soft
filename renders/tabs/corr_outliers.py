@@ -12,6 +12,47 @@ import streamlit as st
 def render_corr_outliers_tab(draw_folder: str, maint_folder: str):
     os.makedirs(maint_folder, exist_ok=True)
 
+    st.markdown(
+        """
+        <style>
+          .corr-top-spacer{ height: 8px; }
+          .corr-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .corr-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .corr-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .corr-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="corr-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="corr-title">📈 Correlation & Outliers</div>', unsafe_allow_html=True)
+    st.markdown('<div class="corr-sub">Scan logs, select signal pairs, and inspect rolling correlation behavior over time.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="corr-line"></div>', unsafe_allow_html=True)
+
     def _safe_key(s: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_]+", "_", str(s))[:90]
 
@@ -48,8 +89,7 @@ def render_corr_outliers_tab(draw_folder: str, maint_folder: str):
 
         return pd.DataFrame({"window_time": times, "file": files, "corr": corrs})
 
-    st.markdown("---")
-    st.subheader("1) Scan logs → one numeric snapshot per file (time = file mtime)")
+    st.markdown('<div class="corr-section">1) Scan logs → one numeric snapshot per file (time = file mtime)</div>', unsafe_allow_html=True)
 
     if not os.path.exists(draw_folder):
         st.warning(f"Logs folder not found: {draw_folder}")
@@ -121,8 +161,7 @@ def render_corr_outliers_tab(draw_folder: str, maint_folder: str):
         st.info("Need at least 2 numeric columns across logs to compute correlations.")
         return
 
-    st.markdown("---")
-    st.subheader("2) Pair settings")
+    st.markdown('<div class="corr-section">2) Pair settings</div>', unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.0, 1.0])
     with c1:
@@ -173,8 +212,7 @@ def render_corr_outliers_tab(draw_folder: str, maint_folder: str):
         st.warning("Filter left fewer than 2 numeric columns.")
         return
 
-    st.markdown("---")
-    st.subheader("3) Compute + plot correlations for MANY pairs")
+    st.markdown('<div class="corr-section">3) Compute + plot correlations for MANY pairs</div>', unsafe_allow_html=True)
 
     pairs = list(itertools.combinations(cols_use, 2))
     if not pairs:

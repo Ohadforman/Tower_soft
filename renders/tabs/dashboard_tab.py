@@ -3,6 +3,7 @@ def render_dashboard_tab(P):
         # Imports (local)
         # ==========================================================
         import os
+        import time
         from datetime import datetime
         import numpy as np
         import pandas as pd
@@ -17,6 +18,11 @@ def render_dashboard_tab(P):
             zone_lengths_from_log_km,
             build_tm_instruction_rows_auto_from_good_zones,
         )
+        t_run_start = time.perf_counter()
+        perf_marks = [("start", t_run_start)]
+
+        def _perf_mark(name: str):
+            perf_marks.append((name, time.perf_counter()))
         
         # ==========================================================
         # WIDE (best set ONCE at top of app; safe-guard here)
@@ -31,7 +37,76 @@ def render_dashboard_tab(P):
         st.markdown(
             """
             <style>
-              .block-container { max-width: 98rem !important; padding-top: 1.2rem; }
+              .block-container { max-width: 98rem !important; padding-top: 2.4rem; }
+              .dash-title{
+                font-size: 1.62rem;
+                font-weight: 900;
+                margin: 0;
+                padding-top: 4px;
+                line-height: 1.2;
+                color: rgba(236,248,255,0.98);
+                text-shadow: 0 0 12px rgba(80,174,255,0.20);
+              }
+              .dash-sub{
+                margin: 4px 0 10px 0;
+                color: rgba(186,224,248,0.88);
+                font-size: 0.92rem;
+              }
+              .dash-top-line{
+                height: 1px;
+                margin: 0 0 12px 0;
+                background: linear-gradient(90deg, rgba(120,200,255,0.56), rgba(120,200,255,0.0));
+              }
+              .dash-soft-card{
+                border: 1px solid rgba(128,206,255,0.22);
+                border-radius: 12px;
+                background: linear-gradient(180deg, rgba(14,32,56,0.30), rgba(8,16,28,0.22));
+                padding: 8px 10px;
+                margin: 4px 0 10px 0;
+                backdrop-filter: blur(2px);
+              }
+              .dash-soft-card p{
+                margin: 0 !important;
+                color: rgba(197,229,249,0.90) !important;
+                font-size: 0.84rem;
+              }
+              .dash-section{
+                margin-top: 4px;
+                margin-bottom: 6px;
+                padding-left: 8px;
+                border-left: 3px solid rgba(120,200,255,0.62);
+                font-size: 1.00rem;
+                font-weight: 800;
+                color: rgba(224,243,255,0.98);
+              }
+              .dash-signal-chip-wrap{
+                margin-top: -4px;
+                margin-bottom: 10px;
+                padding: 6px 8px 7px 8px;
+                border: 1px solid rgba(128,206,255,0.18);
+                border-radius: 10px;
+                background: rgba(10,20,36,0.26);
+              }
+              div[data-testid="stMultiSelect"] div[data-baseweb="tag"]{
+                background: linear-gradient(180deg, rgba(70,160,238,0.92), rgba(32,96,168,0.90)) !important;
+                border: 1px solid rgba(170,232,255,0.78) !important;
+                color: rgba(244,252,255,0.99) !important;
+              }
+              div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg{
+                fill: rgba(238,250,255,0.98) !important;
+              }
+              div[data-testid="stButton"] > button:disabled{
+                opacity: 0.78 !important;
+                color: rgba(212,238,255,0.92) !important;
+                border-color: rgba(128,206,255,0.30) !important;
+                background: linear-gradient(180deg, rgba(24,62,102,0.50), rgba(12,34,64,0.46)) !important;
+                box-shadow: 0 4px 10px rgba(8,30,58,0.20) !important;
+              }
+              div[data-testid="stButton"] > button:disabled:hover{
+                transform: none !important;
+                border-color: rgba(128,206,255,0.30) !important;
+                box-shadow: 0 4px 10px rgba(8,30,58,0.20) !important;
+              }
             </style>
             """,
             unsafe_allow_html=True
@@ -43,23 +118,46 @@ def render_dashboard_tab(P):
         DATASET_DIR = P.dataset_dir
         LOGS_DIR = getattr(P, "logs_dir", None) or getattr(P, "log_dir", None) or "logs"
         
-        st.title("📊 Draw Tower Logs Dashboard")
+        st.markdown('<div class="dash-title">📊 Draw Tower Logs Dashboard</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="dash-sub">Analyze signals, mark good zones, and export T&M-ready zone summaries.</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div class="dash-top-line"></div>', unsafe_allow_html=True)
         
         # ==========================================================
         # Helpers
         # ==========================================================
-        def list_dataset_csvs(dataset_dir):
-            if not os.path.exists(dataset_dir):
+        def _mtime(path: str) -> float:
+            try:
+                return os.path.getmtime(path)
+            except Exception:
+                return 0.0
+
+        @st.cache_data(show_spinner=False)
+        def _cached_list_csv_names(dir_path: str, dir_mtime: float):
+            if not os.path.exists(dir_path):
                 return []
-            return sorted([f for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")])
-        
-        def get_most_recent_dataset_csv(dataset_dir):
-            if not os.path.exists(dataset_dir):
+            return sorted([f for f in os.listdir(dir_path) if f.lower().endswith(".csv")])
+
+        @st.cache_data(show_spinner=False)
+        def _cached_latest_csv_name(dir_path: str, dir_mtime: float):
+            if not os.path.exists(dir_path):
                 return None
-            files = [os.path.join(dataset_dir, f) for f in os.listdir(dataset_dir) if f.lower().endswith(".csv")]
+            files = [os.path.join(dir_path, f) for f in os.listdir(dir_path) if f.lower().endswith(".csv")]
             if not files:
                 return None
             return os.path.basename(max(files, key=os.path.getmtime))
+
+        @st.cache_data(show_spinner=False)
+        def _cached_read_csv(path: str, keep_default_na: bool, file_mtime: float):
+            return pd.read_csv(path, keep_default_na=keep_default_na)
+
+        def list_dataset_csvs(dataset_dir):
+            return _cached_list_csv_names(dataset_dir, _mtime(dataset_dir))
+        
+        def get_most_recent_dataset_csv(dataset_dir):
+            return _cached_latest_csv_name(dataset_dir, _mtime(dataset_dir))
         
         def resolve_log_path(selected_name):
             if not selected_name:
@@ -306,7 +404,8 @@ def render_dashboard_tab(P):
         # ==========================================================
         # Load log CSV
         # ==========================================================
-        csv_files = [f for f in os.listdir(LOGS_DIR) if f.lower().endswith(".csv")]
+        csv_files = _cached_list_csv_names(LOGS_DIR, _mtime(LOGS_DIR))
+        _perf_mark("logs_listed")
         if not csv_files:
             st.error("No CSV files found in the logs directory.")
             st.stop()
@@ -321,12 +420,19 @@ def render_dashboard_tab(P):
         if not st.session_state.get("dataset_select") or st.session_state.get("dataset_select") not in csv_files_sorted:
             st.session_state["dataset_select"] = latest_file
 
-        selected_file = st.sidebar.selectbox(
-            "Select a dataset",
-            options=csv_files_sorted,
-            key="dataset_select",
-        )
-        st.sidebar.caption(f"Latest: **{latest_file}**")
+        st.markdown("<div class='dash-section'>Dataset</div>", unsafe_allow_html=True)
+        ds1, ds2 = st.columns([2.5, 1.2], gap="small")
+        with ds1:
+            selected_file = st.selectbox(
+                "Select a dataset",
+                options=csv_files_sorted,
+                key="dataset_select",
+            )
+        with ds2:
+            st.markdown(
+                f"<div class='dash-soft-card'><p>Latest: <b>{latest_file}</b></p></div>",
+                unsafe_allow_html=True,
+            )
 
         log_path = resolve_log_path(selected_file)
         if not log_path or not os.path.exists(log_path):
@@ -334,7 +440,8 @@ def render_dashboard_tab(P):
             st.stop()
         
         try:
-            df = pd.read_csv(log_path)
+            df = _cached_read_csv(log_path, keep_default_na=True, file_mtime=_mtime(log_path))
+            _perf_mark("log_csv_read")
         except Exception as e:
             st.error(f"Failed to read log CSV: {e}")
             st.stop()
@@ -352,7 +459,10 @@ def render_dashboard_tab(P):
         # ==========================================================
         recent_dataset_csvs = list_dataset_csvs(DATASET_DIR)
         latest_dataset_csv = get_most_recent_dataset_csv(DATASET_DIR)
-        st.caption(f"Most recent dataset CSV: **{latest_dataset_csv if latest_dataset_csv else 'None'}**")
+        st.markdown(
+            f"<div class='dash-soft-card'><p>Most recent dataset CSV: <b>{latest_dataset_csv if latest_dataset_csv else 'None'}</b></p></div>",
+            unsafe_allow_html=True,
+        )
         
         # ==========================================================
         # Session state
@@ -423,14 +533,17 @@ def render_dashboard_tab(P):
             st.warning("No columns found in log CSV.")
             st.stop()
         
-        x_axis = st.selectbox("Select X-axis", column_options, key="x_axis_dash")
-        
-        y_axes = st.multiselect(
-            "Select Y-axis column(s)",
-            options=column_options,
-            default=[],
-            key="y_axes_dash_multi",
-        )
+        st.markdown("<div class='dash-section'>Signals Setup</div>", unsafe_allow_html=True)
+        s1, s2 = st.columns([1, 1], gap="medium")
+        with s1:
+            x_axis = st.selectbox("Select X-axis", column_options, key="x_axis_dash")
+        with s2:
+            y_axes = st.multiselect(
+                "Select Y-axis column(s)",
+                options=column_options,
+                default=[],
+                key="y_axes_dash_multi",
+            )
         
         if not y_axes:
             st.info("Select one or more **Y-axis** columns to show the plot + zones.")
@@ -439,7 +552,7 @@ def render_dashboard_tab(P):
         # ==========================================================
         # Nice UI labels (colored chips) for the selected Y signals
         # ==========================================================
-        st.markdown("#### Selected signals")
+        st.markdown("<div class='dash-section'>Selected signals</div>", unsafe_allow_html=True)
         chips = []
         _chip_colors = [
             "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -453,7 +566,7 @@ def render_dashboard_tab(P):
                 f"{safe_str(y_col)}" 
                 f"</span>"
             )
-        st.markdown("""<div style='margin-top:-6px; margin-bottom:10px;'>""" + "".join(chips) + "</div>", unsafe_allow_html=True)
+        st.markdown("""<div class='dash-signal-chip-wrap'>""" + "".join(chips) + "</div>", unsafe_allow_html=True)
         
         # ==========================================================
         # Stable x typing + build df_plot
@@ -482,6 +595,7 @@ def render_dashboard_tab(P):
         if df_plot.empty:
             st.warning("No data to plot after filtering NA values for selected X/Y columns.")
             st.stop()
+        _perf_mark("plot_dataframe_prepared")
         
         # ==========================================================
         # ✅ FORCE numeric selection axis for zones (works for ANY X type)
@@ -498,8 +612,22 @@ def render_dashboard_tab(P):
         # ==========================================================
         # LIVE Zone Marker settings
         # ==========================================================
-        st.subheader("🟩 Zone Marker (LIVE on-plot selection)")
-        st.caption("Drag a horizontal window on the plot. Turn on Auto-queue to mark many quickly, then 'Add Queued Zones'.")
+        if st.sidebar.checkbox("Show dashboard timings", value=False, key="dash_show_perf"):
+            rows_perf = []
+            for i in range(1, len(perf_marks)):
+                step = perf_marks[i][0]
+                ms = (perf_marks[i][1] - perf_marks[i - 1][1]) * 1000.0
+                rows_perf.append({"step": step, "ms": round(ms, 1)})
+            total_ms = (time.perf_counter() - t_run_start) * 1000.0
+            rows_perf.append({"step": "total_so_far", "ms": round(total_ms, 1)})
+            with st.expander("⏱ Dashboard Performance", expanded=False):
+                st.dataframe(pd.DataFrame(rows_perf), use_container_width=True, hide_index=True)
+
+        st.markdown("<div class='dash-section'>🟩 Zone Marker (LIVE on-plot selection)</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='dash-soft-card'><p>Drag a horizontal window on the plot. Use <b>Auto-queue</b> for fast marking, then click <b>Add Queued Zones</b>.</p></div>",
+            unsafe_allow_html=True,
+        )
         
         opt1, opt2, opt3 = st.columns([1, 1, 2])
         with opt1:
@@ -547,7 +675,7 @@ def render_dashboard_tab(P):
         # ==========================================================
         # Plot (selection uses numeric axis when datetime)
         # ==========================================================
-        st.subheader("📈 Plot")
+        st.markdown("<div class='dash-section'>📈 Plot</div>", unsafe_allow_html=True)
         
         # Use dtype only for formatting ticks/hover; slicing is ALWAYS via __x_sel__
         is_dt_x = pd.api.types.is_datetime64_any_dtype(df_plot[x_axis_display])
@@ -890,7 +1018,7 @@ def render_dashboard_tab(P):
         # ==========================================================
         # Zone actions
         # ==========================================================
-        st.subheader("🟩 Zone Actions")
+        st.markdown("<div class='dash-section'>🟩 Zone Actions</div>", unsafe_allow_html=True)
         
         b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 1])
         
@@ -991,7 +1119,11 @@ def render_dashboard_tab(P):
                         st.error(f"Dataset CSV not found: {dataset_path}")
                     else:
                         try:
-                            df_params = pd.read_csv(dataset_path, keep_default_na=False)
+                            df_params = _cached_read_csv(
+                                dataset_path,
+                                keep_default_na=False,
+                                file_mtime=_mtime(dataset_path),
+                            )
                         except Exception as e:
                             st.error(f"Failed reading dataset CSV: {e}")
                             df_params = None

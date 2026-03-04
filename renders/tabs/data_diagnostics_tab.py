@@ -37,15 +37,25 @@ def _build_path_rows_and_summary(tracked_items: tuple, refresh_token: int):
     report_obj = SimpleNamespace(**tracked)
     report = build_path_health_report(report_obj, critical_keys=list(tracked), legacy_aliases={})
     summary = report.get("summary", {})
+    item_by_key = {it.get("key"): it for it in report.get("items", [])}
 
     rows = []
     for name, path in tracked.items():
+        item = item_by_key.get(name, {})
         exists = os.path.exists(path)
         size = os.path.getsize(path) if exists and os.path.isfile(path) else 0
+        readable = bool(item.get("readable", exists and os.access(path, os.R_OK)))
+        writable = bool(item.get("writable", os.access(path if exists else (os.path.dirname(path) or "."), os.W_OK)))
+        healthy = bool(item.get("healthy", exists and readable and writable))
+        status = "✅ READY" if healthy else "❌ BLOCKED"
         rows.append(
             {
                 "key": name,
+                "status": status,
                 "exists": exists,
+                "readable": readable,
+                "writable": writable,
+                "healthy": healthy,
                 "size_bytes": size,
                 "modified": _fmt_ts(path) if exists else "missing",
                 "path": path,
@@ -102,8 +112,76 @@ def _build_schema_rows(path_map_items: tuple, refresh_token: int) -> pd.DataFram
 
 
 def render_data_diagnostics_tab(P) -> None:
-    st.title("🩺 Data Diagnostics")
-    st.caption("Read-only health view for paths and core data files.")
+    st.markdown(
+        """
+        <style>
+          .diag-top-spacer{ height: 8px; }
+          .diag-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .diag-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .diag-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .diag-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+          .diag-perm-wrap{
+            display:grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin: 8px 0 10px 0;
+          }
+          .diag-perm-card{
+            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid rgba(128,206,255,0.26);
+            background: linear-gradient(180deg, rgba(14,32,56,0.30), rgba(8,16,28,0.22));
+          }
+          .diag-perm-k{
+            font-size: 0.80rem;
+            color: rgba(188,224,248,0.90);
+            margin-bottom: 2px;
+          }
+          .diag-perm-v{
+            font-size: 1.15rem;
+            font-weight: 860;
+            color: rgba(230,246,255,0.98);
+          }
+          .diag-perm-good{
+            border-color: rgba(118,236,160,0.44);
+            box-shadow: 0 0 0 1px rgba(118,236,160,0.18);
+          }
+          .diag-perm-bad{
+            border-color: rgba(255,120,120,0.48);
+            box-shadow: 0 0 0 1px rgba(255,120,120,0.20);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="diag-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="diag-title">🩺 Data Diagnostics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="diag-sub">Read-only health view for paths, backups, audits, and core data schemas.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="diag-line"></div>', unsafe_allow_html=True)
 
     root_fallback_db = os.path.abspath(os.path.join(P.root_dir, "data", "tower.duckdb"))
     active_db = os.path.abspath(P.duckdb_path)
@@ -115,7 +193,7 @@ def render_data_diagnostics_tab(P) -> None:
         st.cache_data.clear()
     refresh_token = int(st.session_state.get("diag_refresh_token", 0))
 
-    st.subheader("Backup")
+    st.markdown('<div class="diag-section">Backup</div>', unsafe_allow_html=True)
     b1, b2 = st.columns([1, 2])
     b1.code(P.backups_dir)
     snapshots = []
@@ -143,7 +221,7 @@ def render_data_diagnostics_tab(P) -> None:
     if snapshots:
         st.caption(f"Latest snapshot: {snapshots[0]}")
 
-    st.subheader("Full App Tests")
+    st.markdown('<div class="diag-section">Full App Tests</div>', unsafe_allow_html=True)
     st.caption("Runs run_app_tests.py and shows the complete report output.")
     st.session_state.setdefault("diag_app_tests_output", "")
     st.session_state.setdefault("diag_app_tests_code", None)
@@ -165,6 +243,28 @@ def render_data_diagnostics_tab(P) -> None:
             st.error(f"Last run failed (exit code {last_code}) at {ran_at}")
         st.code(st.session_state.get("diag_app_tests_output", ""), language="text")
 
+    st.markdown('<div class="diag-section">Path Permissions Audit</div>', unsafe_allow_html=True)
+    st.caption("Deep read/write/list/parse access audit for all configured paths.")
+    st.session_state.setdefault("diag_perm_audit_output", "")
+    st.session_state.setdefault("diag_perm_audit_code", None)
+    st.session_state.setdefault("diag_perm_audit_ran_at", "")
+    if st.button("Run Path Permissions Audit", key="run_perm_audit_btn", use_container_width=True):
+        cmd = [sys.executable, os.path.join(P.root_dir, "run_path_permissions_audit.py")]
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=P.root_dir)
+        out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        st.session_state["diag_perm_audit_output"] = out.strip()
+        st.session_state["diag_perm_audit_code"] = int(proc.returncode)
+        st.session_state["diag_perm_audit_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    audit_code = st.session_state.get("diag_perm_audit_code")
+    if audit_code is not None:
+        ran_at = st.session_state.get("diag_perm_audit_ran_at", "")
+        if audit_code == 0:
+            st.success(f"Permissions audit passed (exit code 0) at {ran_at}")
+        else:
+            st.error(f"Permissions audit failed (exit code {audit_code}) at {ran_at}")
+        st.code(st.session_state.get("diag_perm_audit_output", ""), language="text")
+
     tracked = _collect_configured_paths(P)
     tracked_items = tuple(tracked.items())
     summary, paths_df = _build_path_rows_and_summary(tracked_items, refresh_token)
@@ -173,10 +273,41 @@ def render_data_diagnostics_tab(P) -> None:
     c2.metric("Issues", int(summary.get("issues", 0)))
     c3.metric("Checked paths", len(tracked))
 
-    st.subheader("Configured Paths (All from P)")
-    st.dataframe(paths_df, use_container_width=True, hide_index=True)
+    healthy_count = int(paths_df["healthy"].sum()) if not paths_df.empty and "healthy" in paths_df.columns else 0
+    blocked_count = int((~paths_df["healthy"]).sum()) if not paths_df.empty and "healthy" in paths_df.columns else 0
+    readable_count = int(paths_df["readable"].sum()) if not paths_df.empty and "readable" in paths_df.columns else 0
+    writable_count = int(paths_df["writable"].sum()) if not paths_df.empty and "writable" in paths_df.columns else 0
+    total = len(paths_df)
 
-    st.subheader("Discovered Data Files (CSV/JSON/LOG/DB)")
+    st.markdown(
+        f"""
+        <div class="diag-perm-wrap">
+          <div class="diag-perm-card {'diag-perm-good' if blocked_count == 0 else 'diag-perm-bad'}">
+            <div class="diag-perm-k">Path Access Status</div>
+            <div class="diag-perm-v">{'✅ ALL READY' if blocked_count == 0 else f'❌ {blocked_count} BLOCKED'}</div>
+          </div>
+          <div class="diag-perm-card">
+            <div class="diag-perm-k">Readable Paths</div>
+            <div class="diag-perm-v">{readable_count}/{total}</div>
+          </div>
+          <div class="diag-perm-card">
+            <div class="diag-perm-k">Writable Paths</div>
+            <div class="diag-perm-v">{writable_count}/{total}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="diag-section">Configured Paths (All from P)</div>', unsafe_allow_html=True)
+    show_cols = ["status", "key", "exists", "readable", "writable", "healthy", "modified", "path"]
+    show_cols = [c for c in show_cols if c in paths_df.columns]
+    if not paths_df.empty:
+        st.dataframe(paths_df[show_cols], use_container_width=True, hide_index=True)
+    else:
+        st.info("No configured paths found.")
+
+    st.markdown('<div class="diag-section">Discovered Data Files (CSV/JSON/LOG/DB)</div>', unsafe_allow_html=True)
     dirs = (
         ("data", P.data_dir),
         ("logs", P.logs_dir),
@@ -194,7 +325,7 @@ def render_data_diagnostics_tab(P) -> None:
     else:
         st.dataframe(discovered, use_container_width=True, hide_index=True)
 
-    st.subheader("CSV Schemas")
+    st.markdown('<div class="diag-section">CSV Schemas</div>', unsafe_allow_html=True)
     path_map = {
         "orders": P.orders_csv,
         "parts_orders": P.parts_orders_csv,

@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual env / IDE
+.venv/
+.idea/
+
+# Runtime DB artifacts
+*.duckdb
+*.duckdb.wal
+
+# Temp/debug workers
+tmp/duckdb_worker*.py
+tmp/duckdb_auto_worker.py
+
+# Generated runtime data (keep tracked canonical files manually)
+hooks/*_PRINT.txt
+
+# OS noise
+.DS_Store

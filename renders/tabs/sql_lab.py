@@ -22,17 +22,154 @@ def render_sql_lab_tab(P):
     st.markdown(
         """
         <style>
-        .block-container { max-width: 98% !important; padding-left: 1.8rem; padding-right: 1.8rem; }
+        .block-container { max-width: 98% !important; padding-left: 1.8rem; padding-right: 1.8rem; padding-top: 2.35rem; }
+        .sql-top-spacer{ height: 8px; }
+        .sql-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+        }
+        .sql-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+        }
+        .sql-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+        }
+        .sql-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+        }
+        .st-key-sql_ui_step_btn_1 button,
+        .st-key-sql_ui_step_btn_2 button,
+        .st-key-sql_ui_step_btn_3 button,
+        .st-key-sql_ui_step_btn_4 button {
+            border: 1px solid rgba(120, 205, 255, 0.44) !important;
+            border-radius: 12px !important;
+            background: linear-gradient(145deg, rgba(16, 28, 44, 0.66), rgba(10, 18, 30, 0.48)) !important;
+            color: rgba(232, 245, 255, 0.98) !important;
+            min-height: 58px !important;
+            font-weight: 800 !important;
+        }
+        .st-key-sql_ui_step_btn_1 button:hover,
+        .st-key-sql_ui_step_btn_2 button:hover,
+        .st-key-sql_ui_step_btn_3 button:hover,
+        .st-key-sql_ui_step_btn_4 button:hover {
+            transform: translateY(-2px) scale(1.015) !important;
+            border-color: rgba(156, 224, 255, 0.72) !important;
+            box-shadow: 0 14px 28px rgba(0, 0, 0, 0.30), 0 0 18px rgba(92, 190, 255, 0.34) !important;
+        }
+        .st-key-sql_ui_step_btn_1 button[kind="primary"],
+        .st-key-sql_ui_step_btn_2 button[kind="primary"],
+        .st-key-sql_ui_step_btn_3 button[kind="primary"],
+        .st-key-sql_ui_step_btn_4 button[kind="primary"] {
+            border-color: rgba(172, 232, 255, 0.90) !important;
+            background: linear-gradient(145deg, rgba(34, 70, 108, 0.88), rgba(18, 42, 72, 0.80)) !important;
+            box-shadow: 0 14px 28px rgba(24, 88, 138, 0.40), 0 0 24px rgba(96, 196, 255, 0.45) !important;
+        }
+        .st-key-sql_run button {
+            border-radius: 12px !important;
+            border: 1px solid rgba(172, 232, 255, 0.90) !important;
+            background: linear-gradient(145deg, rgba(34, 70, 108, 0.88), rgba(18, 42, 72, 0.80)) !important;
+            color: rgba(238, 250, 255, 0.98) !important;
+            box-shadow: 0 14px 28px rgba(24, 88, 138, 0.40), 0 0 24px rgba(96, 196, 255, 0.45) !important;
+            font-weight: 800 !important;
+        }
+        .st-key-sql_run button:hover {
+            border-color: rgba(192, 240, 255, 0.98) !important;
+            box-shadow: 0 16px 32px rgba(24, 88, 138, 0.44), 0 0 28px rgba(96, 196, 255, 0.52) !important;
+            transform: translateY(-1px) scale(1.01) !important;
+        }
+        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextInput"] input,
+        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextArea"] textarea,
+        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stNumberInput"] input,
+        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stDateInput"] input {
+            background: rgba(10, 18, 30, 0.66) !important;
+            border: 1px solid rgba(132, 210, 255, 0.30) !important;
+            border-radius: 10px !important;
+            color: rgba(236, 248, 255, 0.98) !important;
+        }
+        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] > div,
+        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] input {
+            background: rgba(10, 18, 30, 0.66) !important;
+            border-color: rgba(132, 210, 255, 0.30) !important;
+            color: rgba(236, 248, 255, 0.98) !important;
+        }
+        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="tag"] {
+            background: rgba(34, 66, 102, 0.66) !important;
+            border: 1px solid rgba(160, 228, 255, 0.44) !important;
+            color: rgba(240, 251, 255, 0.98) !important;
+        }
+        .sql-help {
+            border: 1px solid rgba(132, 214, 255, 0.24);
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin: 6px 0 10px 0;
+            background: rgba(10, 20, 34, 0.42);
+            color: rgba(230, 246, 255, 0.95);
+            font-size: 0.88rem;
+            line-height: 1.35;
+        }
+        .sql-subhead {
+            font-size: 0.90rem;
+            font-weight: 760;
+            color: rgba(170, 226, 255, 0.96);
+            margin: 4px 0 6px 0;
+        }
+        div[data-testid="stExpander"] {
+            border: 1px solid rgba(145, 214, 255, 0.18) !important;
+            border-radius: 12px !important;
+            background: rgba(8, 14, 24, 0.35) !important;
+            overflow: hidden !important;
+        }
+        div[data-testid="stExpander"] details[open] {
+            border: 1px solid rgba(150, 222, 255, 0.44) !important;
+            box-shadow: 0 14px 28px rgba(0,0,0,0.28), 0 0 18px rgba(84, 182, 255, 0.24) !important;
+            background: linear-gradient(165deg, rgba(10, 20, 34, 0.72), rgba(8, 14, 24, 0.52)) !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    
-    st.title("🧪 SQL Lab")
-    st.caption(
-        "Filter **draw CSVs** with AND/OR/NOT, then overlay **Maintenance** and **Faults** "
-        "in a separate events lane. Click any point to inspect."
-    )
+
+    st.markdown('<div class="sql-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sql-title">🧪 SQL Lab</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sql-sub">Filter draw CSVs with AND/OR/NOT, then overlay Maintenance and Faults in a separate events lane. Click any point to inspect.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sql-line"></div>', unsafe_allow_html=True)
+    st.session_state.setdefault("sql_ui_step", 1)
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        if st.button("STEP 1 · Pick parameter / group", key="sql_ui_step_btn_1", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 1 else "secondary"):
+            st.session_state["sql_ui_step"] = 1
+            st.rerun()
+    with s2:
+        if st.button("STEP 2 · Set condition + scope", key="sql_ui_step_btn_2", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 2 else "secondary"):
+            st.session_state["sql_ui_step"] = 2
+            st.rerun()
+    with s3:
+        if st.button("STEP 3 · Add conditions to filter", key="sql_ui_step_btn_3", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 3 else "secondary"):
+            st.session_state["sql_ui_step"] = 3
+            st.rerun()
+    with s4:
+        if st.button("STEP 4 · Run and inspect results", key="sql_ui_step_btn_4", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 4 else "secondary"):
+            st.session_state["sql_ui_step"] = 4
+            st.rerun()
+    active_step = st.session_state.get("sql_ui_step", 1)
+
+    def _step_label(base: str, step_num: int) -> str:
+        return f"{base}  •  ACTIVE" if active_step == step_num else base
     
     DATASET_DIR = P.dataset_dir
     DB_PATH = P.duckdb_path
@@ -255,7 +392,16 @@ def render_sql_lab_tab(P):
     # =========================================================
     # Indexing controls
     # =========================================================
-    with st.expander("📁 Indexing", expanded=False):
+    with st.expander(_step_label("📁 Indexing", 1), expanded=(active_step == 1)):
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Indexing control:</b> Rebuild after adding/removing dataset CSV files.
+              Use <b>Reset SQL state</b> only when the tab behaves unexpectedly.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         c1, c2 = st.columns([1, 1])
         if c1.button("🔄 Rebuild dataset index", use_container_width=True, key="sql_rebuild_kv"):
             for k in [
@@ -311,10 +457,17 @@ def render_sql_lab_tab(P):
     # =========================================================
     # FILTER UI
     # =========================================================
-    st.subheader("🧱 Filters")
-    
-    with st.expander("1) 🔎 Pick parameter / group", expanded=True):
-        st.markdown("#### 🔎 Parameter search (single or group)")
+    with st.expander(_step_label("1) 🔎 Pick parameter / group", 1), expanded=(active_step == 1)):
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Goal:</b> choose the parameter(s) you want to filter.<br>
+              Start with <b>Single parameter</b> for quick runs, or switch to <b>Group</b> for multi-zone filtering.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div class='sql-subhead'>🔎 Parameter Search</div>", unsafe_allow_html=True)
         search_q = st.text_input(
             "Search parameters",
             placeholder="Examples: zone avg diameter | tension | furnace",
@@ -341,6 +494,7 @@ def render_sql_lab_tab(P):
                 horizontal=True,
                 key="sql_pick_mode_builder",
             )
+            st.caption("Single = one parameter rule | Group = one rule over many selected parameters.")
         with cB:
             group_mode = st.radio(
                 "Group logic",
@@ -349,6 +503,7 @@ def render_sql_lab_tab(P):
                 key="sql_group_logic",
                 help="ALL = every selected parameter must match. ANY = at least one matches.",
             )
+            st.caption("ALL = each selected parameter must pass | ANY = at least one passes.")
         with cC:
             st.caption(f"Matches: **{len(matches_all):,}**" + (" (showing first 500)" if len(matches_all) > 500 else ""))
     
@@ -361,7 +516,7 @@ def render_sql_lab_tab(P):
             disabled=(select_mode != "Single parameter"),
         )
     
-        st.markdown("#### ✅ Group selection (from search results)")
+        st.markdown("<div class='sql-subhead'>✅ Group Selection (from search results)</div>", unsafe_allow_html=True)
         if select_mode != "Group from search results":
             st.info("Switch **Pick mode** to **Group from search results** to select many parameters at once.")
             selected_group = []
@@ -423,6 +578,7 @@ def render_sql_lab_tab(P):
                     if st.button("🧼 Clear selection", use_container_width=True, key="sql_clear_group_sel"):
                         st.session_state["sql_group_selected_params"] = []
                         st.rerun()
+                st.caption("Tip: search → select all shown → use 'Add group' in Step 3.")
     
                 selected_group = st.multiselect(
                     "Selected parameters",
@@ -464,7 +620,16 @@ def render_sql_lab_tab(P):
     except Exception:
         pass
     
-    with st.expander("2) ⚙️ Condition", expanded=True):
+    with st.expander(_step_label("2) ⚙️ Condition", 2), expanded=(active_step == 2)):
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Goal:</b> define the comparison rule for your selected parameter(s).<br>
+              Tip: for text use <b>contains</b>; for ranges use <b>between</b>.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         c_op, c_v1, c_v2 = st.columns([1.2, 2, 2])
     
         with c_op:
@@ -492,10 +657,12 @@ def render_sql_lab_tab(P):
         c_join, c_not = st.columns([1, 1])
         with c_join:
             joiner = st.radio("Join", ["AND", "OR"], horizontal=True, key="sql_joiner")
+            st.caption("`AND` = must match all rules | `OR` = can match any rule.")
         with c_not:
             negate = st.checkbox("NOT", value=False, key="sql_negate")
+            st.caption("`NOT` flips the selected rule (exclude matches).")
     
-        st.markdown("#### 🗓️ Time filter (optional)")
+        st.markdown("<div class='sql-subhead'>🗓️ Time Filter (optional)</div>", unsafe_allow_html=True)
         time_on = st.checkbox("Enable time filter", value=False, key="sql_time_on")
         t1, t2 = st.columns(2)
         with t1:
@@ -519,7 +686,15 @@ def render_sql_lab_tab(P):
     # =========================================================
     # Maintenance + Fault filters (collapsed by default)
     # =========================================================
-    with st.expander("🛠 Maintenance & Fault Filters (optional)", expanded=False):
+    with st.expander(_step_label("🛠 Maintenance & Fault Filters (optional)", 2), expanded=(active_step == 2)):
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Quick recipe:</b> enable one section → add text/component → keep scope as <b>matched draws window</b>.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if include_maint or include_faults:
             st.markdown("#### ⏱️ Event scope")
             event_scope = st.radio(
@@ -816,7 +991,15 @@ def render_sql_lab_tab(P):
     # =========================================================
     # Add/remove conditions (UI)
     # =========================================================
-    with st.expander("3) ➕ Build filter", expanded=True):
+    with st.expander(_step_label("3) ➕ Build filter", 3), expanded=(active_step == 3)):
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Build your query:</b> add one or more conditions, then review the active filter summary.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
     
         if b1.button("➕ Add condition", use_container_width=True, key="sql_add_cond"):
@@ -968,7 +1151,15 @@ def render_sql_lab_tab(P):
     # =========================================================
     # RUN FILTER
     # =========================================================
-    st.subheader("▶ Run")
+    st.markdown('<div class="sql-section">▶ Run</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="sql-help">
+          <b>Run filter</b> executes your active conditions and loads matching Draws / Maintenance / Faults.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     
     sql_draws = f"""
     WITH draws AS (

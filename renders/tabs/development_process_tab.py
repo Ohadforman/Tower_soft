@@ -32,29 +32,18 @@ def render_development_process_tab(P):
     /* ---------- page spacing ---------- */
     .block-container { padding-top: 2.8rem; padding-bottom: 2.0rem; }
 
-    /* ---------- header / hero card ---------- */
-    .dp-hero{
-      border-radius: 22px;
-      padding: 16px 18px 14px 18px;
-      margin: 6px 0 10px 0;
-      border: 1px solid rgba(255,255,255,0.10);
-      background:
-        radial-gradient(980px 260px at 12% -10%, rgba(0,140,255,0.18), rgba(0,0,0,0) 60%),
-        radial-gradient(680px 240px at 88% 10%, rgba(0,255,180,0.09), rgba(0,0,0,0) 55%),
-        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-      box-shadow: 0 14px 34px rgba(0,0,0,0.34);
-    }
-    .dp-hero-title{
-      font-size: 1.22rem;
+    .dp-title{
+      font-size: 1.65rem;
       font-weight: 900;
-      margin: 0;
-      line-height: 1.15;
+      margin: 4px 0 2px 0;
       letter-spacing: -0.2px;
+      color: rgba(235,247,255,0.98);
+      text-shadow: 0 0 14px rgba(76,168,255,0.26);
     }
-    .dp-hero-sub{
-      margin-top: 6px;
+    .dp-sub{
+      margin: 0 0 6px 0;
       font-size: 0.93rem;
-      color: rgba(255,255,255,0.72);
+      color: rgba(191,226,250,0.84);
     }
 
     /* ---------- sticky toolbar ---------- */
@@ -62,17 +51,17 @@ def render_development_process_tab(P):
       position: sticky;
       top: 0.25rem;
       z-index: 50;
-      padding-top: 6px;
+      padding-top: 4px;
       padding-bottom: 6px;
-      background: linear-gradient(180deg, rgba(10,10,10,0.75), rgba(10,10,10,0.0));
-      backdrop-filter: blur(6px);
+      background: linear-gradient(180deg, rgba(10,10,10,0.55), rgba(10,10,10,0.0));
+      backdrop-filter: blur(3px);
     }
     .dp-toolbar{
-      border-radius: 18px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.03);
-      box-shadow: 0 10px 28px rgba(0,0,0,0.26);
-      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(116,191,255,0.22);
+      background: linear-gradient(180deg, rgba(16,36,64,0.36), rgba(8,16,30,0.24));
+      box-shadow: 0 8px 18px rgba(7,29,58,0.26);
+      padding: 8px 10px;
     }
     .dp-pill{
       display:inline-flex;
@@ -80,28 +69,61 @@ def render_development_process_tab(P):
       gap:8px;
       padding: 7px 10px;
       border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.03);
-      color: rgba(255,255,255,0.78);
+      border: 1px solid rgba(116,191,255,0.24);
+      background: linear-gradient(180deg, rgba(30,76,124,0.34), rgba(12,28,52,0.28));
+      color: rgba(222,242,255,0.92);
       font-size: 0.88rem;
       white-space: nowrap;
+    }
+    .dp-help{
+      border: 1px solid rgba(125,210,255,0.16);
+      border-radius: 12px;
+      padding: 8px 10px;
+      margin: 6px 0 8px 0;
+      background: rgba(12,22,36,0.26);
+      color: rgba(232,245,255,0.90);
+      font-size: 0.86rem;
+      line-height: 1.35;
+    }
+    .dp-help b{
+      color: rgba(178,231,255,0.98);
+    }
+    .dp-subhead{
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: rgba(190,232,255,0.96);
+      margin: 4px 0 8px 0;
+      letter-spacing: 0.2px;
+    }
+    .dp-flow{
+      margin: 2px 0 8px 1px;
+      color: rgba(185,227,255,0.88);
+      font-size: 0.82rem;
+      letter-spacing: 0.1px;
     }
 
     /* ---------- inputs ---------- */
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div{
       border-radius: 14px !important;
+      border-color: rgba(116,191,255,0.28) !important;
+      background: rgba(9,20,36,0.55) !important;
     }
     textarea, input{
       border-radius: 14px !important;
+    }
+    div[data-baseweb="select"] > div:focus-within,
+    div[data-baseweb="input"] > div:focus-within{
+      border-color: rgba(116,191,255,0.62) !important;
+      box-shadow: 0 0 0 1px rgba(116,191,255,0.45), 0 0 14px rgba(40,140,255,0.25) !important;
     }
 
     /* ---------- expanders as cards ---------- */
     div[data-testid="stExpander"] details{
       border-radius: 18px;
-      border: 1px solid rgba(255,255,255,0.09);
-      background: rgba(255,255,255,0.02);
-      box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+      border: 1px solid rgba(116,191,255,0.20);
+      background: linear-gradient(180deg, rgba(12,26,48,0.34), rgba(8,16,28,0.22));
+      box-shadow: 0 10px 20px rgba(6,22,44,0.24);
       overflow: hidden;
     }
     div[data-testid="stExpander"] details > summary{
@@ -117,11 +139,24 @@ def render_development_process_tab(P):
       height: 44px !important;
       padding: 8px 14px !important;
       white-space: nowrap !important;
+      border: 1px solid rgba(116,191,255,0.42) !important;
+      background: linear-gradient(180deg, rgba(34,92,150,0.56), rgba(16,44,80,0.52)) !important;
+      color: rgba(234,248,255,0.98) !important;
+      box-shadow: 0 4px 14px rgba(14,54,105,0.34) !important;
+    }
+    .stButton>button:hover{
+      transform: translateY(-1px);
+      border-color: rgba(146,210,255,0.80) !important;
+      background: linear-gradient(180deg, rgba(44,112,176,0.70), rgba(20,58,100,0.64)) !important;
+      box-shadow: 0 10px 20px rgba(20,70,130,0.42) !important;
     }
     .stButton>button[kind="primary"]{
       border-radius: 14px !important;
       height: 44px !important;
       padding: 8px 16px !important;
+      border: 1px solid rgba(156,221,255,0.86) !important;
+      background: linear-gradient(180deg, rgba(66,150,230,0.88), rgba(28,88,156,0.86)) !important;
+      box-shadow: 0 12px 24px rgba(20,84,154,0.44), 0 0 18px rgba(84,174,255,0.26) !important;
     }
 
     /* ---------- dataframe looks like a card ---------- */
@@ -134,10 +169,11 @@ def render_development_process_tab(P):
     /* ---------- nicer dividers ---------- */
     hr{ border-color: rgba(255,255,255,0.08) !important; }
 
-    /* segmented label tighten */
-    div[data-testid="stSegmentedControl"] label p{
+    .dp-view-label{
+      margin-bottom: 4px;
+      font-size: 0.93rem;
       font-weight: 700;
-      opacity: 0.85;
+      color: rgba(211,235,252,0.95);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -480,12 +516,15 @@ def render_development_process_tab(P):
     # =========================
     # Header card
     # =========================
-    st.markdown("""
-    <div class="dp-hero">
-      <div class="dp-hero-title">🧪 Development Process</div>
-      <div class="dp-hero-sub">Plan experiments • Attach files • Track updates • Link draws • Notes with Markdown/LaTeX</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="dp-title">🧪 Development Process</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="dp-sub">Plan experiments • Attach files • Track updates • Link draws • Notes with Markdown/LaTeX</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="dp-flow">Flow: Pick project -> New/Manage -> Add experiment -> Review updates -> Save conclusion.</div>',
+        unsafe_allow_html=True,
+    )
 
     # =========================
     # Toolbar (STICKY + 2-ROW)
@@ -498,16 +537,29 @@ def render_development_process_tab(P):
 
     st.markdown('<div class="dp-sticky"><div class="dp-toolbar">', unsafe_allow_html=True)
 
-    r1a, r1b, r1c = st.columns([1.10, 1.90, 1.20], gap="medium")
+    r1a, r1b = st.columns([1.15, 2.95], gap="medium")
 
     with r1a:
-        vm = st.segmented_control(
-            "View",
-            options=["Active", "Archived"],
-            default=view_mode,
-            key="dev_view_mode_main_sc",
-        )
-        st.session_state["dev_view_mode_main"] = vm
+        st.markdown('<div class="dp-view-label">View</div>', unsafe_allow_html=True)
+        v1, v2 = st.columns(2, gap="small")
+        with v1:
+            if st.button(
+                "Active",
+                use_container_width=True,
+                type="primary" if view_mode == "Active" else "secondary",
+                key="dp_view_active_btn",
+            ):
+                st.session_state["dev_view_mode_main"] = "Active"
+                st.rerun()
+        with v2:
+            if st.button(
+                "Archived",
+                use_container_width=True,
+                type="primary" if view_mode == "Archived" else "secondary",
+                key="dp_view_archived_btn",
+            ):
+                st.session_state["dev_view_mode_main"] = "Archived"
+                st.rerun()
 
     with r1b:
         view_mode = st.session_state["dev_view_mode_main"]
@@ -531,15 +583,6 @@ def render_development_process_tab(P):
             key=proj_widget_key,
         )
         st.session_state["dev_selected_project"] = picked
-
-    with r1c:
-        selected_project = st.session_state.get("dev_selected_project", "")
-        if selected_project:
-            label = "➕ Add Experiment" if not st.session_state["dev_show_add_experiment"] else "➖ Hide"
-            if st.button(label, use_container_width=True, type="primary", key="dp_btn_add_exp_toggle"):
-                st.session_state["dev_show_add_experiment"] = not st.session_state["dev_show_add_experiment"]
-        else:
-            st.button("➕ Add Experiment", use_container_width=True, disabled=True, key="dp_btn_add_exp_disabled")
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     r2a, r2b, r2c = st.columns([1.05, 1.25, 2.70], gap="medium")
@@ -570,6 +613,7 @@ def render_development_process_tab(P):
                 f'<span class="dp-pill">⚪ No project selected &nbsp;•&nbsp; <b>{mode}</b></span>',
                 unsafe_allow_html=True
             )
+    st.caption("New Project creates records. Manage controls archive/delete. Add Experiment opens the experiment form.")
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
@@ -578,10 +622,18 @@ def render_development_process_tab(P):
     # =========================
     if st.session_state.get("dev_show_new_project", False):
         with st.expander("➕ Create a new project", expanded=True):
+            st.markdown(
+                """
+                <div class="dp-help">
+                  <b>Create project:</b> keep the name short and unique. Purpose/Target should be actionable and measurable.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             with st.form("dp_create_project_form", clear_on_submit=True):
-                new_project_name = st.text_input("Project Name")
-                new_project_purpose = st.text_area("Project Purpose", height=110)
-                new_project_target = st.text_area("Target", height=90)
+                new_project_name = st.text_input("Project Name", placeholder="Example: Tiger V2 core draw")
+                new_project_purpose = st.text_area("Project Purpose", height=110, placeholder="What are we trying to prove or improve?")
+                new_project_target = st.text_area("Target", height=90, placeholder="Define numeric target / quality goal / timeline")
                 create_project = st.form_submit_button("Create Project")
 
             if create_project:
@@ -613,6 +665,14 @@ def render_development_process_tab(P):
     selected_project = st.session_state.get("dev_selected_project", "")
     if st.session_state.get("dev_show_manage_project", False):
         with st.expander("📦 Manage selected project", expanded=True):
+            st.markdown(
+                """
+                <div class="dp-help">
+                  <b>Manage safely:</b> Archive keeps history. Delete is permanent and removes project experiments/updates.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             if not selected_project:
                 st.info("Select a project first.")
             else:
@@ -681,6 +741,7 @@ def render_development_process_tab(P):
 
     proj = proj_row.iloc[0]
     with st.expander("📌 Project Details", expanded=True):
+        st.markdown("<div class='dp-subhead'>Project snapshot</div>", unsafe_allow_html=True)
         st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', 'N/A')}")
         st.markdown(f"**Target:** {proj.get('Target', 'N/A')}")
         st.caption(f"Created at: {proj.get('Created At', '')} | Archived: {bool(proj.get('Archived', False))}")
@@ -692,11 +753,28 @@ def render_development_process_tab(P):
     # =========================
     if st.session_state.get("dev_show_add_experiment", False):
         with st.expander("➕ Add Experiment", expanded=True):
+            st.markdown(
+                """
+                <div class="dp-help">
+                  <b>Add experiment:</b> fill core fields first (title/date/researcher), then attach files and notes.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             is_drawing_live = st.checkbox("Is this a Drawing?", key=f"newexp_is_drawing__{selected_project}")
             drawing_details_live = ""
             draw_csv_live = ""
 
             if is_drawing_live:
+                st.markdown(
+                    """
+                    <div class="dp-help">
+                      <b>Drawing mode:</b> set a short drawing description, then choose the matching draw CSV.
+                      The newest CSV is shown first to speed up selection.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
                 drawing_details_live = st.text_area("Drawing Details", height=90, key=f"newexp_drawing_details__{selected_project}")
 
                 dataset_files = list_dataset_csvs_newest_first()
@@ -714,6 +792,7 @@ def render_development_process_tab(P):
 
             st.divider()
             st.markdown("### 📎 Attach files (optional)")
+            st.caption("Tip: Upload photos/PDFs first, then add one short caption per file for easier search later.")
             uploaded_new_files = st.file_uploader(
                 "Drag & drop files (images / PDF / .ipynb / anything)",
                 type=None,
@@ -733,21 +812,26 @@ def render_development_process_tab(P):
 
             st.divider()
             st.markdown("### 📓 Notes (Markdown + LaTeX)")
-            notes_md = st.text_area("Write notes here", height=160, key=f"newexp_notes__{selected_project}")
+            notes_md = st.text_area(
+                "Write notes here",
+                height=160,
+                key=f"newexp_notes__{selected_project}",
+                placeholder="Write summary, assumptions, equations, and decisions for this experiment.",
+            )
             st.caption("Markdown + LaTeX: inline `$E=mc^2$` or block `$$\\Delta n(r)=n_0 e^{-r^2/w^2}$$`")
 
             st.divider()
 
             with st.form(f"add_experiment_form__{selected_project}", clear_on_submit=True):
                 c1, c2 = st.columns([2, 1])
-                experiment_title = c1.text_input("Experiment Title")
+                experiment_title = c1.text_input("Experiment Title", placeholder="Short and unique title")
                 date = c2.date_input("Date")
 
-                researcher = st.text_input("Researcher Name")
-                methods = st.text_area("Methods", height=90)
-                purpose = st.text_area("Experiment Purpose", height=90)
-                observations = st.text_area("Observations", height=90)
-                results = st.text_area("Results", height=90)
+                researcher = st.text_input("Researcher Name", placeholder="Who performed this run?")
+                methods = st.text_area("Methods", height=90, placeholder="How was the experiment executed?")
+                purpose = st.text_area("Experiment Purpose", height=90, placeholder="What did we intend to validate?")
+                observations = st.text_area("Observations", height=90, placeholder="What happened during execution?")
+                results = st.text_area("Results", height=90, placeholder="Measured output, pass/fail, next action")
 
                 add_exp = st.form_submit_button("✅ Save Experiment")
 
@@ -814,9 +898,34 @@ def render_development_process_tab(P):
     project_exps = exp_df[exp_df["Project Name"] == selected_project].copy()
 
     if project_exps.empty:
+        h1, h2 = st.columns([4.0, 1.2], gap="small")
+        with h1:
+            st.subheader("🔬 Experiments Conducted")
+        with h2:
+            btn_label = "➕ Add Experiment" if not st.session_state.get("dev_show_add_experiment", False) else "➖ Hide"
+            if st.button(btn_label, use_container_width=True, key="dp_btn_add_exp_near_title_empty"):
+                st.session_state["dev_show_add_experiment"] = not st.session_state.get("dev_show_add_experiment", False)
+                st.rerun()
         st.info("No experiments yet.")
     else:
-        st.subheader("🔬 Experiments Conducted")
+        h1, h2 = st.columns([4.0, 1.2], gap="small")
+        with h1:
+            st.subheader("🔬 Experiments Conducted")
+        with h2:
+            btn_label = "➕ Add Experiment" if not st.session_state.get("dev_show_add_experiment", False) else "➖ Hide"
+            if st.button(btn_label, use_container_width=True, key="dp_btn_add_exp_near_title"):
+                st.session_state["dev_show_add_experiment"] = not st.session_state.get("dev_show_add_experiment", False)
+                st.rerun()
+        st.caption("Open an experiment to preview first, then switch to Edit tab for updates/attachments.")
+        st.markdown(
+            """
+            <div class="dp-help">
+              <b>How to use each experiment card:</b> start in <b>Preview</b> for read-only context.
+              Move to <b>Edit</b> only when updating notes, adding files, or writing progress updates.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         project_exps["Date_sort"] = pd.to_datetime(project_exps["Date"], errors="coerce")
         project_exps = project_exps.sort_values("Date_sort", ascending=False)
 
@@ -896,6 +1005,7 @@ def render_development_process_tab(P):
                 with tab_edit:
                     # Notes editor
                     st.markdown("#### ✍️ Edit Notes (Markdown + LaTeX)")
+                    st.caption("Keep notes structured: Context -> Action -> Result -> Next Step.")
                     edited_notes = st.text_area(
                         "Notes",
                         value=str(exp.get("Markdown Notes", "") or ""),
@@ -977,6 +1087,7 @@ def render_development_process_tab(P):
 
                     # Add update (inputs here)
                     st.markdown("#### 🔄 Add Update")
+                    st.caption("Updates should be short and factual: what changed, who changed it, and why.")
                     with st.form(f"update_form__{expander_key}"):
                         update_researcher = st.text_input("Your name", key=f"upd_name__{expander_key}")
                         update_notes = st.text_area("Update notes", height=80, key=f"upd_notes__{expander_key}")
@@ -1002,6 +1113,7 @@ def render_development_process_tab(P):
     st.divider()
 
     st.subheader("📢 Project Conclusion")
+    st.caption("Write the final outcome, key decisions, and next actions for this project.")
     conclusion_file = f"project_conclusion__{selected_project.replace(' ', '_')}.txt"
 
     existing = ""

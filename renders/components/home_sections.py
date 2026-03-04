@@ -9,14 +9,43 @@ from helpers.params_io import get_float_param
 from helpers.dataset_param_parsers import _parse_steps, _parse_zones_from_end, _parse_marked_zone_lengths
 
 
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _read_csv_cached(path: str, keep_default_na: bool, mtime: float):
+    return pd.read_csv(path, keep_default_na=keep_default_na)
+
+
 def render_home_draw_orders_overview(
         orders_file: str = P.orders_csv,
-        title: str = "📦 Draw Orders",
+        title: str = "🚀 Draws Monitor",
         height: int = 360,
 ):
-    import os
-    import pandas as pd
-    import streamlit as st
+    # ---------- Title ----------
+    st.markdown(
+        """
+        <style>
+        .home-balloon {
+            transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+            transform-origin: center center;
+            will-change: transform;
+        }
+        .home-balloon:hover {
+            transform: translateY(-4px) scale(1.012);
+            box-shadow: 0 14px 30px rgba(0,0,0,0.35) !important;
+        }
+        .home-now-box.home-balloon:hover {
+            transform: translateY(-4px) scale(1.008);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # ---------- Title ----------
     st.markdown(
@@ -53,7 +82,7 @@ def render_home_draw_orders_overview(
                 justify-content: center;
                 align-items: center;
                 gap: 6px;
-            ">
+            " class="home-balloon">
                 <div style="font-size:18px;font-weight:800;color:white;">
                     {emoji} {title_txt}
                 </div>
@@ -80,7 +109,7 @@ def render_home_draw_orders_overview(
                 justify-content:space-between;
                 align-items:center;
                 margin-bottom:18px;
-            ">
+            " class="home-now-box home-balloon">
                 <div style="font-size:22px;font-weight:900;color:white;">
                     {emoji} {text_left}
                 </div>
@@ -98,7 +127,7 @@ def render_home_draw_orders_overview(
 
     # ---------- Load orders (safe) ----------
     try:
-        df = pd.read_csv(orders_file, keep_default_na=False)
+        df = _read_csv_cached(orders_file, keep_default_na=False, mtime=_mtime(orders_file))
     except Exception:
         st.info("No orders submitted yet.")
         return
@@ -215,7 +244,7 @@ def render_schedule_home_minimal():
     if not os.path.exists(SCHEDULE_FILE):
         pd.DataFrame(columns=required_columns).to_csv(SCHEDULE_FILE, index=False)
 
-    schedule_df = pd.read_csv(SCHEDULE_FILE)
+    schedule_df = _read_csv_cached(SCHEDULE_FILE, keep_default_na=False, mtime=_mtime(SCHEDULE_FILE))
     schedule_df.columns = schedule_df.columns.str.strip()
 
     # Ensure required columns exist (auto-fix)
@@ -249,43 +278,11 @@ def render_schedule_home_minimal():
     schedule_df.loc[schedule_df["Recurrence"].eq(""), "Recurrence"] = "None"
 
     # -------------------------
-    # UI: range buttons (Week / Month / 3 Months) + Show all
+    # Home view is fixed to weekly horizon (no range buttons here)
     # -------------------------
     today = pd.Timestamp.today().normalize()
-
-    if "home_schedule_range" not in st.session_state:
-        st.session_state.home_schedule_range = "week"  # default
-
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-
-    with c1:
-        if st.button("📅 Week", use_container_width=True, key="home_sched_btn_week"):
-            st.session_state.home_schedule_range = "week"
-            st.rerun()
-
-    with c2:
-        if st.button("🗓️ Month", use_container_width=True, key="home_sched_btn_month"):
-            st.session_state.home_schedule_range = "month"
-            st.rerun()
-
-    with c3:
-        if st.button("📆 3 Months", use_container_width=True, key="home_sched_btn_3months"):
-            st.session_state.home_schedule_range = "3months"
-            st.rerun()
-
-    with c4:
-        show_all = st.checkbox("Show all", value=False, key="home_schedule_show_all_min")
-
-    # Compute filters from selection
-    range_sel = st.session_state.home_schedule_range
     start_filter = today
-
-    if range_sel == "week":
-        end_filter = today + pd.DateOffset(weeks=1)
-    elif range_sel == "month":
-        end_filter = today + pd.DateOffset(months=1)
-    else:  # "3months"
-        end_filter = today + pd.DateOffset(months=3)
+    end_filter = today + pd.DateOffset(weeks=1)
 
     # Filter to valid rows first
     valid = schedule_df.dropna(subset=["Start DateTime", "End DateTime"]).copy()
@@ -385,11 +382,6 @@ def render_schedule_home_minimal():
     win_start = pd.to_datetime(start_filter)
     win_end = pd.to_datetime(end_filter)
 
-    # If show_all: show a bigger horizon so recurring events really look “recurring”
-    if show_all:
-        win_start = today
-        win_end = today + pd.DateOffset(months=12)
-
     expanded = _expand_recurrences(valid, win_start, win_end)
 
     # Now filter (overlap logic)
@@ -486,7 +478,7 @@ def render_parts_orders_home_all():
         st.info("No orders file yet (part_orders.csv).")
         return
 
-    orders_df = pd.read_csv(ORDER_FILE)
+    orders_df = _read_csv_cached(ORDER_FILE, keep_default_na=False, mtime=_mtime(ORDER_FILE))
     orders_df.columns = orders_df.columns.str.strip()
 
     # Ensure required columns exist
@@ -509,7 +501,6 @@ def render_parts_orders_home_all():
     opened_count = int((status_lower == "opened").sum())
     approved_count = int((status_lower == "approved").sum())
     ordered_count = int((status_lower == "ordered").sum())
-    shipped_count = int((status_lower == "shipped").sum())
     received_count = int((status_lower == "received").sum())
 
     # ---------------- KPI Cards + GLASS TABLE CSS ----------------
@@ -613,7 +604,7 @@ def render_parts_orders_home_all():
     )
 
     # ---------------- KPI Cards (symmetric) ----------------
-    c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1])
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
 
     opened_class = "kpi-card kpi-opened" if opened_count > 0 else "kpi-card"
     with c1:
@@ -649,19 +640,8 @@ def render_parts_orders_home_all():
             unsafe_allow_html=True
         )
 
-    with c4:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-title">🚚 Shipped</div>
-                <div class="kpi-value">{shipped_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
     received_class = "kpi-card kpi-received" if received_count > 0 else "kpi-card"
-    with c5:
+    with c4:
         st.markdown(
             f"""
             <div class="{received_class}">
@@ -672,42 +652,78 @@ def render_parts_orders_home_all():
             unsafe_allow_html=True
         )
 
-    # ---------------- Sorting ----------------
-    # ensure all statuses are valid; unknown -> Opened
-    orders_df["Status"] = orders_df["Status"].apply(lambda s: s if s in status_order else "Opened")
+    # ---------------- Opened-only compact cards ----------------
+    opened_only = orders_df[
+        orders_df["Status"].astype(str).str.strip().str.lower().eq("opened")
+    ].copy()
 
-    orders_df["__status_sort__"] = pd.Categorical(
-        orders_df["Status"],
-        categories=status_order,
-        ordered=True
-    )
-    orders_df = (
-        orders_df
-        .sort_values(["__status_sort__", "Part Name"], na_position="last")
-        .drop(columns="__status_sort__")
-    )
-
-    # ---------------- Table Coloring (Status cell only) ----------------
-    # keep same "colors logic" but with Opened replacing Needed
-    def highlight_status(row):
-        color_map = {
-            "Opened": "background-color: lightcoral; color: black; font-weight: 900;",
-            "Approved": "background-color: lightgreen; color: black; font-weight: 900;",
-            "Ordered": "background-color: lightyellow; color: black; font-weight: 900;",
-            "Shipped": "background-color: lightblue; color: black; font-weight: 900;",
-            "Received": "background-color: green; color: black; font-weight: 900;",
-            "Installed": "background-color: lightgray; color: black; font-weight: 900;",
+    st.markdown(
+        """
+        <style>
+        .parts-opened-title {
+            font-size: 1.08rem;
+            font-weight: 800;
+            color: rgba(255,255,255,0.96);
+            margin: 12px 0 8px 0;
         }
-        s = str(row.get("Status", "")).strip()
-        return [color_map.get(s, "")] + [""] * (len(row) - 1)
-
-    st.dataframe(
-        orders_df.style.apply(highlight_status, axis=1),
-        use_container_width=True,
-        height=360
+        .parts-opened-card {
+            border: 1px solid rgba(255, 120, 120, 0.42);
+            border-radius: 12px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            background: rgba(76, 22, 22, 0.26);
+            transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+        }
+        .parts-opened-card:hover {
+            transform: translateY(-2px) scale(1.01);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.24);
+            border-color: rgba(255, 146, 146, 0.70);
+        }
+        .parts-opened-main {
+            font-size: 1.0rem;
+            font-weight: 800;
+            color: rgba(255,236,236,0.98);
+            margin-bottom: 6px;
+        }
+        .parts-opened-sub {
+            font-size: 0.86rem;
+            color: rgba(255,255,255,0.88);
+            line-height: 1.35;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
-    with st.expander("Plain table view", expanded=False):
-        st.dataframe(orders_df, use_container_width=True, height=300)
+
+    st.markdown("<div class='parts-opened-title'>🔴 Opened Parts</div>", unsafe_allow_html=True)
+
+    if opened_only.empty:
+        st.info("No parts currently in Opened status.")
+        return
+
+    opened_only["Date Ordered"] = pd.to_datetime(opened_only["Date Ordered"], errors="coerce")
+    opened_only = opened_only.sort_values("Date Ordered", ascending=False, na_position="last")
+
+    for _, r in opened_only.iterrows():
+        part_name = str(r.get("Part Name", "")).strip() or "—"
+        details = str(r.get("Details", "")).strip() or "No details"
+        ordered_by = str(r.get("Ordered By", "")).strip() or "—"
+        company = str(r.get("Company", "")).strip() or "—"
+        dt_val = r.get("Date Ordered")
+        dt_txt = dt_val.strftime("%Y-%m-%d") if pd.notna(dt_val) else "—"
+
+        st.markdown(
+            f"""
+            <div class="parts-opened-card">
+                <div class="parts-opened-main">{part_name}</div>
+                <div class="parts-opened-sub">{details}</div>
+                <div class="parts-opened-sub" style="margin-top:6px;">
+                    Ordered by: <b>{ordered_by}</b> &nbsp;|&nbsp; Date: <b>{dt_txt}</b> &nbsp;|&nbsp; Company: <b>{company}</b>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: str):
@@ -837,14 +853,15 @@ def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: 
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_done_home_section():
+def render_done_home_section(show_header: bool = True):
     import os
     import pandas as pd
     import streamlit as st
     import datetime as dt
 
-    st.subheader("✅ DONE – Recent Draws (last 4 days)")
-    st.caption("Summarizes finished draws from the dataset CSV. After 4 days, they auto-move to T&M.")
+    if show_header:
+        st.subheader("✅ DONE – Recent Draws (last 4 days)")
+        st.caption("Summarizes finished draws from the dataset CSV. After 4 days, they auto-move to T&M.")
 
     ORDERS_FILE = P.orders_csv
     AUTO_MOVE_DAYS = 4
@@ -853,7 +870,7 @@ def render_done_home_section():
         st.info("No draw_orders.csv found.")
         return
 
-    df = pd.read_csv(ORDERS_FILE, keep_default_na=False)
+    df = _read_csv_cached(ORDERS_FILE, keep_default_na=False, mtime=_mtime(ORDERS_FILE))
     df.columns = [c.strip() for c in df.columns]
 
     # Ensure columns exist
@@ -874,7 +891,7 @@ def render_done_home_section():
     # -----------------------------
     def _read_dataset_df(csv_path: str):
         try:
-            dfx = pd.read_csv(csv_path, keep_default_na=False)
+            dfx = _read_csv_cached(csv_path, keep_default_na=False, mtime=_mtime(csv_path))
         except Exception:
             return None
         if dfx is None or dfx.empty:
@@ -1039,12 +1056,30 @@ def render_done_home_section():
             border-radius: 14px;
             padding: 14px 14px 10px 14px;
             margin-bottom: 12px;
+            transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+            will-change: transform;
+        }
+        .done-card:hover {
+            transform: translateY(-4px) scale(1.01);
+            box-shadow: 0 14px 30px rgba(0,0,0,0.32);
+            border-color: rgba(140,255,185,0.35);
         }
         .done-meta {
             color: rgba(255,255,255,0.82);
             font-size: 0.92rem;
             margin-top: -6px;
             margin-bottom: 10px;
+        }
+        .done-main {
+            font-size: 1.08rem;
+            font-weight: 800;
+            color: rgba(255,255,255,0.97);
+            margin-bottom: 6px;
+        }
+        .done-sub {
+            color: rgba(255,255,255,0.78);
+            font-size: 0.82rem;
+            line-height: 1.35;
         }
         .done-pill {
             display:inline-block;
@@ -1128,14 +1163,17 @@ def render_done_home_section():
         st.markdown(
             f"""
             <div class='done-meta'>
-                Project: <b>{project or "—"}</b>
-                &nbsp; | &nbsp; Preform: <b>{preform or "—"}</b>
-                &nbsp; | &nbsp; Fiber type: <b>{fiber or "—"}</b>
-                &nbsp; | &nbsp; Drum: <b>{drum or "—"}</b>
-                <span class="done-pill">Done: {done_str}</span>
-                <span class="done-pill">Age: {age_str}</span>
-                <br/>
-                CSV: <code>{csv_name or "—"}</code>
+                <div class="done-main">
+                    Project: {project or "—"} &nbsp;&nbsp;|&nbsp;&nbsp; Preform: {preform or "—"}
+                </div>
+                <div class="done-sub">
+                    Fiber type: {fiber or "—"} &nbsp;|&nbsp; Drum: {drum or "—"}
+                    &nbsp;|&nbsp; CSV: <code>{csv_name or "—"}</code>
+                </div>
+                <div style="margin-top:6px;">
+                    <span class="done-pill">Done: {done_str}</span>
+                    <span class="done-pill">Age: {age_str}</span>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
@@ -1150,29 +1188,12 @@ def render_done_home_section():
         if done_desc:
             st.caption(f"Done notes: {done_desc}")
 
-        b1, b2 = st.columns([1.1, 2.9])
-
-        with b1:
-            if csv_name and os.path.exists(csv_path):
-                with open(csv_path, "rb") as f:
-                    st.download_button(
-                        "📄 Download CSV",
-                        data=f,
-                        file_name=csv_name,
-                        mime="text/csv",
-                        key=f"done_dl_{idx}",
-                        use_container_width=True
-                    )
-            else:
-                st.button("📄 Download CSV", disabled=True, use_container_width=True, key=f"done_missing_{idx}")
-
-        with b2:
-            if done_dt:
-                st.caption(
-                    f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** "
-                    f"(this one moves in ~{max(0.0, AUTO_MOVE_DAYS - age_days):.1f} days)."
-                )
-            else:
-                st.caption(f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (done time unknown).")
+        if done_dt:
+            st.caption(
+                f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** "
+                f"(this one moves in ~{max(0.0, AUTO_MOVE_DAYS - age_days):.1f} days)."
+            )
+        else:
+            st.caption(f"Auto-move to T&M after **{AUTO_MOVE_DAYS} days** (done time unknown).")
 
         st.markdown("</div>", unsafe_allow_html=True)

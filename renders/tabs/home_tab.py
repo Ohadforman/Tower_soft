@@ -15,6 +15,7 @@ def render_home_tab(
     import os
     import pandas as pd
     import streamlit as st
+    import streamlit.components.v1 as components
 
     st.title("️ Tower Management Software")
 
@@ -25,8 +26,30 @@ def render_home_tab(
         f"""
         <style>
         .stApp {{
-            background: url("data:image/jpg;base64,{image_base64}") no-repeat center center fixed;
+            background: url("data:image/jpg;base64,{image_base64}") no-repeat 58% 34% fixed;
             background-size: cover;
+        }}
+        .stApp::before {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background:
+              radial-gradient(1200px 620px at 52% 38%, rgba(255,255,255,0.00), rgba(0,0,0,0.18) 72%, rgba(0,0,0,0.28) 100%),
+              linear-gradient(to bottom, rgba(4,10,20,0.28) 0%, rgba(4,10,20,0.08) 22%, rgba(4,10,20,0.08) 72%, rgba(4,10,20,0.34) 100%);
+        }}
+        [data-testid="stAppViewContainer"] .main {{
+            position: relative;
+            z-index: 1;
+        }}
+        [data-testid="stMarkdownContainer"] h1 {{
+            text-shadow:
+                0 0 16px rgba(122, 210, 255, 0.55),
+                0 0 34px rgba(62, 156, 255, 0.35),
+                0 4px 18px rgba(0,0,0,0.45);
+            letter-spacing: 0.2px;
+            text-align: center;
         }}
         .css-1aumxhk {{ background-color: rgba(20, 20, 20, 0.90) !important; }}
         div[data-testid="stDialog"] {{
@@ -135,8 +158,83 @@ def render_home_tab(
     # =========================================================
     # ❌ FAILED (last 4 days) — compact list + POPUP reason
     # =========================================================
-    def render_failed_home_popup(days_visible: int = 4):
-        st.subheader("❌ Failed (last 4 days)")
+    def render_failed_home_popup(days_visible: int = 4, show_header: bool = True):
+        if show_header:
+            st.subheader("❌ Failed (last 4 days)")
+        st.markdown(
+            """
+            <style>
+            .fancy-section-title {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 10px 12px;
+                border-radius: 14px;
+                border: 1px solid rgba(255,255,255,0.14);
+                background: rgba(7, 12, 20, 0.35);
+                margin-bottom: 10px;
+                transition: transform 260ms ease, box-shadow 260ms ease, border-color 260ms ease;
+            }
+            .fancy-section-title:hover {
+                transform: translateY(-3px) scale(1.015);
+                box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+            }
+            .fancy-orb {
+                width: 18px;
+                height: 18px;
+                border-radius: 999px;
+                position: relative;
+                box-shadow: 0 0 0 2px rgba(255,255,255,0.15) inset;
+            }
+            .fancy-orb::before {
+                content: "";
+                position: absolute;
+                inset: -6px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.22);
+                transform: scale(0.9);
+                transition: transform 260ms ease, opacity 260ms ease;
+                opacity: 0.75;
+            }
+            .fancy-section-title:hover .fancy-orb::before {
+                transform: scale(1.14);
+                opacity: 1;
+            }
+            .fancy-title-text {
+                font-size: 1.05rem;
+                font-weight: 800;
+                color: rgba(255,255,255,0.96);
+                letter-spacing: 0.2px;
+            }
+            .failed-card {
+                border: 1px solid rgba(255,255,255,0.12);
+                background: rgba(35, 12, 12, 0.40);
+                border-radius: 14px;
+                padding: 12px 14px 10px 14px;
+                margin-bottom: 10px;
+                transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+                will-change: transform;
+            }
+            .failed-card:hover {
+                transform: translateY(-4px) scale(1.01);
+                box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32);
+                border-color: rgba(255, 110, 110, 0.38);
+            }
+            .failed-main {
+                font-size: 1.04rem;
+                font-weight: 800;
+                color: rgba(255,255,255,0.97);
+            }
+            .failed-sub {
+                color: rgba(255,255,255,0.75);
+                font-size: 0.80rem;
+                margin-top: 2px;
+                line-height: 1.35;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
         if not os.path.exists(ORDERS_FILE):
             st.info("No orders file found.")
@@ -197,12 +295,7 @@ def render_home_tab(
             updated = safe_str(row.get(STATUS_UPDATED_COL))
             reason = safe_str(row.get(FAILED_REASON_COL))
 
-            left = " | ".join([p for p in [
-                f"#{oid}" if oid else "",
-                f"PF {pf}" if pf else "",
-                ftype if ftype else "",
-                proj if proj else ""
-            ] if p])
+            left = " | ".join([p for p in [f"#{oid}" if oid else "", ftype if ftype else ""] if p])
 
             extra = []
             if "Required Length (m) (for T&M+costumer)" in failed.columns:
@@ -224,11 +317,19 @@ def render_home_tab(
                 if val:
                     extra.append(f"Notes: {val}")
 
-            c1, c2 = st.columns([3.2, 1.2])
+            st.markdown("<div class='failed-card'>", unsafe_allow_html=True)
+            c1, c2 = st.columns([3.2, 1.2], vertical_alignment="center")
             with c1:
-                st.markdown(f"**{left if left else 'Failed Order'}**")
+                st.markdown(
+                    f"<div class='failed-main'>Project: {proj or '—'} &nbsp;|&nbsp; Preform: {pf or '—'}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='failed-sub'>{left if left else 'Failed Order'}</div>",
+                    unsafe_allow_html=True,
+                )
                 if updated:
-                    st.caption(f"Updated: {updated}")
+                    st.markdown(f"<div class='failed-sub'>Updated: {updated}</div>", unsafe_allow_html=True)
             with c2:
                 btn_key = f"failed_reason_btn_{i}_{oid}_{pf}"
                 if st.button("View reason", key=btn_key, use_container_width=True):
@@ -240,36 +341,465 @@ def render_home_tab(
                         extra_lines=extra
                     )
 
-            st.markdown("---")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # =========================================================
     # 🔁 AUTO CLEANUP FIRST
     # =========================================================
     auto_move_failed_to_pending(days=4)
+    
+    def _section_gap():
+        st.markdown('<div style="height: 18px;"></div>', unsafe_allow_html=True)
 
-    # =========================================================
-    # ✅ 1) DRAW ORDERS (keep as-is)
-    # =========================================================
-    render_home_draw_orders_overview()
-    st.markdown("---")
+    def _fancy_section_title(label: str, orb_color: str):
+        st.markdown(
+            f"""
+            <div class="fancy-section-title">
+                <span class="fancy-orb" style="background:{orb_color}; box-shadow: 0 0 12px {orb_color};"></span>
+                <span class="fancy-title-text">{label}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    # =========================================================
-    # ✅ 2) DONE
-    # =========================================================
-    render_done_home_section()
-    st.markdown("---")
+    def _render_done_failed_compact(days_visible: int = 4):
+        if not os.path.exists(ORDERS_FILE):
+            st.info("No orders file found.")
+            return
 
-    # =========================================================
-    # ✅ 3) FAILED
-    # =========================================================
-    render_failed_home_popup(days_visible=4)
-    st.markdown("---")
+        try:
+            df = pd.read_csv(ORDERS_FILE)
+        except Exception as e:
+            st.error(f"Failed to read {ORDERS_FILE}: {e}")
+            return
 
-    # =========================================================
-    # ✅ 4) CALENDAR / SCHEDULE (MOVED HERE ✅)
-    # =========================================================
-    render_schedule_home_minimal()
-    st.markdown("---")
+        df = _ensure_cols(df)
+        if df.empty:
+            st.info("No orders.")
+            return
+
+        # compact styling
+        st.markdown(
+            """
+            <style>
+            .home-compact-card {
+                border: 1px solid rgba(255,255,255,0.14);
+                border-radius: 12px;
+                padding: 10px 12px;
+                background: rgba(7,12,20,0.40);
+            }
+            .home-compact-h {
+                font-size: 1.02rem;
+                font-weight: 800;
+                margin-bottom: 8px;
+                color: rgba(255,255,255,0.96);
+            }
+            .home-done-mini {
+                border: 1px solid rgba(130, 255, 178, 0.28);
+                border-radius: 10px;
+                padding: 8px 10px;
+                margin-bottom: 8px;
+                background: rgba(20, 50, 34, 0.30);
+            }
+            .home-done-mini-main {
+                font-size: 0.93rem;
+                font-weight: 760;
+                color: rgba(245,255,248,0.98);
+                margin-bottom: 6px;
+            }
+            .home-done-tag {
+                display: inline-block;
+                margin-right: 6px;
+                margin-bottom: 4px;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 0.76rem;
+                border: 1px solid rgba(255,255,255,0.18);
+                background: rgba(255,255,255,0.08);
+                color: rgba(245,245,245,0.96);
+            }
+            .home-failed-mini {
+                border: 1px solid rgba(255, 118, 118, 0.34);
+                border-radius: 10px;
+                padding: 8px 10px;
+                margin-bottom: 8px;
+                background: rgba(62, 24, 24, 0.32);
+            }
+            .home-failed-mini-main {
+                font-size: 0.93rem;
+                font-weight: 760;
+                color: rgba(255,245,245,0.98);
+                margin-bottom: 6px;
+            }
+            .home-failed-tag {
+                display: inline-block;
+                margin-right: 6px;
+                margin-bottom: 4px;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 0.76rem;
+                border: 1px solid rgba(255,200,200,0.22);
+                background: rgba(255,120,120,0.10);
+                color: rgba(255,232,232,0.98);
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        done_df = df[df[STATUS_COL].astype(str).str.strip().str.lower().eq("done")].copy()
+        failed_df = df[df[STATUS_COL].astype(str).str.strip().str.lower().eq("failed")].copy()
+
+        # parse timestamps used for recency
+        done_df["_ts"] = pd.to_datetime(done_df.get(STATUS_UPDATED_COL, ""), errors="coerce")
+        failed_df["_ts"] = pd.to_datetime(failed_df.get(STATUS_UPDATED_COL, ""), errors="coerce")
+
+        now = pd.Timestamp.now()
+        cutoff = now - pd.Timedelta(days=days_visible)
+
+        done_recent = done_df[(done_df["_ts"].isna()) | (done_df["_ts"] >= cutoff)].copy()
+        failed_recent = failed_df[(failed_df["_ts"].isna()) | (failed_df["_ts"] >= cutoff)].copy()
+
+        done_recent = done_recent.sort_values("_ts", ascending=False).head(6)
+        failed_recent = failed_recent.sort_values("_ts", ascending=False).head(6)
+
+        c_done, c_failed = st.columns(2, gap="medium")
+        with c_done:
+            st.markdown("<div class='home-compact-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='home-compact-h'>✅ DONE (last {days_visible} days): {len(done_recent)}</div>",
+                unsafe_allow_html=True,
+            )
+            if done_recent.empty:
+                st.caption("No recent done draws.")
+            else:
+                for _, r in done_recent.head(5).iterrows():
+                    project = str(r.get("Fiber Project", "")).strip() or "—"
+                    preform = str(r.get("Preform Number", "")).strip() or "—"
+                    when = r.get("_ts")
+                    when_s = when.strftime("%Y-%m-%d %H:%M") if pd.notna(when) else "—"
+                    st.markdown(
+                        f"""
+                        <div class="home-done-mini">
+                            <div class="home-done-mini-main">Project: {project}</div>
+                            <span class="home-done-tag">Preform: {preform}</span>
+                            <span class="home-done-tag">Done: {when_s}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with c_failed:
+            st.markdown("<div class='home-compact-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='home-compact-h'>❌ FAILED (last {days_visible} days): {len(failed_recent)}</div>",
+                unsafe_allow_html=True,
+            )
+            if failed_recent.empty:
+                st.caption("No recent failed draws.")
+            else:
+                for _, r in failed_recent.head(5).iterrows():
+                    project = str(r.get("Fiber Project", "")).strip() or "—"
+                    preform = str(r.get("Preform Number", "")).strip() or "—"
+                    reason = str(r.get(FAILED_REASON_COL, "")).strip() or "No reason"
+                    reason = reason[:72]
+                    st.markdown(
+                        f"""
+                        <div class="home-failed-mini">
+                            <div class="home-failed-mini-main">Project: {project}</div>
+                            <span class="home-failed-tag">Preform: {preform}</span>
+                            <span class="home-failed-tag">Reason: {reason}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <style>
+        .home-manifest-nav {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 82px;
+            margin-top: 0;
+            padding: 10px 8px 12px 8px;
+            border-radius: 18px;
+            background: transparent;
+            box-shadow: none;
+            position: relative;
+        }
+        .home-manifest-nav::after {
+            content: "";
+            position: absolute;
+            left: -10px;
+            top: 28px;
+            bottom: 28px;
+            width: 92px;
+            border: 1px solid rgba(140, 220, 255, 0.42);
+            border-right: none;
+            border-radius: 999px 0 0 999px;
+            pointer-events: none;
+        }
+        .home-manifest-nav > label {
+            transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease, background 220ms ease, filter 220ms ease;
+            border-radius: 999px;
+            padding: 10px 14px 10px 30px !important;
+            border: 1px solid rgba(255,255,255,0.20);
+            background: linear-gradient(145deg, rgba(8, 16, 28, 0.62), rgba(22, 34, 52, 0.42));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 16px rgba(0,0,0,0.22);
+            overflow: visible;
+            transform-origin: left center;
+            z-index: 2;
+            backdrop-filter: blur(3px);
+            width: 100%;
+            max-width: 300px;
+            margin-right: 10px;
+        }
+        /* Internal hidden option (last item = __none__). */
+        .home-manifest-nav > label:last-of-type {
+            display: none !important;
+        }
+        /* Hide Streamlit's native radio/check UI inside chips. */
+        .home-manifest-nav > label [role="radio"],
+        .home-manifest-nav > label input[type="radio"] {
+            display: none !important;
+            opacity: 0 !important;
+            width: 0 !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        .home-manifest-nav > label::before {
+            content: "";
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            background: radial-gradient(circle at 30% 30%, rgba(200, 243, 255, 0.95), rgba(96, 172, 240, 0.58));
+            border: 1px solid rgba(168,232,255,0.38);
+            box-shadow: 0 0 11px rgba(92,176,255,0.42);
+            transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease;
+        }
+        .home-manifest-nav > label:nth-of-type(1) { margin-left: 74px; }
+        .home-manifest-nav > label:nth-of-type(2) { margin-left: 48px; }
+        .home-manifest-nav > label:nth-of-type(3) { margin-left: 14px; }
+        .home-manifest-nav > label:nth-of-type(4) { margin-left: 14px; }
+        .home-manifest-nav > label:nth-of-type(5) { margin-left: 14px; }
+        .home-nav-wrap {
+            min-height: auto;
+            display: block;
+            padding-top: clamp(36px, 9vh, 108px);
+        }
+        .home-hidden-option {
+            position: absolute !important;
+            left: -10000px !important;
+            top: -10000px !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
+        }
+        .home-panel-wrap {
+            min-height: auto;
+            display: block;
+            padding-top: clamp(96px, 14vh, 170px);
+        }
+        .home-manifest-nav > label:hover {
+            filter: saturate(1.12);
+            box-shadow: 0 16px 32px rgba(0,0,0,0.36), 0 0 22px rgba(132,214,255,0.20);
+            border-color: rgba(170,238,255,0.68);
+            background: linear-gradient(145deg, rgba(16, 30, 52, 0.78), rgba(22, 40, 66, 0.58));
+            z-index: 4;
+        }
+        .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.18) rotate(-0.6deg); }
+        .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.19) rotate(-0.9deg); }
+        .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.19) rotate(0.8deg); }
+        .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.19) rotate(-0.7deg); }
+        .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.19) rotate(0.7deg); }
+        .home-manifest-nav > label:hover::before {
+            transform: translateY(-50%) scale(1.15);
+            box-shadow: 0 0 18px rgba(110,200,255,0.42);
+            background: radial-gradient(circle at 30% 30%, rgba(220, 249, 255, 0.98), rgba(102, 182, 255, 0.66));
+        }
+        .home-manifest-nav > label.home-chip-active {
+            border-color: rgba(160, 231, 255, 0.88);
+            background: linear-gradient(145deg, rgba(30, 66, 98, 0.82), rgba(28, 48, 78, 0.70));
+            box-shadow: 0 16px 30px rgba(35, 138, 198, 0.34), inset 0 1px 0 rgba(255,255,255,0.24);
+            filter: saturate(1.18);
+        }
+        .home-manifest-nav > label.home-chip-active::before {
+            background: radial-gradient(circle at 30% 30%, rgba(232, 252, 255, 1), rgba(124, 201, 255, 0.76));
+            border-color: rgba(194,246,255,0.72);
+            box-shadow: 0 0 22px rgba(126,214,255,0.56);
+        }
+        .home-panel-shell {
+            position: relative;
+            margin-top: 0;
+            padding: 18px 16px 16px 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(154, 226, 255, 0.22);
+            background:
+                linear-gradient(160deg, rgba(7, 18, 33, 0.50), rgba(7, 14, 25, 0.30));
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(4px);
+        }
+        @media (max-width: 900px) {
+            .home-manifest-nav {
+                width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: center;
+                margin-bottom: 8px;
+                padding: 6px 0 0 0;
+                background: transparent;
+                box-shadow: none;
+            }
+            .home-manifest-nav::after {
+                display: none;
+            }
+            .home-manifest-nav > label {
+                position: relative;
+                left: unset !important;
+                top: unset !important;
+                transform: none !important;
+                margin-left: 0 !important;
+                width: auto;
+                max-width: 100%;
+            }
+            .home-manifest-nav > label:hover {
+                transform: translateY(-2px) scale(1.05) !important;
+            }
+            .home-nav-wrap,
+            .home-panel-wrap {
+                min-height: auto;
+                display: block;
+                padding-top: 0;
+            }
+            .home-panel-shell {
+                margin-top: 10px;
+            }
+        }
+        .home-panel-fade {
+            animation: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    nav_col, panel_col = st.columns([1.05, 2.95], gap="large")
+    if "home_focus_panel" not in st.session_state:
+        st.session_state["home_focus_panel"] = "__none__"
+    with nav_col:
+        st.markdown('<div class="home-nav-wrap">', unsafe_allow_html=True)
+        selected_panel = st.radio(
+            "Home Sections",
+            [
+                "🚀 Draws Monitor",
+                "✅ Done + ❌ Failed",
+                "📅 Schedule",
+                "🧰 Maintenance + 🚨 Faults",
+                "🧩 Parts Orders",
+                "__none__",
+            ],
+            horizontal=False,
+            key="home_focus_panel",
+            label_visibility="collapsed",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    components.html(
+        """
+        <script>
+        (function() {
+            const expected = [
+            "🚀 Draws Monitor",
+            "✅ Done + ❌ Failed",
+            "📅 Schedule",
+            "🧰 Maintenance + 🚨 Faults",
+            "🧩 Parts Orders"
+          ];
+
+          function bindHoverSwitch() {
+            const root = window.parent?.document || document;
+            const groups = root.querySelectorAll('div[role="radiogroup"]');
+            const hoveredLabel = (group) =>
+              Array.from(group.querySelectorAll("label")).find((l) => {
+                return !l.classList.contains("home-hidden-option") && l.matches(":hover");
+              }) || null;
+            const syncHoverIndicator = (group) => {
+              const labels = Array.from(group.querySelectorAll("label"));
+              const hovered = hoveredLabel(group);
+              labels.forEach((l) => {
+                if (l.classList.contains("home-hidden-option")) return;
+                if (hovered && l === hovered) l.classList.add("home-chip-active");
+                else l.classList.remove("home-chip-active");
+              });
+              return hovered;
+            };
+            for (const group of groups) {
+              const labels = Array.from(group.querySelectorAll("label"));
+              if (!labels.length) continue;
+              const labelTexts = labels.map(l => (l.textContent || "").trim());
+              const matches = expected.filter(e => labelTexts.includes(e)).length;
+              if (matches < 4) continue;
+              const noneLabel = labels[labels.length - 1];
+              if (noneLabel) noneLabel.classList.add("home-hidden-option");
+              if (group.dataset.homeHoverBound === "1") {
+                syncHoverIndicator(group);
+                return true;
+              }
+              group.classList.add("home-manifest-nav");
+              group.addEventListener("mouseleave", () => {
+                const hovered = syncHoverIndicator(group);
+                if (!hovered && noneLabel) {
+                  const noneInput = noneLabel.querySelector('input[type="radio"]');
+                  if (!noneInput || !noneInput.checked) {
+                    try { noneLabel.click(); } catch (e) {}
+                  }
+                }
+              });
+
+              labels.forEach((label) => {
+                if (label.classList.contains("home-hidden-option")) return;
+                label.addEventListener("mouseenter", () => {
+                  syncHoverIndicator(group);
+                  try { label.click(); } catch (e) {}
+                });
+                label.addEventListener("mouseleave", () => {
+                  const hovered = syncHoverIndicator(group);
+                  if (!hovered && noneLabel) {
+                    const noneInput = noneLabel.querySelector('input[type="radio"]');
+                    if (!noneInput || !noneInput.checked) {
+                      try { noneLabel.click(); } catch (e) {}
+                    }
+                  }
+                });
+              });
+              group.dataset.homeHoverBound = "1";
+              syncHoverIndicator(group);
+              return true;
+            }
+            return false;
+          }
+
+          // Keep syncing state continuously so "blank when not hovered" is always enforced.
+          setInterval(() => {
+            bindHoverSwitch();
+          }, 120);
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+    _section_gap()
 
     # =========================================================
     # 5) MAINTENANCE OVERVIEW (unchanged below)
@@ -545,42 +1075,52 @@ def render_home_tab(
         due_soon = int((dfm["Status"] == "DUE SOON").sum())
         return overdue, due_soon
 
-    st.subheader("🧰 Maintenance Overview")
+    with panel_col:
+        if selected_panel != "__none__":
+            st.markdown('<div class="home-panel-wrap">', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="home-panel-shell"><div class="home-panel-fade">',
+                unsafe_allow_html=True,
+            )
+            if selected_panel == "🚀 Draws Monitor":
+                render_home_draw_orders_overview()
+            elif selected_panel == "✅ Done + ❌ Failed":
+                _render_done_failed_compact(days_visible=4)
+            elif selected_panel == "📅 Schedule":
+                render_schedule_home_minimal()
+            elif selected_panel == "🧰 Maintenance + 🚨 Faults":
+                st.subheader("🧰 Maintenance Overview")
 
-    MAINT_FOLDER = P.maintenance_dir
-    DATASET_DIR = P.dataset_dir
+                MAINT_FOLDER = P.maintenance_dir
+                DATASET_DIR = P.dataset_dir
 
-    overdue, due_soon = compute_maintenance_counts_for_home(
-        maint_folder=MAINT_FOLDER,
-        dataset_dir=DATASET_DIR,
-    )
+                overdue, due_soon = compute_maintenance_counts_for_home(
+                    maint_folder=MAINT_FOLDER,
+                    dataset_dir=DATASET_DIR,
+                )
 
-    st.session_state["maint_overdue"] = overdue
-    st.session_state["maint_due_soon"] = due_soon
+                st.session_state["maint_overdue"] = overdue
+                st.session_state["maint_due_soon"] = due_soon
 
-    c1, c2 = st.columns(2)
-    c1.metric("🔴 Overdue", overdue)
-    c2.metric("🟠 Due soon", due_soon)
+                c1, c2 = st.columns(2)
+                c1.metric("🔴 Overdue", overdue)
+                c2.metric("🟠 Due soon", due_soon)
 
-    st.subheader("🚨 Faults Overview")
+                st.subheader("🚨 Faults Overview")
+                open_critical = compute_open_critical_faults(FAULTS_CSV)
+                c1, c2, c3 = st.columns([1, 1, 2])
+                c1.metric("🟥 Critical open faults", open_critical)
 
-    open_critical = compute_open_critical_faults(FAULTS_CSV)
+                with c2:
+                    if open_critical == 0:
+                        st.success("No critical faults ✅")
+                    else:
+                        st.warning("Check Maintenance → Faults")
 
-    c1, c2, c3 = st.columns([1, 1, 2])
-    c1.metric("🟥 Critical open faults", open_critical)
-
-    with c2:
-        if open_critical == 0:
-            st.success("No critical faults ✅")
-        else:
-            st.warning("Check Maintenance → Faults")
-
-    with c3:
-        if open_critical > 0:
-            st.caption("Tip: open 🧰 Maintenance → Faults / Incidents to review.")
-    st.markdown("---")
-    # =========================================================
-    # 6) PARTS NEEDED
-    # =========================================================
-
-    render_parts_orders_home_all()
+                with c3:
+                    if open_critical > 0:
+                        st.caption("Tip: open 🧰 Maintenance → Faults / Incidents to review.")
+            elif selected_panel == "🧩 Parts Orders":
+                render_parts_orders_home_all()
+            st.markdown("</div></div>", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)

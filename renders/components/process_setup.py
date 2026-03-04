@@ -13,6 +13,7 @@ from app_io.paths import P, dataset_csv_path
 from helpers.text_utils import safe_str, now_str
 from helpers.constants import STATUS_COL, STATUS_UPDATED_COL, MSG_SCHED, MSG_FAILED
 from helpers.process_setup_state import apply_order_row_to_process_setup_state
+from helpers.app_logger import log_event
 
 # These are your existing “collect” UIs (already moved out of dash_try)
 from renders.components.coating import render_coating_section
@@ -328,6 +329,13 @@ def render_scheduled_quick_start(
                 st.session_state["process_setup_last_dataset_csv"] = csv_name
                 st.session_state["process_setup_last_order_idx"] = int(idx)
                 st.session_state[MSG_SCHED] = f"✅ Quick Start created {csv_name} and moved Order #{idx} → In Progress"
+                log_event(
+                    "process_quick_start_created",
+                    order_index=int(idx),
+                    dataset_csv=csv_name,
+                    preform=preform,
+                    status="In Progress",
+                )
 
                 st.rerun()
 
@@ -374,8 +382,46 @@ def render_process_setup_tab(
     orders_df: pd.DataFrame,
     orders_file: str,
 ):
-    st.title("⚙️ Process Setup")
-    st.caption("Quick Start → Configure → Save")
+    st.markdown(
+        """
+        <style>
+          .ps-top-spacer{ height: 8px; }
+          .ps-title{
+            font-size: 1.62rem;
+            font-weight: 900;
+            margin: 0;
+            padding-top: 4px;
+            line-height: 1.2;
+            color: rgba(236,248,255,0.98);
+            text-shadow: 0 0 14px rgba(86,178,255,0.22);
+          }
+          .ps-sub{
+            margin: 4px 0 8px 0;
+            font-size: 0.92rem;
+            color: rgba(188,224,248,0.88);
+          }
+          .ps-line{
+            height: 1px;
+            margin: 0 0 12px 0;
+            background: linear-gradient(90deg, rgba(120,200,255,0.58), rgba(120,200,255,0.0));
+          }
+          .ps-section{
+            margin-top: 8px;
+            margin-bottom: 8px;
+            padding-left: 8px;
+            border-left: 3px solid rgba(120,200,255,0.62);
+            font-size: 1.04rem;
+            font-weight: 820;
+            color: rgba(230,246,255,0.98);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="ps-top-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="ps-title">⚙️ Process Setup</div>', unsafe_allow_html=True)
+    st.markdown('<div class="ps-sub">Quick Start -> Configure -> Save</div>', unsafe_allow_html=True)
+    st.markdown('<div class="ps-line"></div>', unsafe_allow_html=True)
 
     # -------------------------------------------------
     # View selector
@@ -385,7 +431,7 @@ def render_process_setup_tab(
     # -------------------------------------------------
     # Scheduled Quick Start (OWN expander)
     # -------------------------------------------------
-    st.subheader("⚡ Scheduled Orders → Quick Start")
+    st.markdown('<div class="ps-section">⚡ Scheduled Orders → Quick Start</div>', unsafe_allow_html=True)
     render_scheduled_quick_start(
         orders_df=orders_df,
         orders_file=orders_file,

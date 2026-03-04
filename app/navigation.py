@@ -28,6 +28,14 @@ NAV_GROUPS = {
     ],
 }
 
+SAFE_NAV_GROUPS = {
+    "🛡 Safe Mode": [
+        "🏠 Home",
+        "🩺 Data Diagnostics",
+        "🧪 SQL Lab",
+    ]
+}
+
 TAB_TO_GROUPS = {}
 for group_name, tabs in NAV_GROUPS.items():
     for tab_name in tabs:
@@ -43,8 +51,9 @@ def init_session_state() -> None:
     st.session_state.setdefault("good_zones", [])
 
 
-def resolve_group_for_tab(tab: str, fallback: str = "🏠 Home & Project Management") -> str:
-    groups_for_tab = TAB_TO_GROUPS.get(tab, [])
+def resolve_group_for_tab(tab: str, tab_to_groups=None, fallback: str = "🏠 Home & Project Management") -> str:
+    tab_to_groups = tab_to_groups or TAB_TO_GROUPS
+    groups_for_tab = tab_to_groups.get(tab, [])
     current_group = st.session_state.get("nav_group_select")
     if current_group in groups_for_tab:
         return current_group
@@ -55,7 +64,18 @@ def resolve_group_for_tab(tab: str, fallback: str = "🏠 Home & Project Managem
     return fallback
 
 
-def render_sidebar_navigation() -> str:
+def _build_groups(safe_mode: bool):
+    groups = SAFE_NAV_GROUPS if safe_mode else NAV_GROUPS
+    tab_to_groups = {}
+    for group_name, tabs in groups.items():
+        for tab_name in tabs:
+            tab_to_groups.setdefault(tab_name, []).append(group_name)
+    return groups, tab_to_groups, list(groups.keys())
+
+
+def render_sidebar_navigation(safe_mode: bool = False) -> str:
+    nav_groups, tab_to_groups, groups = _build_groups(safe_mode)
+
     with st.sidebar:
         st.markdown("### 📌 Navigation")
 
@@ -67,12 +87,12 @@ def render_sidebar_navigation() -> str:
         )
         st.session_state["selected_tab"] = None
 
-        if desired_tab not in TAB_TO_GROUPS:
-            desired_tab = "🏠 Home"
+        if desired_tab not in tab_to_groups:
+            desired_tab = list(nav_groups.values())[0][0]
 
-        desired_group = resolve_group_for_tab(desired_tab)
+        desired_group = resolve_group_for_tab(desired_tab, tab_to_groups=tab_to_groups)
         jump_tab = desired_tab
-        jump_group = resolve_group_for_tab(jump_tab, desired_group)
+        jump_group = resolve_group_for_tab(jump_tab, tab_to_groups=tab_to_groups, fallback=desired_group)
 
         st.session_state["nav_group_select"] = jump_group
         st.session_state["tab_select"] = jump_tab
@@ -82,7 +102,7 @@ def render_sidebar_navigation() -> str:
         def _on_group_change():
             group = st.session_state.get("nav_group_select")
             last_by_group = st.session_state.get("nav_last_tab_by_group", {})
-            next_tab = last_by_group.get(group, NAV_GROUPS.get(group, [None])[0])
+            next_tab = last_by_group.get(group, nav_groups.get(group, [None])[0])
             if next_tab:
                 st.session_state["tab_select"] = next_tab
                 st.session_state["last_tab"] = next_tab
@@ -91,28 +111,27 @@ def render_sidebar_navigation() -> str:
         def _on_page_change():
             tab = st.session_state.get("tab_select")
             group = st.session_state.get("nav_group_select", "🏠 Home & Project Management")
-            if tab not in NAV_GROUPS.get(group, []):
-                group = resolve_group_for_tab(tab, group)
+            if tab not in nav_groups.get(group, []):
+                group = resolve_group_for_tab(tab, tab_to_groups=tab_to_groups, fallback=group)
                 st.session_state["nav_group_select"] = group
             st.session_state["last_tab"] = tab
             st.session_state["nav_last_tab_by_group"][group] = tab
 
         group = st.selectbox(
             "📁 Group",
-            GROUPS,
-            index=GROUPS.index(st.session_state.get("nav_group_select", desired_group)),
+            groups,
             key="nav_group_select",
             on_change=_on_group_change,
         )
 
         current_tab = st.session_state.get("tab_select", desired_tab)
-        if current_tab not in NAV_GROUPS[group]:
-            current_tab = st.session_state.get("nav_last_tab_by_group", {}).get(group, NAV_GROUPS[group][0])
+        if current_tab not in nav_groups[group]:
+            current_tab = st.session_state.get("nav_last_tab_by_group", {}).get(group, nav_groups[group][0])
             st.session_state["tab_select"] = current_tab
 
         tab_selection = st.radio(
             "📄 Page",
-            NAV_GROUPS[group],
+            nav_groups[group],
             key="tab_select",
             on_change=_on_page_change,
         )
