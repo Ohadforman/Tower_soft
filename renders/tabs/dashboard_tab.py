@@ -141,6 +141,17 @@ def render_dashboard_tab(P):
             return sorted([f for f in os.listdir(dir_path) if f.lower().endswith(".csv")])
 
         @st.cache_data(show_spinner=False)
+        def _cached_sorted_csv_names_by_mtime(dir_path: str, dir_mtime: float):
+            if not os.path.exists(dir_path):
+                return []
+            files = [f for f in os.listdir(dir_path) if f.lower().endswith(".csv")]
+            return sorted(
+                files,
+                key=lambda fn: os.path.getmtime(os.path.join(dir_path, fn)),
+                reverse=True,
+            )
+
+        @st.cache_data(show_spinner=False)
         def _cached_latest_csv_name(dir_path: str, dir_mtime: float):
             if not os.path.exists(dir_path):
                 return None
@@ -410,11 +421,9 @@ def render_dashboard_tab(P):
             st.error("No CSV files found in the logs directory.")
             st.stop()
 
-        csv_files_sorted = sorted(
-            csv_files,
-            key=lambda fn: os.path.getmtime(os.path.join(LOGS_DIR, fn)),
-            reverse=True,
-        )
+        csv_files_sorted = _cached_sorted_csv_names_by_mtime(LOGS_DIR, _mtime(LOGS_DIR))
+        if not csv_files_sorted:
+            csv_files_sorted = csv_files
         latest_file = csv_files_sorted[0]
 
         if not st.session_state.get("dataset_select") or st.session_state.get("dataset_select") not in csv_files_sorted:
