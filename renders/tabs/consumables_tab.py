@@ -140,6 +140,19 @@ def render_consumables_tab(P):
     st.markdown('<div class="cons-sub">Containers, warehouse stock, temperatures, dies, and monthly argon reports.</div>', unsafe_allow_html=True)
     st.markdown('<div class="cons-line"></div>', unsafe_allow_html=True)
 
+    # Top refresh controls (placed above section selector for faster workflow).
+    TOWER_TEMPS_CSV = P.tower_temps_csv
+    TOWER_CONTAINERS_CSV = P.tower_containers_csv
+    top_l, top_r = st.columns(2, gap="medium")
+    with top_l:
+        st.markdown('<div class="cons-csv-label">Temps CSV:</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cons-csv-path">{TOWER_TEMPS_CSV}</div>', unsafe_allow_html=True)
+        refresh_temps = st.button("🔄 Refresh temps", use_container_width=True, key="refresh_temps_btn")
+    with top_r:
+        st.markdown('<div class="cons-csv-label">Containers CSV:</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cons-csv-path">{TOWER_CONTAINERS_CSV}</div>', unsafe_allow_html=True)
+        refresh_containers = st.button("🔄 Refresh containers", use_container_width=True, key="refresh_containers_btn")
+
     st.session_state.setdefault("cons_focus_panel", "__none__")
     st.markdown('<div class="cons-nav-wrap">', unsafe_allow_html=True)
     st.radio(
@@ -226,8 +239,6 @@ def render_consumables_tab(P):
 
     LOW_STOCK_KG = 1.0
     WAREHOUSE_STOCK_FILE = P.coating_stock_json
-    TOWER_TEMPS_CSV = P.tower_temps_csv
-    TOWER_CONTAINERS_CSV = P.tower_containers_csv
     CONTAINER_SNAPSHOT_FILE = P.container_levels_prev_json
     CONTAINER_CFG_PATH = P.container_config_json
 
@@ -434,19 +445,6 @@ def render_consumables_tab(P):
             st.session_state.setdefault(_lvl_key(lab), 0.0)
             st.session_state.setdefault(_type_key(lab), coating_types[0] if coating_types else "")
 
-
-    # ==========================================================
-    # Top toolbar: Refresh buttons
-    # ==========================================================
-    tL, tM = st.columns(2, gap="medium")
-    with tL:
-        st.markdown('<div class="cons-csv-label">Temps CSV:</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="cons-csv-path">{TOWER_TEMPS_CSV}</div>', unsafe_allow_html=True)
-        refresh_temps = st.button("🔄 Refresh temps", use_container_width=True, key="refresh_temps_btn")
-    with tM:
-        st.markdown('<div class="cons-csv-label">Containers CSV:</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="cons-csv-path">{TOWER_CONTAINERS_CSV}</div>', unsafe_allow_html=True)
-        refresh_containers = st.button("🔄 Refresh containers", use_container_width=True, key="refresh_containers_btn")
 
     if refresh_temps:
         wide_temps = _read_one_row_csv(TOWER_TEMPS_CSV)
@@ -902,13 +900,24 @@ def render_consumables_tab(P):
     def _list_logs():
         out = []
         try:
-            for base, _, files in os.walk(LOGS_DIR):
-                for fn in files:
-                    if fn.lower().endswith(".csv"):
-                        out.append(os.path.join(base, fn))
+                for base, _, files in os.walk(LOGS_DIR):
+                    for fn in files:
+                        if fn.lower().endswith(".csv"):
+                            out.append(os.path.join(base, fn))
         except Exception:
             pass
         return out
+
+
+    def _logs_snapshot():
+        rows = []
+        for p in _list_logs():
+            try:
+                rows.append((p, os.path.getmtime(p)))
+            except Exception:
+                rows.append((p, 0.0))
+        rows.sort(key=lambda t: t[0])
+        return tuple(rows)
 
 
     def _safe_float(x, default=0.0):
@@ -1050,6 +1059,63 @@ def render_consumables_tab(P):
         return {"updated": True, "rows": len(out_df), "logs_scanned": len(logs)}
 
 
+    @st.cache_data(show_spinner=False)
+    def _compute_all_draw_gas_stats(logs_snapshot: tuple, dt_cap_value: float):
+        total_sl = 0.0
+        total_minutes = 0.0
+        used_logs = 0
+        used_rows = 0
+
+        for lp, _ in logs_snapshot:
+            try:
+                df = pd.read_csv(lp)
+            except Exception:
+                continue
+
+            if TIME_COL not in df.columns:
+                continue
+            if not any(c in df.columns for c in MFC_ACTUAL_COLS):
+                continue
+
+            df["_t"] = _parse_dt_series_date_time(df[TIME_COL])
+            df = df.dropna(subset=["_t"]).sort_values("_t")
+            if len(df) < 3:
+                continue
+
+            flow = None
+            for c in MFC_ACTUAL_COLS:
+                if c in df.columns:
+                    s = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                    flow = s if flow is None else (flow + s)
+            if flow is None:
+                continue
+
+            dt_s = df["_t"].diff().dt.total_seconds().fillna(0.0)
+            dt_s = dt_s.clip(lower=0.0, upper=float(dt_cap_value))
+            dt_min = dt_s / 60.0
+
+            sl = float((flow * dt_min).sum())
+            mins = float(dt_min.sum())
+            if mins <= 0:
+                continue
+
+            total_sl += sl
+            total_minutes += mins
+            used_logs += 1
+            used_rows += int(len(df))
+
+        avg_sl_per_draw = (total_sl / used_logs) if used_logs > 0 else 0.0
+        weighted_avg_slpm = (total_sl / total_minutes) if total_minutes > 0 else 0.0
+        return {
+            "total_standard_liters": float(total_sl),
+            "total_minutes": float(total_minutes),
+            "draw_logs_count": int(used_logs),
+            "rows_used": int(used_rows),
+            "avg_sl_per_draw": float(avg_sl_per_draw),
+            "weighted_avg_slpm": float(weighted_avg_slpm),
+        }
+
+
     # ✅ AUTO build on load
     info = _build_monthly_csv(force_rebuild=bool(force))
 
@@ -1057,6 +1123,19 @@ def render_consumables_tab(P):
         st.caption(info["info"])
     else:
         st.caption(f"AUTO updated ✅ | logs scanned: {info.get('logs_scanned', 0)} | months: {info.get('rows', 0)}")
+
+    # All-draw gas spend summary (independent of monthly scan filter).
+    all_stats = _compute_all_draw_gas_stats(_logs_snapshot(), float(dt_cap_s))
+    st.markdown("#### 📌 Average Gas Spend (All Draw Data)")
+    g1, g2, g3, g4 = st.columns(4)
+    g1.metric("Total Argon (SL)", f"{all_stats['total_standard_liters']:.1f}")
+    g2.metric("Draw Logs Used", f"{all_stats['draw_logs_count']}")
+    g3.metric("Avg Spend / Draw (SL)", f"{all_stats['avg_sl_per_draw']:.1f}")
+    g4.metric("Weighted Avg Flow (SLPM)", f"{all_stats['weighted_avg_slpm']:.2f}")
+    st.caption(
+        "Computed from all available draw CSV logs in `logs/` using Furnace MFC1–4 Actual "
+        f"and dt cap={float(dt_cap_s):.2f}s."
+    )
 
     # View report
     if os.path.exists(REPORT_CSV):

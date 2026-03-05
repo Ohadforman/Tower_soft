@@ -192,9 +192,21 @@ def render_maintenance_tab(P):
     # =========================================================
     # DuckDB connection (shared with SQL Lab)
     # =========================================================
-    if "sql_duck_con" not in st.session_state:
-        st.session_state["sql_duck_con"] = duckdb.connect(P.duckdb_path)
-    con = st.session_state["sql_duck_con"]
+    con = st.session_state.get("sql_duck_con")
+    if con is None:
+        try:
+            con = duckdb.connect(P.duckdb_path)
+            st.session_state["sql_duck_con"] = con
+        except Exception as e:
+            msg = str(e)
+            if "Could not set lock on file" in msg:
+                st.warning(
+                    "DuckDB is locked by another Tower process on this computer. "
+                    "Close the other running app instance and retry this tab."
+                )
+                st.caption(f"DB path: `{P.duckdb_path}`")
+                return
+            raise
     try:
         con.execute("PRAGMA threads=4;")
     except Exception:

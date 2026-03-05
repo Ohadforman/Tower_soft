@@ -50,6 +50,18 @@ def _build_path_rows_and_summary(tracked_items: tuple, refresh_token: int):
         readable = bool(item.get("readable", exists and os.access(path, os.R_OK)))
         writable = bool(item.get("writable", os.access(path if exists else (os.path.dirname(path) or "."), os.W_OK)))
         healthy = bool(item.get("healthy", exists and readable and writable))
+
+        # DuckDB file is often created lazily on first connection.
+        # If parent directory is writable, treat missing file as ready.
+        if name == "duckdb_path" and (not exists):
+            parent = os.path.dirname(path) or "."
+            parent_writable = os.path.isdir(parent) and os.access(parent, os.W_OK)
+            if parent_writable:
+                exists = True
+                readable = True
+                writable = True
+                healthy = True
+
         status = "✅ READY" if healthy else "❌ BLOCKED"
         rows.append(
             {
@@ -305,8 +317,31 @@ def render_data_diagnostics_tab(P) -> None:
         st.session_state[f"{prefix}_code"] = int(proc.returncode)
         st.session_state[f"{prefix}_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    def _sync_statuses_from_full_health_output(out_text: str, ran_at: str) -> None:
+        if not out_text:
+            return
+        mapping = {
+            "App tests": "diag_app_tests",
+            "Path permissions audit": "diag_perm_audit",
+            "Environment pretest": "diag_env_pretest",
+            "Release check": "diag_release_check",
+        }
+        for line in out_text.splitlines():
+            s = line.strip()
+            for label, prefix in mapping.items():
+                if s.endswith(label) and s.startswith("[PASS]"):
+                    st.session_state[f"{prefix}_code"] = 0
+                    st.session_state[f"{prefix}_ran_at"] = ran_at
+                elif s.endswith(label) and s.startswith("[FAIL]"):
+                    st.session_state[f"{prefix}_code"] = 1
+                    st.session_state[f"{prefix}_ran_at"] = ran_at
+
     if st.button("▶ Run All (Full Health)", key="run_all_full_health_top_btn", use_container_width=True):
         _run_and_store("diag_full_health", "run_full_health_check.py")
+        _sync_statuses_from_full_health_output(
+            st.session_state.get("diag_full_health_output", ""),
+            st.session_state.get("diag_full_health_ran_at", ""),
+        )
 
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("Refresh", key="refresh_diagnostics_btn", use_container_width=True):

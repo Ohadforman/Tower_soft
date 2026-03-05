@@ -37,14 +37,30 @@ def sys_platform_is_macos() -> bool:
 
 def _local_duckdb_path(filename: str = "tower.duckdb") -> str:
     """
-    Prefer a user-local DB file to avoid file locking across users/sessions.
+    Prefer a user-local DB file.
     Optional override: TOWER_LOCAL_DB_DIR
-    Optional mode:
-      - TOWER_DUCKDB_SHARED=1  -> shared per-user file (tower.duckdb)
-      - default                -> isolated per-process file (tower_<pid>.duckdb)
+    Optional mode flags:
+      - default                     -> shared per-user file (tower.duckdb)
+      - TOWER_DUCKDB_ISOLATED=1     -> isolated per-process file (tower_<pid>.duckdb)
+      - TOWER_DUCKDB_SHARED=0       -> isolated per-process file
+      - TOWER_DUCKDB_SHARED=1       -> shared per-user file
     Falls back to project data folder if local user dir cannot be created.
     """
-    shared = os.environ.get("TOWER_DUCKDB_SHARED", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
+    truthy = {"1", "true", "TRUE", "yes", "YES"}
+    falsy = {"0", "false", "FALSE", "no", "NO"}
+
+    isolated = os.environ.get("TOWER_DUCKDB_ISOLATED", "").strip() in truthy
+    shared_env = os.environ.get("TOWER_DUCKDB_SHARED", "").strip()
+
+    if isolated:
+        shared = False
+    elif shared_env in truthy:
+        shared = True
+    elif shared_env in falsy:
+        shared = False
+    else:
+        shared = True
+
     if shared:
         db_name = filename
     else:
