@@ -21,9 +21,32 @@ from helpers.regression_snapshot import compute_snapshot, load_baseline
 from app_io.paths import P
 from app_io.path_health import build_path_health_report
 
+TEST_DESCRIPTIONS = {
+    "Path health report": "Verifies configured critical paths are reachable and healthy.",
+    "Paths are folder-based": "Ensures core files resolve to the expected data/config/assets folders.",
+    "Core files exist": "Checks required CSV/JSON/image files are present.",
+    "JSON integrity": "Parses key JSON configs to confirm valid structure.",
+    "Backup dir writable": "Confirms backup directory exists and is writable.",
+    "DuckDB local path policy": "Validates DB path follows local/fallback policy and is writable.",
+    "Orders schema": "Validates required columns in draw orders CSV.",
+    "Parts schema": "Validates required columns in parts orders CSV.",
+    "Schedule schema": "Validates required columns in schedule CSV.",
+    "Tower temps schema": "Validates required columns in tower temps CSV.",
+    "Tower containers schema": "Validates required columns in tower containers CSV.",
+    "CSV roundtrip in temp": "Checks read/write roundtrip stability for key CSV files.",
+    "Config expected keys": "Verifies required keys exist in coating/protocol configs.",
+    "No root duplicate files": "Ensures no legacy duplicate data/config files exist in repo root.",
+    "Legacy redirect runtime": "Checks legacy root filenames redirect correctly to canonical paths.",
+    "dash_try compile": "Compiles app entry script to catch syntax errors.",
+    "Module import smoke": "Imports main tabs/modules to catch import-time failures.",
+    "Regression snapshot": "Compares current data snapshot against saved baseline.",
+    "Path script single source guardrail": "Scans code for suspicious hardcoded file path usage.",
+}
+
 
 @dataclass
 class TestResult:
+    code: str
     name: str
     ok: bool
     details: str = ""
@@ -35,19 +58,19 @@ class Runner:
         self.strict_warnings = strict_warnings
         self.results: List[TestResult] = []
 
-    def add(self, name: str, ok: bool, details: str = "", warning: bool = False) -> None:
-        self.results.append(TestResult(name=name, ok=ok, details=details, warning=warning))
+    def add(self, code: str, name: str, ok: bool, details: str = "", warning: bool = False) -> None:
+        self.results.append(TestResult(code=code, name=name, ok=ok, details=details, warning=warning))
 
-    def check(self, name: str, fn: Callable[[], None], warning: bool = False) -> None:
+    def check(self, code: str, name: str, fn: Callable[[], None], warning: bool = False) -> None:
         try:
             fn()
-            self.add(name, True)
+            self.add(code, name, True)
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             if warning:
-                self.add(name, True, details=detail, warning=True)
+                self.add(code, name, True, details=detail, warning=True)
             else:
-                self.add(name, False, details=detail)
+                self.add(code, name, False, details=detail)
 
     def summary(self) -> int:
         passed = sum(1 for r in self.results if r.ok and not r.warning)
@@ -61,7 +84,10 @@ class Runner:
                 status = "WARN"
             if not r.ok:
                 status = "FAIL"
-            msg = f"[{status}] {r.name}"
+            msg = f"[{status}] [{r.code}] {r.name}"
+            desc = TEST_DESCRIPTIONS.get(r.name, "")
+            if desc:
+                msg += f" - {desc}"
             if r.details:
                 msg += f" -> {r.details}"
             print(msg)
@@ -254,10 +280,12 @@ def test_regression_snapshot() -> None:
     baseline_path = os.path.join(P.state_dir, "regression_snapshot.json")
     baseline = load_baseline(baseline_path)
     if not baseline:
-        raise RuntimeError(f"baseline missing: {baseline_path} (run run_update_regression_snapshot.py)")
+        raise RuntimeError(
+            f"baseline missing: {baseline_path} (run scripts/cli/run_update_regression_snapshot.py)"
+        )
     current = compute_snapshot(P)
     if current != baseline:
-        raise RuntimeError("snapshot mismatch (run run_update_regression_snapshot.py to refresh baseline)")
+        raise RuntimeError("snapshot mismatch (run scripts/cli/run_update_regression_snapshot.py to refresh baseline)")
 
 
 def test_dash_try_compiles() -> None:
@@ -267,20 +295,56 @@ def test_dash_try_compiles() -> None:
 
 
 def test_path_script_single_source() -> None:
-    # Guardrail: core app files should reference P.* paths, not hardcoded root file names.
+    # Guardrail: app code should use P.* or path helper functions, not hardcoded canonical filenames.
     suspicious = []
-    targets = ["dash_try.py", "renders/tabs/home_tab.py", "renders/tabs/consumables_tab.py", "renders/tabs/order_draw_tab.py"]
-    literals = ["draw_orders.csv", "part_orders.csv", "tower_schedule.csv", "tower_temps.csv", "tower_containers.csv", "config_coating.json"]
-    for rel in targets:
+    literals = [
+        "draw_orders.csv",
+        "part_orders.csv",
+        "tower_schedule.csv",
+        "tower_temps.csv",
+        "tower_containers.csv",
+        "config_coating.json",
+        "protocols.json",
+    ]
+    io_markers = ("open(", "read_csv(", "to_csv(", "Path(", "os.path.join(", "=")
+    allowed_refs = (
+        "P.",
+        "dataset_csv_path(",
+        "log_csv_path(",
+        "maintenance_file_path(",
+        "parts_file_path(",
+        "hook_file_path(",
+        "gas_report_path(",
+    )
+    skip_files = {
+        "app_io/paths.py",  # canonical place where filenames are defined
+        "app_io/legacy_path_compat.py",  # intentionally maps legacy hardcoded names to P paths
+    }
+    scan_roots = ("app", "app_io", "renders", "helpers", "hooks", "orders")
+
+    targets: list[str] = ["dash_try.py"]
+    for root in scan_roots:
+        for d, _, files in os.walk(root):
+            for name in files:
+                if name.endswith(".py"):
+                    targets.append(os.path.join(d, name))
+
+    for rel in sorted(set(targets)):
+        rel_norm = rel.replace("\\", "/")
+        if rel_norm in skip_files:
+            continue
         with open(rel, "r", encoding="utf-8") as f:
-            text = f.read()
-        for lit in literals:
-            if f'"{lit}"' in text or f"'{lit}'" in text:
-                # allow UI/help text mentions, block obvious path assignments/opens
-                for line in text.splitlines():
-                    if lit in line and ("open(" in line or "read_csv(" in line or "=" in line):
-                        if "P." not in line and "caption" not in line and "warning" not in line and "error(" not in line:
-                            suspicious.append(f"{rel}: {line.strip()}")
+            lines = f.read().splitlines()
+        for line in lines:
+            if not any(lit in line for lit in literals):
+                continue
+            if not any(m in line for m in io_markers):
+                continue
+            if any(a in line for a in allowed_refs):
+                continue
+            if any(msg in line for msg in ("caption(", "warning(", "error(", "info(", "markdown(")):
+                continue
+            suspicious.append(f"{rel_norm}: {line.strip()}")
     _assert(not suspicious, "suspicious hardcoded path usage: " + " | ".join(suspicious))
 
 
@@ -371,29 +435,33 @@ def main() -> int:
     r = Runner(strict_warnings=args.strict_warnings)
 
     # Core checks
-    r.check("Path health report", test_path_health)
-    r.check("Paths are folder-based", test_paths_are_folder_based)
-    r.check("Core files exist", test_core_files_exist)
-    r.check("JSON integrity", test_json_integrity)
-    r.check("Backup dir writable", test_backup_dir_is_writable)
-    r.check("DuckDB local path policy", test_duckdb_path_is_local_or_fallback)
-    r.check("Orders schema", test_orders_schema)
-    r.check("Parts schema", test_parts_schema)
-    r.check("Schedule schema", test_schedule_schema)
-    r.check("Tower temps schema", test_temps_schema)
-    r.check("Tower containers schema", test_containers_schema)
-    r.check("CSV roundtrip in temp", test_csv_roundtrip_in_temp)
-    r.check("Config expected keys", test_configs_have_expected_keys)
-    r.check("No root duplicate files", test_no_root_duplicate_files_warning, warning=True)
-    r.check("Legacy redirect runtime", test_legacy_redirect_runtime)
-    r.check("dash_try compile", test_dash_try_compiles)
-    r.check("Module import smoke", test_module_imports)
-    r.check("Regression snapshot", test_regression_snapshot, warning=True)
-    r.check("Path script single source guardrail", test_path_script_single_source)
+    checks = [
+        ("AT-01", "Path health report", test_path_health, False),
+        ("AT-02", "Paths are folder-based", test_paths_are_folder_based, False),
+        ("AT-03", "Core files exist", test_core_files_exist, False),
+        ("AT-04", "JSON integrity", test_json_integrity, False),
+        ("AT-05", "Backup dir writable", test_backup_dir_is_writable, False),
+        ("AT-06", "DuckDB local path policy", test_duckdb_path_is_local_or_fallback, False),
+        ("AT-07", "Orders schema", test_orders_schema, False),
+        ("AT-08", "Parts schema", test_parts_schema, False),
+        ("AT-09", "Schedule schema", test_schedule_schema, False),
+        ("AT-10", "Tower temps schema", test_temps_schema, False),
+        ("AT-11", "Tower containers schema", test_containers_schema, False),
+        ("AT-12", "CSV roundtrip in temp", test_csv_roundtrip_in_temp, False),
+        ("AT-13", "Config expected keys", test_configs_have_expected_keys, False),
+        ("AT-14", "No root duplicate files", test_no_root_duplicate_files_warning, True),
+        ("AT-15", "Legacy redirect runtime", test_legacy_redirect_runtime, False),
+        ("AT-16", "dash_try compile", test_dash_try_compiles, False),
+        ("AT-17", "Module import smoke", test_module_imports, False),
+        ("AT-18", "Regression snapshot", test_regression_snapshot, True),
+        ("AT-19", "Path script single source guardrail", test_path_script_single_source, False),
+    ]
+    for code, name, fn, warning in checks:
+        r.check(code, name, fn, warning=warning)
     if args.ui_smoke:
-        r.check("UI smoke (streamlit.testing)", test_ui_smoke, warning=not args.ui_strict)
+        r.check("AT-90", "UI smoke (streamlit.testing)", test_ui_smoke, warning=not args.ui_strict)
     if args.ui_tabs:
-        r.check("UI tab switch smoke", test_ui_tab_switch_smoke, warning=not args.ui_strict)
+        r.check("AT-91", "UI tab switch smoke", test_ui_tab_switch_smoke, warning=not args.ui_strict)
 
     code = r.summary()
     log_event("app_tests_run", exit_code=code, strict_warnings=bool(args.strict_warnings), ui_smoke=bool(args.ui_smoke))

@@ -17,5 +17,14 @@ tmp/duckdb_auto_worker.py
 # Generated runtime data (keep tracked canonical files manually)
 hooks/*_PRINT.txt
 
+# Diagnostics generated artifacts (timestamped)
+reports/checks/all_checks_*.json
+reports/checks/env_pretest_*.json
+reports/checks/env_pretest_*.md
+reports/path_audit/path_permissions_*.json
+reports/path_audit/path_permissions_*.csv
+backups/snapshot_*/
+logs/app_events_*.log
+
 # OS noise
 .DS_Store

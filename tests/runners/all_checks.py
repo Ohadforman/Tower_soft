@@ -23,9 +23,9 @@ def _run(cmd: list[str]) -> dict:
 
 def main() -> int:
     checks = [
-        [sys.executable, os.path.join(P.root_dir, "run_preflight.py")],
-        [sys.executable, os.path.join(P.root_dir, "run_app_tests.py")],
-        [sys.executable, os.path.join(P.root_dir, "run_path_permissions_audit.py")],
+        [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_preflight.py")],
+        [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_app_tests.py")],
+        [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_path_permissions_audit.py")],
     ]
 
     results = [_run(c) for c in checks]

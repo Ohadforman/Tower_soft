@@ -13,6 +13,7 @@ from app_io.paths import P
 
 @dataclass
 class CheckResult:
+    code: str
     name: str
     ok: bool
     details: str = ""
@@ -107,24 +108,15 @@ def check_csv_schemas() -> None:
 
 def run() -> int:
     started = time.time()
-    checks = [
-        ("Folder layout", check_folder_layout),
-        ("Required files", check_required_files),
-        ("Backup dir", check_backup_dir),
-        ("JSON parse", check_json_parse),
-        ("DuckDB local policy", check_duckdb_local_policy),
-        ("CSV schemas", check_csv_schemas),
-    ]
-
     results = run_checks()
     failed = 0
     print("=== Preflight Check ===")
     for r in results:
         if r.ok:
-            print(f"[PASS] {r.name}")
+            print(f"[PASS] [{r.code}] {r.name}")
         else:
             failed += 1
-            print(f"[FAIL] {r.name} -> {r.details}")
+            print(f"[FAIL] [{r.code}] {r.name} -> {r.details}")
 
     elapsed = time.time() - started
     print(f"\nDone in {elapsed:.2f}s")
@@ -141,20 +133,20 @@ def run() -> int:
 
 def run_checks() -> list[CheckResult]:
     checks = [
-        ("Folder layout", check_folder_layout),
-        ("Required files", check_required_files),
-        ("Backup dir", check_backup_dir),
-        ("JSON parse", check_json_parse),
-        ("DuckDB local policy", check_duckdb_local_policy),
-        ("CSV schemas", check_csv_schemas),
+        ("PF-01", "Folder layout", check_folder_layout),
+        ("PF-02", "Required files", check_required_files),
+        ("PF-03", "Backup dir", check_backup_dir),
+        ("PF-04", "JSON parse", check_json_parse),
+        ("PF-05", "DuckDB local policy", check_duckdb_local_policy),
+        ("PF-06", "CSV schemas", check_csv_schemas),
     ]
     results: list[CheckResult] = []
-    for name, fn in checks:
+    for code, name, fn in checks:
         try:
             fn()
-            results.append(CheckResult(name=name, ok=True))
+            results.append(CheckResult(code=code, name=name, ok=True))
         except Exception as e:
-            results.append(CheckResult(name=name, ok=False, details=f"{type(e).__name__}: {e}"))
+            results.append(CheckResult(code=code, name=name, ok=False, details=f"{type(e).__name__}: {e}"))
     return results
 
 

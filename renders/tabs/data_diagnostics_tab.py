@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
+import re
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -10,8 +12,9 @@ import pandas as pd
 import streamlit as st
 
 from app_io.path_health import build_path_health_report
-from helpers.backup_io import create_backup_snapshot
+from helpers.backup_io import create_backup_snapshot, create_diagnostics_bundle
 from helpers.csv_schema import REQUIRED_CSV_COLUMNS, validate_csv_schema
+from helpers.error_registry import get_error_help
 
 
 def _fmt_ts(path: str) -> str:
@@ -64,6 +67,7 @@ def _build_path_rows_and_summary(tracked_items: tuple, refresh_token: int):
     return summary, pd.DataFrame(rows)
 
 
+@st.cache_data(show_spinner=False)
 def _discover_operational_files(dirs: tuple, refresh_token: int) -> pd.DataFrame:
     allowed = {".csv", ".json", ".txt", ".log", ".duckdb", ".db", ".xlsx"}
     rows = []
@@ -109,6 +113,86 @@ def _build_schema_rows(path_map_items: tuple, refresh_token: int) -> pd.DataFram
             }
         )
     return pd.DataFrame(schema_rows)
+
+
+def _render_error_guidance_from_outputs(*outputs: str) -> None:
+    fail_code_re = re.compile(r"^\[FAIL\]\s+\[((?:PF|AT|EV)-\d{2})\]", flags=re.MULTILINE)
+    detected: list[str] = []
+    for out in outputs:
+        if not out:
+            continue
+        detected.extend(fail_code_re.findall(out))
+
+    # Preserve order and uniqueness.
+    seen = set()
+    codes = [c for c in detected if not (c in seen or seen.add(c))]
+    if not codes:
+        return
+
+    st.markdown('<div class="diag-section">Error Code Guidance</div>', unsafe_allow_html=True)
+    st.caption("Detected failing codes with quick fix instructions.")
+    rows = [get_error_help(c) for c in codes]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    unique_docs = sorted({row.get("doc", "") for row in rows if row.get("doc", "")})
+    if unique_docs:
+        st.caption("Useful docs")
+        st.markdown(" | ".join([f"`{d}`" for d in unique_docs]))
+
+
+def _extract_missing_imports_from_env_output(text: str) -> list[str]:
+    if not text:
+        return []
+    # Example line:
+    # [FAIL] [EV-04] Required package imports -> RuntimeError: missing imports: plotly, duckdb, reportlab, PyPDF2
+    m = re.search(r"missing imports:\s*([^\n]+)", text, flags=re.IGNORECASE)
+    if not m:
+        return []
+    raw = m.group(1)
+    names = [x.strip() for x in raw.split(",") if x.strip()]
+    # preserve order and uniqueness
+    seen = set()
+    out = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _safe_auto_repair(P) -> list[str]:
+    actions: list[str] = []
+    dir_keys = [
+        "data_dir",
+        "config_dir",
+        "state_dir",
+        "assets_dir",
+        "images_dir",
+        "dataset_dir",
+        "logs_dir",
+        "reports_dir",
+        "backups_dir",
+        "maintenance_dir",
+        "hooks_dir",
+        "parts_dir",
+    ]
+    for key in dir_keys:
+        d = getattr(P, key, "")
+        if isinstance(d, str) and d:
+            os.makedirs(d, exist_ok=True)
+            actions.append(f"ensured dir: {key}")
+
+    defaults = [
+        (P.selected_csv_json, {"selected_csv": ""}),
+        (P.container_levels_prev_json, {}),
+        (P.coating_stock_json, {}),
+    ]
+    for path, payload in defaults:
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            actions.append(f"created file: {os.path.basename(path)}")
+    return actions
 
 
 def render_data_diagnostics_tab(P) -> None:
@@ -174,6 +258,26 @@ def render_data_diagnostics_tab(P) -> None:
             border-color: rgba(255,120,120,0.48);
             box-shadow: 0 0 0 1px rgba(255,120,120,0.20);
           }
+          .diag-status-card{
+            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid rgba(128,206,255,0.22);
+            background: linear-gradient(180deg, rgba(14,32,56,0.26), rgba(8,16,28,0.20));
+            min-height: 82px;
+          }
+          .diag-status-k{
+            font-size: 0.80rem;
+            color: rgba(188,224,248,0.90);
+            margin-bottom: 4px;
+          }
+          .diag-status-v{
+            font-size: 1.55rem;
+            font-weight: 880;
+            line-height: 1.1;
+          }
+          .diag-ok{ color: rgba(118,236,160,0.96); text-shadow: 0 0 12px rgba(118,236,160,0.28); }
+          .diag-bad{ color: rgba(255,120,120,0.96); text-shadow: 0 0 12px rgba(255,120,120,0.26); }
+          .diag-na{ color: rgba(186,206,224,0.92); }
         </style>
         """,
         unsafe_allow_html=True,
@@ -188,82 +292,202 @@ def render_data_diagnostics_tab(P) -> None:
     db_mode = "fallback" if active_db == root_fallback_db else "local"
     st.info(f"DuckDB mode: `{db_mode}`  |  path: `{active_db}`")
     st.session_state.setdefault("diag_refresh_token", 0)
-    if st.button("Refresh diagnostics", key="refresh_diagnostics_btn", use_container_width=True):
-        st.session_state["diag_refresh_token"] += 1
-        st.cache_data.clear()
     refresh_token = int(st.session_state.get("diag_refresh_token", 0))
 
-    st.markdown('<div class="diag-section">Backup</div>', unsafe_allow_html=True)
-    b1, b2 = st.columns([1, 2])
-    b1.code(P.backups_dir)
+    st.markdown('<div class="diag-section">Control Panel</div>', unsafe_allow_html=True)
+    st.caption("Run checks and actions from one compact panel.")
+
+    def _run_and_store(prefix: str, script_name: str) -> None:
+        cmd = [sys.executable, os.path.join(P.root_dir, "scripts", "cli", script_name)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=P.root_dir)
+        out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        st.session_state[f"{prefix}_output"] = out.strip()
+        st.session_state[f"{prefix}_code"] = int(proc.returncode)
+        st.session_state[f"{prefix}_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if st.button("▶ Run All (Full Health)", key="run_all_full_health_top_btn", use_container_width=True):
+        _run_and_store("diag_full_health", "run_full_health_check.py")
+
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("Refresh", key="refresh_diagnostics_btn", use_container_width=True):
+        st.session_state["diag_refresh_token"] += 1
+        st.cache_data.clear()
+    if c2.button("Safe Auto Repair", key="run_safe_auto_repair_btn", use_container_width=True):
+        actions = _safe_auto_repair(P)
+        st.session_state["diag_auto_repair_actions"] = actions
+        st.session_state["diag_refresh_token"] += 1
+        st.cache_data.clear()
+    if c3.button("Create Backup", key="create_backup_snapshot_btn", use_container_width=True):
+        with st.spinner("Creating backup snapshot..."):
+            result = create_backup_snapshot(P)
+        st.session_state["diag_refresh_token"] += 1
+        st.cache_data.clear()
+        st.session_state["diag_backup_result"] = {
+            "snapshot_dir": result.snapshot_dir,
+            "copied_files": result.copied_files,
+            "errors": result.errors,
+        }
+    if c4.button("Export Bundle", key="export_diag_bundle_btn", use_container_width=True):
+        with st.spinner("Building diagnostics bundle..."):
+            bundle = create_diagnostics_bundle(P)
+        st.session_state["diag_bundle_path"] = bundle.bundle_path
+        st.session_state["diag_bundle_errors"] = bundle.errors
+        st.session_state["diag_bundle_stats"] = (bundle.included_files, bundle.total_bytes)
+
+    r1, r2, r3 = st.columns(3)
+    if r1.button("Run App Tests", key="run_full_app_tests_btn", use_container_width=True):
+        _run_and_store("diag_app_tests", "run_app_tests.py")
+    if r2.button("Run Path Audit", key="run_perm_audit_btn", use_container_width=True):
+        _run_and_store("diag_perm_audit", "run_path_permissions_audit.py")
+    if r3.button("Run Env Pretest", key="run_env_pretest_btn", use_container_width=True):
+        _run_and_store("diag_env_pretest", "run_env_pretest.py")
+
+    q1 = st.columns(1)[0]
+    if q1.button("Run Release Check", key="run_release_check_btn", use_container_width=True):
+        _run_and_store("diag_release_check", "run_release_check.py")
+
+    # Keep state keys initialized
+    st.session_state.setdefault("diag_app_tests_output", "")
+    st.session_state.setdefault("diag_app_tests_code", None)
+    st.session_state.setdefault("diag_app_tests_ran_at", "")
+    st.session_state.setdefault("diag_perm_audit_output", "")
+    st.session_state.setdefault("diag_perm_audit_code", None)
+    st.session_state.setdefault("diag_perm_audit_ran_at", "")
+    st.session_state.setdefault("diag_env_pretest_output", "")
+    st.session_state.setdefault("diag_env_pretest_code", None)
+    st.session_state.setdefault("diag_env_pretest_ran_at", "")
+    st.session_state.setdefault("diag_release_check_output", "")
+    st.session_state.setdefault("diag_release_check_code", None)
+    st.session_state.setdefault("diag_release_check_ran_at", "")
+    st.session_state.setdefault("diag_full_health_output", "")
+    st.session_state.setdefault("diag_full_health_code", None)
+    st.session_state.setdefault("diag_full_health_ran_at", "")
+
+    # Compact status row (green/red)
+    def _status_html(label: str, code):
+        if code is None:
+            cls, txt = "diag-na", "N/A"
+        elif int(code) == 0:
+            cls, txt = "diag-ok", "OK"
+        else:
+            cls, txt = "diag-bad", "FAIL"
+        return (
+            f'<div class="diag-status-card">'
+            f'<div class="diag-status-k">{label}</div>'
+            f'<div class="diag-status-v {cls}">{txt}</div>'
+            f"</div>"
+        )
+
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.markdown(_status_html("App Tests", st.session_state.get("diag_app_tests_code")), unsafe_allow_html=True)
+    s2.markdown(_status_html("Path Audit", st.session_state.get("diag_perm_audit_code")), unsafe_allow_html=True)
+    s3.markdown(_status_html("Env", st.session_state.get("diag_env_pretest_code")), unsafe_allow_html=True)
+    s4.markdown(_status_html("Release", st.session_state.get("diag_release_check_code")), unsafe_allow_html=True)
+    s5.markdown(_status_html("Full Health", st.session_state.get("diag_full_health_code")), unsafe_allow_html=True)
+
+    # Backup and bundle quick statuses
     snapshots = []
     if os.path.isdir(P.backups_dir):
         snapshots = sorted(
             [d for d in os.listdir(P.backups_dir) if os.path.isdir(os.path.join(P.backups_dir, d))],
             reverse=True,
         )
-    b2.metric("Snapshots", len(snapshots))
-    if st.button("Create Backup Snapshot", key="create_backup_snapshot_btn", use_container_width=True):
-        with st.spinner("Creating backup snapshot..."):
-            result = create_backup_snapshot(P)
-        st.session_state["diag_refresh_token"] += 1
-        st.cache_data.clear()
-        if result.errors:
+    st.caption(f"Backups dir: `{P.backups_dir}` | Snapshots: {len(snapshots)}")
+
+    actions = st.session_state.get("diag_auto_repair_actions", [])
+    if actions:
+        st.success(f"Auto repair completed ({len(actions)} actions).")
+        with st.expander("Auto repair actions"):
+            for a in actions:
+                st.text(a)
+
+    backup_result = st.session_state.get("diag_backup_result")
+    if backup_result:
+        if backup_result.get("errors"):
             st.warning(
-                f"Backup completed with warnings: files={result.copied_files}, errors={len(result.errors)}\n"
-                f"Snapshot: {result.snapshot_dir}"
+                f"Backup warnings: files={backup_result.get('copied_files', 0)}, "
+                f"errors={len(backup_result.get('errors', []))}"
             )
             with st.expander("Backup errors"):
-                for e in result.errors:
+                for e in backup_result.get("errors", []):
                     st.text(e)
         else:
-            st.success(f"Backup created: {result.snapshot_dir} (files={result.copied_files})")
-    if snapshots:
-        st.caption(f"Latest snapshot: {snapshots[0]}")
+            st.success(
+                f"Backup created: {backup_result.get('snapshot_dir', '')} "
+                f"(files={backup_result.get('copied_files', 0)})"
+            )
 
-    st.markdown('<div class="diag-section">Full App Tests</div>', unsafe_allow_html=True)
-    st.caption("Runs run_app_tests.py and shows the complete report output.")
-    st.session_state.setdefault("diag_app_tests_output", "")
-    st.session_state.setdefault("diag_app_tests_code", None)
-    st.session_state.setdefault("diag_app_tests_ran_at", "")
-    if st.button("Run Full App Tests", key="run_full_app_tests_btn", use_container_width=True):
-        cmd = [sys.executable, os.path.join(P.root_dir, "run_app_tests.py")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=P.root_dir)
-        out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-        st.session_state["diag_app_tests_output"] = out.strip()
-        st.session_state["diag_app_tests_code"] = int(proc.returncode)
-        st.session_state["diag_app_tests_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    bundle_path = st.session_state.get("diag_bundle_path", "")
+    if bundle_path and os.path.isfile(bundle_path):
+        files_count, total_bytes = st.session_state.get("diag_bundle_stats", (0, 0))
+        st.success(f"Bundle ready: {os.path.basename(bundle_path)} (files={files_count}, bytes={total_bytes})")
+        with open(bundle_path, "rb") as f:
+            data = f.read()
+        st.download_button(
+            "Download Diagnostics Bundle",
+            data=data,
+            file_name=os.path.basename(bundle_path),
+            mime="application/zip",
+            use_container_width=True,
+            key="download_diag_bundle_btn",
+        )
+        errs = st.session_state.get("diag_bundle_errors", [])
+        if errs:
+            with st.expander("Bundle warnings"):
+                for e in errs:
+                    st.text(e)
 
-    last_code = st.session_state.get("diag_app_tests_code")
-    if last_code is not None:
-        ran_at = st.session_state.get("diag_app_tests_ran_at", "")
-        if last_code == 0:
-            st.success(f"Last run passed (exit code 0) at {ran_at}")
+    with st.expander("Run Outputs", expanded=False):
+        for name, code_key, at_key, out_key in [
+            ("App Tests", "diag_app_tests_code", "diag_app_tests_ran_at", "diag_app_tests_output"),
+            ("Path Permissions Audit", "diag_perm_audit_code", "diag_perm_audit_ran_at", "diag_perm_audit_output"),
+            ("Environment Pretest", "diag_env_pretest_code", "diag_env_pretest_ran_at", "diag_env_pretest_output"),
+            ("Release Check", "diag_release_check_code", "diag_release_check_ran_at", "diag_release_check_output"),
+            ("Full Health Check", "diag_full_health_code", "diag_full_health_ran_at", "diag_full_health_output"),
+        ]:
+            code = st.session_state.get(code_key)
+            if code is None:
+                continue
+            ran_at = st.session_state.get(at_key, "")
+            if code == 0:
+                st.success(f"{name}: PASS (exit 0) at {ran_at}")
+            else:
+                st.error(f"{name}: FAIL (exit {code}) at {ran_at}")
+            st.code(st.session_state.get(out_key, ""), language="text")
+
+    with st.expander("EV-04 Package Auto Fix", expanded=False):
+        st.caption("If EV-04 failed, install missing packages for the active Python environment.")
+        env_out = st.session_state.get("diag_env_pretest_output", "")
+        missing_imports = _extract_missing_imports_from_env_output(env_out)
+        if missing_imports:
+            st.warning(f"Detected missing imports: {', '.join(missing_imports)}")
+            install_cmd = [sys.executable, "-m", "pip", "install", *missing_imports]
+            st.code(" ".join(install_cmd), language="bash")
+            if st.button("Install Missing EV-04 Packages", key="install_ev04_packages_btn", use_container_width=True):
+                proc = subprocess.run(install_cmd, capture_output=True, text=True, cwd=P.root_dir)
+                out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+                st.session_state["diag_ev04_install_code"] = int(proc.returncode)
+                st.session_state["diag_ev04_install_output"] = out.strip()
+                st.session_state["diag_ev04_install_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         else:
-            st.error(f"Last run failed (exit code {last_code}) at {ran_at}")
-        st.code(st.session_state.get("diag_app_tests_output", ""), language="text")
+            st.info("No missing package list detected from latest env pretest output.")
 
-    st.markdown('<div class="diag-section">Path Permissions Audit</div>', unsafe_allow_html=True)
-    st.caption("Deep read/write/list/parse access audit for all configured paths.")
-    st.session_state.setdefault("diag_perm_audit_output", "")
-    st.session_state.setdefault("diag_perm_audit_code", None)
-    st.session_state.setdefault("diag_perm_audit_ran_at", "")
-    if st.button("Run Path Permissions Audit", key="run_perm_audit_btn", use_container_width=True):
-        cmd = [sys.executable, os.path.join(P.root_dir, "run_path_permissions_audit.py")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=P.root_dir)
-        out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-        st.session_state["diag_perm_audit_output"] = out.strip()
-        st.session_state["diag_perm_audit_code"] = int(proc.returncode)
-        st.session_state["diag_perm_audit_ran_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ev04_install_code = st.session_state.get("diag_ev04_install_code")
+        if ev04_install_code is not None:
+            ran_at = st.session_state.get("diag_ev04_install_ran_at", "")
+            if ev04_install_code == 0:
+                st.success(f"Package install completed (exit code 0) at {ran_at}. Re-run Environment Pretest.")
+            else:
+                st.error(f"Package install failed (exit code {ev04_install_code}) at {ran_at}")
+            st.code(st.session_state.get("diag_ev04_install_output", ""), language="text")
 
-    audit_code = st.session_state.get("diag_perm_audit_code")
-    if audit_code is not None:
-        ran_at = st.session_state.get("diag_perm_audit_ran_at", "")
-        if audit_code == 0:
-            st.success(f"Permissions audit passed (exit code 0) at {ran_at}")
-        else:
-            st.error(f"Permissions audit failed (exit code {audit_code}) at {ran_at}")
-        st.code(st.session_state.get("diag_perm_audit_output", ""), language="text")
+    _render_error_guidance_from_outputs(
+        st.session_state.get("diag_app_tests_output", ""),
+        st.session_state.get("diag_perm_audit_output", ""),
+        st.session_state.get("diag_release_check_output", ""),
+        st.session_state.get("diag_env_pretest_output", ""),
+        st.session_state.get("diag_full_health_output", ""),
+    )
 
     tracked = _collect_configured_paths(P)
     tracked_items = tuple(tracked.items())
@@ -299,15 +523,14 @@ def render_data_diagnostics_tab(P) -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="diag-section">Configured Paths (All from P)</div>', unsafe_allow_html=True)
-    show_cols = ["status", "key", "exists", "readable", "writable", "healthy", "modified", "path"]
-    show_cols = [c for c in show_cols if c in paths_df.columns]
-    if not paths_df.empty:
-        st.dataframe(paths_df[show_cols], use_container_width=True, hide_index=True)
-    else:
-        st.info("No configured paths found.")
+    with st.expander("Configured Paths (All from P)", expanded=False):
+        show_cols = ["status", "key", "exists", "readable", "writable", "healthy", "modified", "path"]
+        show_cols = [c for c in show_cols if c in paths_df.columns]
+        if not paths_df.empty:
+            st.dataframe(paths_df[show_cols], use_container_width=True, hide_index=True)
+        else:
+            st.info("No configured paths found.")
 
-    st.markdown('<div class="diag-section">Discovered Data Files (CSV/JSON/LOG/DB)</div>', unsafe_allow_html=True)
     dirs = (
         ("data", P.data_dir),
         ("logs", P.logs_dir),
@@ -319,13 +542,13 @@ def render_data_diagnostics_tab(P) -> None:
         ("config", P.config_dir),
         ("state", P.state_dir),
     )
-    discovered = _discover_operational_files(dirs, refresh_token)
-    if discovered.empty:
-        st.info("No data files found in configured directories.")
-    else:
-        st.dataframe(discovered, use_container_width=True, hide_index=True)
+    with st.expander("Discovered Data Files (CSV/JSON/LOG/DB)", expanded=False):
+        discovered = _discover_operational_files(dirs, refresh_token)
+        if discovered.empty:
+            st.info("No data files found in configured directories.")
+        else:
+            st.dataframe(discovered, use_container_width=True, hide_index=True)
 
-    st.markdown('<div class="diag-section">CSV Schemas</div>', unsafe_allow_html=True)
     path_map = {
         "orders": P.orders_csv,
         "parts_orders": P.parts_orders_csv,
@@ -333,5 +556,6 @@ def render_data_diagnostics_tab(P) -> None:
         "tower_temps": P.tower_temps_csv,
         "tower_containers": P.tower_containers_csv,
     }
-    schema_df = _build_schema_rows(tuple(path_map.items()), refresh_token)
-    st.dataframe(schema_df, use_container_width=True, hide_index=True)
+    with st.expander("CSV Schemas", expanded=False):
+        schema_df = _build_schema_rows(tuple(path_map.items()), refresh_token)
+        st.dataframe(schema_df, use_container_width=True, hide_index=True)

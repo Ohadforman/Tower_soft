@@ -9,7 +9,7 @@
     "good_fiber": "./good_fiber.py",
     "create_folder": "./create_folder.py",
     "csv_col_nam_map": "./csv_col_nam_map.py",
-    "run_scripts": "./run_end_draw_scripts.py",
+    "run_scripts": "./scripts/cli/run_end_draw_scripts.py",
     "correlation_script": "./corr_map.py",
     "fiber_report_pdf": "fiber_report.pdf",
     "correlation_logs_directory": "./",

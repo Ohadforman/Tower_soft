@@ -13,8 +13,9 @@ from app.bootstrap import build_runtime, configure_page, ensure_coating_config
 from app.navigation import init_session_state, render_sidebar_navigation
 from app.router import render_selected_tab
 from helpers.app_logger import log_event
+from helpers.error_registry import get_error_help
 from renders.support.style_utils import apply_blue_clean_base_theme
-from run_preflight import run_checks
+from tests.runners.preflight import run_checks
 
 configure_page()
 apply_blue_clean_base_theme()
@@ -25,16 +26,24 @@ startup_failures = [r for r in startup_results if not r.ok]
 if startup_failures and not safe_mode:
     log_event("startup_checks_failed", safe_mode=False, failures=len(startup_failures))
     st.error("Startup checks failed. Fix the following issues before running the app:")
-    lines = [f"- {r.name}: {r.details}" for r in startup_failures]
+    lines = [f"- [{r.code}] {r.name}: {r.details}" for r in startup_failures]
     st.code("\n".join(lines), language="text")
+    st.caption("Quick fixes:")
+    for code in {r.code for r in startup_failures}:
+        h = get_error_help(code)
+        st.write(f"- `{h['code']}` {h['title']}: {h['fix']}")
     st.info("Tip: set `TOWER_SAFE_MODE=1` to open only safe tabs for debugging.")
     st.stop()
 
 if startup_failures and safe_mode:
     log_event("startup_checks_failed", safe_mode=True, failures=len(startup_failures))
     st.warning("Startup checks failed. Running in SAFE MODE with limited tabs.")
-    lines = [f"- {r.name}: {r.details}" for r in startup_failures]
+    lines = [f"- [{r.code}] {r.name}: {r.details}" for r in startup_failures]
     st.code("\n".join(lines), language="text")
+    with st.expander("Quick fix hints"):
+        for code in {r.code for r in startup_failures}:
+            h = get_error_help(code)
+            st.write(f"- `{h['code']}` {h['title']}: {h['fix']}")
 
 ensure_coating_config(P)
 runtime = build_runtime(P)
