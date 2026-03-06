@@ -70,7 +70,7 @@ def render_home_draw_orders_overview(
             <div style="
                 width: 100%;
                 min-height: 140px;
-                background: rgba(0,0,0,0.35);
+                background: rgba(0,0,0,0.52);
                 border: 2px solid {border_color};
                 border-radius: 18px;
                 padding: 14px;
@@ -103,7 +103,7 @@ def render_home_draw_orders_overview(
                 padding:18px 22px;
                 border-radius:20px;
                 border:2px solid {border_color};
-                background:rgba(40,20,60,0.55);
+                background:rgba(40,20,60,0.66);
                 box-shadow:0 10px 30px rgba(0,0,0,0.35);
                 display:flex;
                 justify-content:space-between;
@@ -507,9 +507,18 @@ def render_parts_orders_home_all():
     st.markdown(
         """
         <style>
+        .parts-home-shell{
+            border: 1px solid rgba(150, 220, 255, 0.20);
+            border-radius: 16px;
+            padding: 10px 12px 12px 12px;
+            background: linear-gradient(160deg, rgba(6, 14, 26, 0.58), rgba(6, 12, 22, 0.42));
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+        }
         /* ================= KPI CARDS ================= */
         .kpi-card{
-            background: rgba(0,0,0,0.35);
+            background: rgba(0,0,0,0.52);
             border: 1px solid rgba(255,255,255,0.18);
             border-radius: 14px;
             padding: 14px 16px;
@@ -663,7 +672,8 @@ def render_parts_orders_home_all():
         .parts-opened-title {
             font-size: 1.08rem;
             font-weight: 800;
-            color: rgba(255,255,255,0.96);
+            color: rgba(246,252,255,0.98);
+            text-shadow: 0 1px 10px rgba(0,0,0,0.45);
             margin: 12px 0 8px 0;
         }
         .parts-opened-card {
@@ -671,7 +681,9 @@ def render_parts_orders_home_all():
             border-radius: 12px;
             padding: 10px 12px;
             margin-bottom: 8px;
-            background: rgba(76, 22, 22, 0.26);
+            background: rgba(76, 22, 22, 0.62);
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
             transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
         }
         .parts-opened-card:hover {
@@ -682,12 +694,14 @@ def render_parts_orders_home_all():
         .parts-opened-main {
             font-size: 1.0rem;
             font-weight: 800;
-            color: rgba(255,236,236,0.98);
+            color: rgba(255,244,244,0.99);
+            text-shadow: 0 1px 8px rgba(0,0,0,0.42);
             margin-bottom: 6px;
         }
         .parts-opened-sub {
             font-size: 0.86rem;
-            color: rgba(255,255,255,0.88);
+            color: rgba(245,245,245,0.95);
+            text-shadow: 0 1px 8px rgba(0,0,0,0.40);
             line-height: 1.35;
         }
         </style>
@@ -695,10 +709,12 @@ def render_parts_orders_home_all():
         unsafe_allow_html=True,
     )
 
+    st.markdown("<div class='parts-home-shell'>", unsafe_allow_html=True)
     st.markdown("<div class='parts-opened-title'>🔴 Opened Parts</div>", unsafe_allow_html=True)
 
     if opened_only.empty:
         st.info("No parts currently in Opened status.")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     opened_only["Date Ordered"] = pd.to_datetime(opened_only["Date Ordered"], errors="coerce")
@@ -724,6 +740,7 @@ def render_parts_orders_home_all():
             """,
             unsafe_allow_html=True,
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_tm_drum_fiber_visual_from_csv(df_params: pd.DataFrame, dataset_name: str):
@@ -1052,7 +1069,7 @@ def render_done_home_section(show_header: bool = True):
         <style>
         .done-card {
             border: 1px solid rgba(255,255,255,0.12);
-            background: rgba(10,10,10,0.45);
+            background: rgba(10,10,10,0.60);
             border-radius: 14px;
             padding: 14px 14px 10px 14px;
             margin-bottom: 12px;

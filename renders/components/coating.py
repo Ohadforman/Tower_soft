@@ -374,6 +374,6 @@ def render_coating_section(_config: dict | None = None) -> dict:
         "Ideal Primary Die (µm)": st.session_state.get("coating_ideal_primary_die_um", ""),
         "Ideal Secondary Die (µm)": st.session_state.get("coating_ideal_secondary_die_um", ""),
         "Pred @ Ideal FC (µm)": st.session_state.get("coating_fc_at_ideal_primary_um", ""),
-        "Pred @ Ideal SC (µm)": st.session_state.get("coating_sc_at_ideal_secondary_die_um", ""),
+        "Pred @ Ideal SC (µm)": st.session_state.get("coating_sc_at_ideal_secondary_um", ""),
     }
     return coating_data

@@ -13,7 +13,9 @@ from app_io.paths import P, dataset_csv_path
 from helpers.text_utils import safe_str, now_str
 from helpers.constants import STATUS_COL, STATUS_UPDATED_COL, MSG_SCHED, MSG_FAILED
 from helpers.process_setup_state import apply_order_row_to_process_setup_state
+from helpers.process_setup_state import apply_dataset_process_rows_to_state
 from helpers.app_logger import log_event
+from helpers.dataset_io import most_recent_csv
 
 # These are your existing “collect” UIs (already moved out of dash_try)
 from renders.components.coating import render_coating_section
@@ -422,6 +424,31 @@ def render_process_setup_tab(
     st.markdown('<div class="ps-title">⚙️ Process Setup</div>', unsafe_allow_html=True)
     st.markdown('<div class="ps-sub">Quick Start -> Configure -> Save</div>', unsafe_allow_html=True)
     st.markdown('<div class="ps-line"></div>', unsafe_allow_html=True)
+
+    # -------------------------------------------------
+    # Auto-restore last saved Process setup (once per session)
+    # -------------------------------------------------
+    if not st.session_state.get("process_setup_restore_done", False):
+        restore_file = ""
+        preferred = str(st.session_state.get("process_setup_last_dataset_csv", "")).strip()
+        if preferred:
+            cand = dataset_csv_path(preferred)
+            if os.path.exists(cand):
+                restore_file = cand
+        if not restore_file:
+            latest = most_recent_csv(P.dataset_dir)
+            if latest:
+                restore_file = os.path.join(P.dataset_dir, latest)
+
+        if restore_file and os.path.exists(restore_file):
+            try:
+                dfp = pd.read_csv(restore_file, keep_default_na=False)
+                restored = apply_dataset_process_rows_to_state(dfp, overwrite=False)
+                if restored > 0:
+                    st.caption(f"Loaded last process setup from `{os.path.basename(restore_file)}`")
+            except Exception:
+                pass
+        st.session_state["process_setup_restore_done"] = True
 
     # -------------------------------------------------
     # View selector

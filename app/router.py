@@ -22,6 +22,7 @@ from renders.tabs.maintenance_tab import render_maintenance_tab
 from renders.tabs.order_draw_tab import render_order_draw_tab
 from renders.tabs.process_setup_tab import render_process_setup_tab_main
 from renders.tabs.protocols import render_protocols_tab
+from renders.tabs.report_center_tab import render_report_center_tab
 from renders.tabs.schedule_tab import render_schedule_tab
 from renders.tabs.sql_lab import render_sql_lab_tab
 from renders.tabs.tower_parts_tab import render_tower_parts_tab
@@ -51,6 +52,8 @@ def render_selected_tab(tab_selection: str, P, image_base64: str, failed_reason_
         render_draw_finalize_tab(P)
     elif tab_selection == "🍃 Tower state - Consumables and dies":
         render_consumables_tab(P)
+    elif tab_selection == "🗂️ Report Center":
+        render_report_center_tab(P)
     elif tab_selection == "📅 Schedule":
         render_schedule_tab(P)
     elif tab_selection == "📦 Order Draw":

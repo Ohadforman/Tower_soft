@@ -1,3 +1,4 @@
 maintenance_id,maintenance_ts,maintenance_component,maintenance_task,maintenance_task_id,maintenance_mode,maintenance_hours_source,maintenance_done_date,maintenance_done_hours,maintenance_done_draw,maintenance_source_file,maintenance_actor,maintenance_note
 1770830174587,2026-02-11 19:16:14,Bare Fibre Diameter Gauge,Align bare fibre diameter gauge to fibre line using tightened line,ALGN-003,event,nan,2026-02-11,,,TowerAlignment_Maintenance_Tracker_Template.xlsx,,
 1770834663031,2026-02-11 20:31:03,63mm Furnace System,Before operation: check top sleeve + water-cooled top ring for soot; clean if needed,FUR-MNT-002,event,FURNACE,2026-02-11,1006.0,,Furnace63_Maintenance_Tracker_Template.xlsx,,
+1772790988521,2026-03-06 11:56:28,UV Curing System,"Every 500 operating hours: clean lamp module, reflector, bulb and RF screen",UV-MNT-003,hours,lamp_hours,2026-03-06,1008.0,,UV_CuringSystem_Maintenance_Tracker_Template.xlsx,operator,

@@ -14,6 +14,7 @@ from app.navigation import init_session_state, render_sidebar_navigation
 from app.router import render_selected_tab
 from helpers.app_logger import log_event
 from helpers.error_registry import get_error_help
+from helpers.weekly_report_scheduler import maybe_run_weekly_report_auto
 from renders.support.style_utils import apply_blue_clean_base_theme
 from tests.runners.preflight import run_checks
 
@@ -48,6 +49,24 @@ if startup_failures and safe_mode:
 ensure_coating_config(P)
 runtime = build_runtime(P)
 init_session_state()
+
+# Weekly report auto-run:
+# Run at most once per Streamlit session; helper itself enforces once per due slot.
+if "weekly_report_auto_checked" not in st.session_state:
+    auto_res = maybe_run_weekly_report_auto()
+    st.session_state["weekly_report_auto_checked"] = True
+    st.session_state["weekly_report_auto_result"] = {
+        "ran": auto_res.ran,
+        "reason": auto_res.reason,
+        "due_iso": auto_res.due_iso,
+        "pdf_path": auto_res.pdf_path,
+        "error": auto_res.error,
+    }
+    if auto_res.ran:
+        st.toast("Weekly report generated automatically.", icon="✅")
+    elif auto_res.reason == "generation_failed":
+        st.toast("Weekly report auto-generation failed. Check logs.", icon="⚠️")
+
 selected_tab = render_sidebar_navigation(safe_mode=safe_mode and bool(startup_failures))
 
 # One-time startup popup on first page only (Home).

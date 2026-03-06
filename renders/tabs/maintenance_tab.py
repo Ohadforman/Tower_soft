@@ -542,40 +542,86 @@ def render_maintenance_tab(P):
     default_uv2 = float(state.get("uv2_hours", 0.0) or 0.0)
     default_warn_days = int(state.get("warn_days", 14) or 14)
     default_warn_hours = float(state.get("warn_hours", 50.0) or 50.0)
-    
-    st.subheader("Current status inputs (saved)")
+
+    # Compact weekly status view + folded editor.
+    # Keep editor defaults synced with last saved weekly snapshot (without overriding active unsaved typing every rerun).
+    saved_stamp = safe_str(state.get("status_weekly_updated_at", ""))
+    if st.session_state.get("maint_weekly_loaded_stamp", None) != saved_stamp:
+        st.session_state["maint_furnace_hours"] = default_furnace
+        st.session_state["maint_uv1_hours"] = default_uv1
+        st.session_state["maint_uv2_hours"] = default_uv2
+        st.session_state["maint_warn_days"] = default_warn_days
+        st.session_state["maint_warn_hours"] = default_warn_hours
+        st.session_state["maint_weekly_loaded_stamp"] = saved_stamp
+    else:
+        st.session_state.setdefault("maint_furnace_hours", default_furnace)
+        st.session_state.setdefault("maint_uv1_hours", default_uv1)
+        st.session_state.setdefault("maint_uv2_hours", default_uv2)
+        st.session_state.setdefault("maint_warn_days", default_warn_days)
+        st.session_state.setdefault("maint_warn_hours", default_warn_hours)
+
     current_date = dt.date.today()
-    st.date_input("Today", value=current_date, disabled=True)
-    
-    c2, c3, c4, c5 = st.columns([1, 1, 1, 1])
-    with c2:
-        furnace_hours = st.number_input(
-            "Furnace hours", min_value=0.0, value=default_furnace, step=1.0,
-            key="maint_furnace_hours", on_change=_persist_inputs
+    weekly_updated_raw = safe_str(state.get("status_weekly_updated_at", ""))
+    weekly_updated_dt = pd.to_datetime(weekly_updated_raw, errors="coerce")
+    is_weekly_fresh = pd.notna(weekly_updated_dt) and ((pd.Timestamp(current_date) - weekly_updated_dt.normalize()).days <= 7)
+
+    st.markdown('<div class="maint-section-title">📌 Current Tower Status (Weekly)</div>', unsafe_allow_html=True)
+    draw_logs_count = get_draw_csv_count(LOGS_FOLDER)
+    c0, c1, c2, c3, c4, c5, c6 = st.columns(7)
+    c0.metric("Today", str(current_date))
+    c1.metric("Furnace h", f"{float(st.session_state.get('maint_furnace_hours', 0.0)):.1f}")
+    c2.metric("UV1 h", f"{float(st.session_state.get('maint_uv1_hours', 0.0)):.1f}")
+    c3.metric("UV2 h", f"{float(st.session_state.get('maint_uv2_hours', 0.0)):.1f}")
+    c4.metric("Draws (logs)", int(draw_logs_count))
+    c5.metric("Warn days", int(st.session_state.get("maint_warn_days", 14)))
+    c6.metric("Warn hours", f"{float(st.session_state.get('maint_warn_hours', 50.0)):.1f}")
+
+    if is_weekly_fresh:
+        st.success(f"Weekly status updated: {weekly_updated_dt.strftime('%Y-%m-%d %H:%M')}")
+    else:
+        show_ts = weekly_updated_dt.strftime("%Y-%m-%d %H:%M") if pd.notna(weekly_updated_dt) else "never"
+        st.warning(f"Weekly status update is due. Last update: {show_ts}")
+
+    with st.expander("🛠️ Edit Weekly Status Inputs", expanded=False):
+        c2, c3, c4, c5 = st.columns([1, 1, 1, 1])
+        with c2:
+            st.number_input(
+                "Furnace hours", min_value=0.0, step=1.0,
+                key="maint_furnace_hours"
+            )
+        with c3:
+            st.number_input(
+                "UV System 1 hours", min_value=0.0, step=1.0,
+                key="maint_uv1_hours"
+            )
+        with c4:
+            st.number_input(
+                "UV System 2 hours", min_value=0.0, step=1.0,
+                key="maint_uv2_hours"
+            )
+        with c5:
+            st.number_input(
+                "Warn if due within (days)", min_value=0, step=1,
+                key="maint_warn_days"
+            )
+
+        st.number_input(
+            "Warn if due within (hours)", min_value=0.0, step=1.0,
+            key="maint_warn_hours"
         )
-    with c3:
-        uv1_hours = st.number_input(
-            "UV System 1 hours", min_value=0.0, value=default_uv1, step=1.0,
-            key="maint_uv1_hours", on_change=_persist_inputs
-        )
-    with c4:
-        uv2_hours = st.number_input(
-            "UV System 2 hours", min_value=0.0, value=default_uv2, step=1.0,
-            key="maint_uv2_hours", on_change=_persist_inputs
-        )
-    with c5:
-        warn_days = st.number_input(
-            "Warn if due within (days)", min_value=0, value=default_warn_days, step=1,
-            key="maint_warn_days", on_change=_persist_inputs
-        )
-    
-    warn_hours = st.number_input(
-        "Warn if due within (hours)", min_value=0.0, value=default_warn_hours, step=1.0,
-        key="maint_warn_hours", on_change=_persist_inputs
-    )
-    
-    _persist_inputs()
-    st.caption("Hours-based tasks use **Hours Source**: FURNACE / UV1 / UV2. If empty → defaults to FURNACE.")
+        if st.button("💾 Save Weekly Status", key="maint_save_weekly_status_btn", type="primary", use_container_width=True):
+            state["status_weekly_updated_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _persist_inputs()
+            st.session_state["maint_weekly_loaded_stamp"] = safe_str(state.get("status_weekly_updated_at", ""))
+            st.success("Weekly status saved.")
+            st.rerun()
+
+    furnace_hours = float(st.session_state.get("maint_furnace_hours", default_furnace))
+    uv1_hours = float(st.session_state.get("maint_uv1_hours", default_uv1))
+    uv2_hours = float(st.session_state.get("maint_uv2_hours", default_uv2))
+    warn_days = int(st.session_state.get("maint_warn_days", default_warn_days))
+    warn_hours = float(st.session_state.get("maint_warn_hours", default_warn_hours))
+    st.caption("Hours-based tasks use **Hours Source**: FURNACE / UV1 / UV2. If empty -> defaults to FURNACE.")
     
     # =========================================================
     # Actor
@@ -775,26 +821,152 @@ def render_maintenance_tab(P):
         return open_total, crit_open
     
     def render_maintenance_dashboard_metrics(dfm):
-        st.subheader("Dashboard")
+        st.markdown(
+            """
+            <style>
+              .maint-metrics-grid{
+                display:grid;
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+                gap: 10px;
+                margin: 8px 0 10px 0;
+              }
+              .maint-metric-card{
+                border-radius: 12px;
+                padding: 10px 12px;
+                border: 1px solid rgba(128,206,255,0.24);
+                background: linear-gradient(180deg, rgba(14,32,56,0.36), rgba(8,16,28,0.26));
+              }
+              .maint-metric-k{
+                font-size: 0.78rem;
+                color: rgba(188,224,248,0.92);
+                margin-bottom: 4px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+              }
+              .maint-metric-v{
+                font-size: 2.0rem;
+                line-height: 1.0;
+                font-weight: 900;
+              }
+              .maint-v-red{ color:#ff5f5f; text-shadow:0 0 12px rgba(255,72,72,0.26); }
+              .maint-v-orange{ color:#ffb84d; text-shadow:0 0 12px rgba(255,168,48,0.24); }
+              .maint-v-green{ color:#6dff95; text-shadow:0 0 12px rgba(88,246,126,0.22); }
+              .maint-v-blue{ color:#7ec6ff; text-shadow:0 0 12px rgba(86,180,255,0.22); }
+              @media (max-width: 1100px){
+                .maint-metrics-grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+              }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         overdue = int((dfm["Status"] == "OVERDUE").sum())
         due_soon = int((dfm["Status"] == "DUE SOON").sum())
         routine = int((dfm["Status"] == "ROUTINE").sum())
         ok = int((dfm["Status"] == "OK").sum())
         open_faults, crit_faults = get_open_faults_counts()
-    
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("OVERDUE", overdue)
-        c2.metric("DUE SOON", due_soon)
-        c3.metric("ROUTINE", routine)
-        c4.metric("OK", ok)
-        c5.metric("🚨 Open faults", open_faults)
-        c6.metric("🟥 Critical open", crit_faults)
+        overdue_cls = "maint-v-red" if overdue > 0 else "maint-v-green"
+        due_cls = "maint-v-orange" if due_soon > 0 else "maint-v-green"
+        routine_cls = "maint-v-blue"
+        ok_cls = "maint-v-green"
+        open_cls = "maint-v-orange" if open_faults > 0 else "maint-v-green"
+        crit_cls = "maint-v-red" if crit_faults > 0 else "maint-v-green"
+
+        st.markdown(
+            f"""
+            <div class="maint-metrics-grid">
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">OVERDUE</div>
+                <div class="maint-metric-v {overdue_cls}">{overdue}</div>
+              </div>
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">DUE SOON</div>
+                <div class="maint-metric-v {due_cls}">{due_soon}</div>
+              </div>
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">ROUTINE</div>
+                <div class="maint-metric-v {routine_cls}">{routine}</div>
+              </div>
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">OK</div>
+                <div class="maint-metric-v {ok_cls}">{ok}</div>
+              </div>
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">🚨 Open Faults</div>
+                <div class="maint-metric-v {open_cls}">{open_faults}</div>
+              </div>
+              <div class="maint-metric-card">
+                <div class="maint-metric-k">🟥 Critical Open</div>
+                <div class="maint-metric-v {crit_cls}">{crit_faults}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.session_state.setdefault("maint_dash_focus", "")
+        b1, b2, b3, b4, b5, b6 = st.columns(6)
+        if b1.button("View OVERDUE", key="maint_dash_btn_overdue", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "OVERDUE"
+        if b2.button("View DUE SOON", key="maint_dash_btn_due_soon", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "DUE SOON"
+        if b3.button("View ROUTINE", key="maint_dash_btn_routine", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "ROUTINE"
+        if b4.button("View OK", key="maint_dash_btn_ok", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "OK"
+        if b5.button("View Open Faults", key="maint_dash_btn_open_faults", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "OPEN_FAULTS"
+        if b6.button("View Critical", key="maint_dash_btn_critical_faults", use_container_width=True):
+            st.session_state["maint_dash_focus"] = "CRITICAL_FAULTS"
+
+        focus = st.session_state.get("maint_dash_focus", "")
+        if focus:
+            c_left, c_right = st.columns([5, 1])
+            c_left.markdown(f"**Focused List: {focus}**")
+            if c_right.button("Clear", key="maint_dash_focus_clear", use_container_width=True):
+                st.session_state["maint_dash_focus"] = ""
+                st.rerun()
+
+            if focus in {"OVERDUE", "DUE SOON", "ROUTINE", "OK"}:
+                show_cols = [
+                    c for c in [
+                        "Status", "Component", "Task", "Task_ID", "Tracking_Mode",
+                        "Hours_Source", "Next_Due_Date", "Next_Due_Hours", "Next_Due_Draw", "Source_File"
+                    ] if c in dfm.columns
+                ]
+                view_df = dfm[dfm["Status"] == focus].copy()
+                st.dataframe(view_df[show_cols], use_container_width=True, hide_index=True, height=280)
+            else:
+                faults_csv = _read_csv_safe(FAULTS_CSV, FAULTS_COLS)
+                actions_csv = _read_csv_safe(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS)
+                smap = _latest_fault_state(actions_csv)
+                if faults_csv.empty:
+                    st.info("No faults data.")
+                    return
+                faults_csv["fault_id"] = pd.to_numeric(faults_csv["fault_id"], errors="coerce")
+                faults_csv = faults_csv.dropna(subset=["fault_id"]).copy()
+                faults_csv["fault_id"] = faults_csv["fault_id"].astype(int)
+                faults_csv["_is_closed"] = faults_csv["fault_id"].apply(lambda fid: bool(smap.get(int(fid), {}).get("is_closed", False)))
+                open_df = faults_csv[~faults_csv["_is_closed"]].copy()
+
+                if focus == "OPEN_FAULTS":
+                    out = open_df[[
+                        "fault_ts", "fault_id", "fault_component", "fault_severity",
+                        "fault_title", "fault_description", "fault_related_draw"
+                    ]] if not open_df.empty else pd.DataFrame()
+                    st.dataframe(out, use_container_width=True, hide_index=True, height=280)
+                elif focus == "CRITICAL_FAULTS":
+                    crit = open_df[open_df["fault_severity"].astype(str).str.lower().eq("critical")].copy()
+                    out = crit[[
+                        "fault_ts", "fault_id", "fault_component", "fault_severity",
+                        "fault_title", "fault_description", "fault_related_draw"
+                    ]] if not crit.empty else pd.DataFrame()
+                    st.dataframe(out, use_container_width=True, hide_index=True, height=280)
     
     # =========================================================
     # Horizon selector + roadmaps
     # =========================================================
     def render_maintenance_horizon_selector(current_draw_count: int):
-        st.subheader("📅 Future schedule view")
+        st.markdown("#### Horizon Setup")
     
         st.markdown(
             """
@@ -859,6 +1031,24 @@ def render_maintenance_tab(P):
             st.session_state["maint_horizon_days"],
             st.session_state["maint_horizon_draws"],
         )
+
+    def render_future_schedule_focus_selector():
+        st.session_state.setdefault("maint_future_focus", "all")
+        st.caption("Focus by type")
+        picked = st.radio(
+            "Timeline type",
+            options=["all", "hours", "draws", "calendar"],
+            format_func=lambda v: {
+                "all": "🌐 All",
+                "hours": "🔥 Hours",
+                "draws": "🧵 Draws",
+                "calendar": "🗓️ Calendar",
+            }.get(v, v),
+            horizontal=True,
+            key="maint_future_focus",
+            label_visibility="collapsed",
+        )
+        return picked
     
     def render_maintenance_roadmaps(
         dfm: pd.DataFrame,
@@ -870,6 +1060,7 @@ def render_maintenance_tab(P):
         horizon_hours: int,
         horizon_days: int,
         horizon_draws: int,
+        focus: str = "all",
     ):
         def status_color(s):
             s = str(s).upper()
@@ -938,61 +1129,62 @@ def render_maintenance_tab(P):
         draw_df = draw_df.dropna(subset=["Due"])
         draw_df["Hover"] = draw_df["Component"] + " — " + draw_df["Task"] + "<br>Status: " + draw_df["Status"]
     
-        st.markdown("### 🔥 Furnace / 💡 UV timelines")
-        c1, c2, c3 = st.columns(3)
-    
-        with c1:
-            x0, x1 = furnace_hours, furnace_hours + horizon_hours
+        if focus in ("all", "hours"):
+            st.markdown("### 🔥 Furnace / 💡 UV timelines")
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                x0, x1 = furnace_hours, furnace_hours + horizon_hours
+                st.plotly_chart(
+                    roadmap(x0, x1, "FURNACE", "Hours",
+                            hours_df[(hours_df["Group"] == "FURNACE") & hours_df["Due"].between(x0, x1)],
+                            "Due", "Hover"),
+                    use_container_width=True
+                )
+
+            with c2:
+                x0, x1 = uv1_hours, uv1_hours + horizon_hours
+                st.plotly_chart(
+                    roadmap(x0, x1, "UV1", "Hours",
+                            hours_df[(hours_df["Group"] == "UV1") & hours_df["Due"].between(x0, x1)],
+                            "Due", "Hover"),
+                    use_container_width=True
+                )
+
+            with c3:
+                x0, x1 = uv2_hours, uv2_hours + horizon_hours
+                st.plotly_chart(
+                    roadmap(x0, x1, "UV2", "Hours",
+                            hours_df[(hours_df["Group"] == "UV2") & hours_df["Due"].between(x0, x1)],
+                            "Due", "Hover"),
+                    use_container_width=True
+                )
+
+        if focus in ("all", "draws"):
+            st.markdown("### 🧵 Draw timeline")
+            d0, d1 = current_draw_count, current_draw_count + horizon_draws
             st.plotly_chart(
-                roadmap(x0, x1, "FURNACE", "Hours",
-                        hours_df[(hours_df["Group"] == "FURNACE") & hours_df["Due"].between(x0, x1)],
+                roadmap(d0, d1, "Draw-based tasks", "Draw #",
+                        draw_df[draw_df["Due"].between(d0, d1)],
                         "Due", "Hover"),
                 use_container_width=True
             )
-    
-        with c2:
-            x0, x1 = uv1_hours, uv1_hours + horizon_hours
+
+        if focus in ("all", "calendar"):
+            st.markdown("### 🗓️ Calendar timeline")
+            t0 = pd.Timestamp(current_date)
+            t1 = t0 + pd.Timedelta(days=horizon_days)
             st.plotly_chart(
-                roadmap(x0, x1, "UV1", "Hours",
-                        hours_df[(hours_df["Group"] == "UV1") & hours_df["Due"].between(x0, x1)],
+                roadmap(t0, t1, "Calendar tasks", "Date",
+                        cal_df[(cal_df["Due"] >= t0) & (cal_df["Due"] <= t1)],
                         "Due", "Hover"),
                 use_container_width=True
             )
-    
-        with c3:
-            x0, x1 = uv2_hours, uv2_hours + horizon_hours
-            st.plotly_chart(
-                roadmap(x0, x1, "UV2", "Hours",
-                        hours_df[(hours_df["Group"] == "UV2") & hours_df["Due"].between(x0, x1)],
-                        "Due", "Hover"),
-                use_container_width=True
-            )
-    
-        st.markdown("### 🧵 Draw timeline")
-        d0, d1 = current_draw_count, current_draw_count + horizon_draws
-        st.plotly_chart(
-            roadmap(d0, d1, "Draw-based tasks", "Draw #",
-                    draw_df[draw_df["Due"].between(d0, d1)],
-                    "Due", "Hover"),
-            use_container_width=True
-        )
-    
-        st.markdown("### 🗓️ Calendar timeline")
-        t0 = pd.Timestamp(current_date)
-        t1 = t0 + pd.Timedelta(days=horizon_days)
-        st.plotly_chart(
-            roadmap(t0, t1, "Calendar tasks", "Date",
-                    cal_df[(cal_df["Due"] >= t0) & (cal_df["Due"] <= t1)],
-                    "Due", "Hover"),
-            use_container_width=True
-        )
     
     # =========================================================
     # Done editor + apply done (updates + logs DB + CSV)
     # =========================================================
     def render_maintenance_done_editor(dfm):
-        st.markdown('<div class="maint-section-title">Mark tasks as done</div>', unsafe_allow_html=True)
-
         focus_default = ["OVERDUE", "DUE SOON", "ROUTINE"]
         focus_status = st.multiselect(
             "Work on these statuses",
@@ -1030,6 +1222,386 @@ def render_maintenance_tab(P):
             key="maint_editor"
         )
         return edited
+
+    def render_quick_reschedule_panel(
+        *,
+        dfm,
+        MAINT_FOLDER,
+        current_draw_count,
+        furnace_hours,
+        uv1_hours,
+        uv2_hours,
+        read_file,
+        write_file,
+        normalize_df,
+        templateize_df,
+    ):
+        st.caption("Push a maintenance task quickly: +draws or +hours, without editing full tables.")
+
+        def _task_label(r: dict) -> str:
+            return (
+                f"[{safe_str(r.get('Status',''))}] "
+                f"{safe_str(r.get('Component',''))} — {safe_str(r.get('Task',''))} "
+                f"(ID: {safe_str(r.get('Task_ID',''))})"
+            )
+
+        def _update_task_in_source(task_row: dict, *, by_mode: str, shift_value: float):
+            src = safe_str(task_row.get("Source_File", ""))
+            if not src:
+                st.error("Task has no Source_File; cannot update.")
+                return
+            path = os.path.join(MAINT_FOLDER, src)
+            if not os.path.exists(path):
+                st.error(f"Source file missing: {path}")
+                return
+
+            raw = read_file(path)
+            df_src = normalize_df(raw)
+            mask = (
+                df_src["Component"].astype(str).eq(str(task_row.get("Component", "")))
+                & df_src["Task"].astype(str).eq(str(task_row.get("Task", "")))
+            )
+            if not mask.any():
+                st.warning("Task not found in source file.")
+                return
+
+            if by_mode == "draws":
+                base = parse_int(task_row.get("Last_Done_Draw", None))
+                if base is None:
+                    base = int(current_draw_count)
+                df_src.loc[mask, "Last_Done_Draw"] = int(base + int(shift_value))
+            elif by_mode == "hours":
+                hs = norm_source(task_row.get("Hours_Source", ""))
+                current_ref = float(furnace_hours)
+                if hs in ("uv1", "uv 1", "uv_system_1", "uv system 1", "uv-system-1", "system1", "system 1"):
+                    current_ref = float(uv1_hours)
+                elif hs in ("uv2", "uv 2", "uv_system_2", "uv system 2", "uv-system-2", "system2", "system 2"):
+                    current_ref = float(uv2_hours)
+
+                base = parse_float(task_row.get("Last_Done_Hours", None))
+                if base is None:
+                    base = current_ref
+                df_src.loc[mask, "Last_Done_Hours"] = float(base + float(shift_value))
+            else:
+                return
+
+            out = templateize_df(df_src, list(raw.columns))
+            write_file(path, out)
+            st.success(f"Rescheduled: {safe_str(task_row.get('Component',''))} — {safe_str(task_row.get('Task',''))}")
+            st.rerun()
+
+        # Draw-based quick push
+        draw_tasks = (
+            dfm[dfm["Tracking_Mode_norm"] == "draws"]
+            .copy()
+            .sort_values(["Status", "Component", "Task"])
+        )
+        hour_tasks = (
+            dfm[dfm["Tracking_Mode_norm"] == "hours"]
+            .copy()
+            .sort_values(["Status", "Component", "Task"])
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**🧵 Draw-based tasks**")
+            if draw_tasks.empty:
+                st.info("No draw-based tasks found.")
+            else:
+                d_opts = draw_tasks.to_dict("records")
+                d_pick = st.selectbox(
+                    "Select draw task",
+                    options=d_opts,
+                    format_func=_task_label,
+                    key="maint_resched_draw_pick",
+                )
+                d_shift = st.number_input(
+                    "Push by draws",
+                    min_value=1,
+                    value=5,
+                    step=1,
+                    key="maint_resched_draw_shift",
+                )
+                if st.button("⏩ Schedule +Draws", use_container_width=True, type="primary", key="maint_resched_draw_apply"):
+                    _update_task_in_source(d_pick, by_mode="draws", shift_value=float(d_shift))
+
+        with c2:
+            st.markdown("**🔥 Hour-based tasks**")
+            if hour_tasks.empty:
+                st.info("No hour-based tasks found.")
+            else:
+                h_opts = hour_tasks.to_dict("records")
+                h_pick = st.selectbox(
+                    "Select hours task",
+                    options=h_opts,
+                    format_func=_task_label,
+                    key="maint_resched_hours_pick",
+                )
+                h_shift = st.number_input(
+                    "Push by hours",
+                    min_value=1.0,
+                    value=5.0,
+                    step=1.0,
+                    key="maint_resched_hours_shift",
+                )
+                if st.button("⏩ Schedule +Hours", use_container_width=True, type="primary", key="maint_resched_hours_apply"):
+                    _update_task_in_source(h_pick, by_mode="hours", shift_value=float(h_shift))
+
+    def render_maintenance_scheduler_bridge(
+        *,
+        dfm,
+        current_date,
+        current_draw_count,
+        furnace_hours,
+        uv1_hours,
+        uv2_hours,
+    ):
+        st.caption("Auto-plan maintenance tasks into free schedule slots, based on urgency and current tower state.")
+        st.caption("Default rule: prioritize Thursday. Friday/Saturday are non-working days.")
+
+        # ---- Controls
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+        with c1:
+            horizon_days = st.number_input("Plan horizon (days)", min_value=3, max_value=30, value=7, step=1, key="maint_sched_horizon_days")
+        with c2:
+            slot_min = st.selectbox("Slot length (min)", options=[30, 45, 60, 90, 120], index=2, key="maint_sched_slot_minutes")
+        with c3:
+            day_start_h = st.number_input("Day start (hour)", min_value=0, max_value=23, value=8, step=1, key="maint_sched_day_start")
+        with c4:
+            day_end_h = st.number_input("Day end (hour)", min_value=1, max_value=23, value=18, step=1, key="maint_sched_day_end")
+
+        weekday_options = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"]
+        weekday_to_idx = {
+            "Monday": 0,
+            "Tuesday": 1,
+            "Wednesday": 2,
+            "Thursday": 3,
+            "Sunday": 6,
+        }
+        preferred_days = st.multiselect(
+            "Preferred maintenance day(s)",
+            options=weekday_options,
+            default=["Thursday"],
+            key="maint_sched_preferred_days",
+            help="Planner will prefer these days first (still by urgency).",
+        )
+        if not preferred_days:
+            preferred_days = ["Thursday"]
+        preferred_idx = [weekday_to_idx[d] for d in preferred_days if d in weekday_to_idx]
+
+        if int(day_end_h) <= int(day_start_h):
+            st.warning("Day end must be after day start.")
+            return
+
+        # ---- Candidate tasks (only actionable statuses)
+        cand = dfm[dfm["Status"].isin(["OVERDUE", "DUE SOON"])].copy()
+        if cand.empty:
+            st.info("No OVERDUE / DUE SOON tasks to schedule.")
+            return
+
+        def _urgency_score(row):
+            score = 0.0
+            status = str(row.get("Status", "")).upper()
+            mode = str(row.get("Tracking_Mode_norm", "")).lower()
+            if status == "OVERDUE":
+                score += 100.0
+            elif status == "DUE SOON":
+                score += 50.0
+
+            if mode == "calendar":
+                nd = row.get("Next_Due_Date", None)
+                if nd is not None and not pd.isna(nd):
+                    try:
+                        dd = (pd.Timestamp(current_date) - pd.Timestamp(nd)).days
+                        score += max(0.0, float(dd))
+                    except Exception:
+                        pass
+            elif mode == "hours":
+                nh = row.get("Next_Due_Hours", None)
+                cur = float(row.get("Current_Hours_For_Task", 0.0) or 0.0)
+                try:
+                    if nh is not None and not pd.isna(nh):
+                        score += max(0.0, cur - float(nh))
+                except Exception:
+                    pass
+            elif mode == "draws":
+                nd = row.get("Next_Due_Draw", None)
+                try:
+                    if nd is not None and not pd.isna(nd):
+                        score += max(0.0, float(current_draw_count) - float(nd))
+                except Exception:
+                    pass
+            return score
+
+        cand["_urgency"] = cand.apply(_urgency_score, axis=1)
+        cand = cand.sort_values(["_urgency", "Component", "Task"], ascending=[False, True, True]).reset_index(drop=True)
+
+        max_tasks = st.number_input("Max tasks to plan", min_value=1, max_value=100, value=min(12, len(cand)), step=1, key="maint_sched_max_tasks")
+        cand = cand.head(int(max_tasks)).copy()
+
+        # ---- Read schedule and build busy intervals
+        sched_path = P.schedule_csv
+        if os.path.exists(sched_path):
+            try:
+                sched_df = pd.read_csv(sched_path, keep_default_na=False)
+            except Exception:
+                sched_df = pd.DataFrame()
+        else:
+            sched_df = pd.DataFrame()
+
+        for col in ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]:
+            if col not in sched_df.columns:
+                sched_df[col] = ""
+
+        start_window = pd.Timestamp(current_date)
+        end_window = start_window + pd.Timedelta(days=int(horizon_days))
+        sched_df["_start"] = pd.to_datetime(sched_df["Start DateTime"], errors="coerce")
+        sched_df["_end"] = pd.to_datetime(sched_df["End DateTime"], errors="coerce")
+
+        busy = []
+        for _, r in sched_df.iterrows():
+            s = r.get("_start")
+            e = r.get("_end")
+            if pd.isna(s) or pd.isna(e):
+                continue
+            if e < start_window or s > end_window:
+                continue
+            busy.append((pd.Timestamp(s), pd.Timestamp(e)))
+
+        def _overlaps(a0, a1, b0, b1):
+            return (a0 < b1) and (a1 > b0)
+
+        # ---- Build free slots
+        slots = []
+        slot_delta = pd.Timedelta(minutes=int(slot_min))
+        d = start_window.normalize()
+        while d < end_window:
+            # Friday/Saturday are non-working days.
+            if d.weekday() in (4, 5):
+                d = d + pd.Timedelta(days=1)
+                continue
+            day_s = d + pd.Timedelta(hours=int(day_start_h))
+            day_e = d + pd.Timedelta(hours=int(day_end_h))
+            t = day_s
+            while t + slot_delta <= day_e:
+                t2 = t + slot_delta
+                conflict = any(_overlaps(t, t2, b0, b1) for b0, b1 in busy)
+                if not conflict:
+                    # Priority: preferred selected days first, then other working days.
+                    # weekday(): Monday=0 ... Thursday=3, Sunday=6.
+                    if d.weekday() in preferred_idx:
+                        # keep user-selected preferred day order
+                        pref_rank = preferred_idx.index(d.weekday())
+                        slots.append((0, pref_rank, t, t2))
+                    else:
+                        slots.append((1, 999, t, t2))
+                t = t + slot_delta
+            d = d + pd.Timedelta(days=1)
+
+        if not slots:
+            st.warning("No free slots found in selected horizon/day window.")
+            return
+
+        slots.sort(key=lambda x: (x[0], x[1], x[2]))
+
+        # ---- Auto assign highest urgency tasks to earliest free slots
+        plan_rows = []
+        for i, (_, task) in enumerate(cand.iterrows()):
+            if i >= len(slots):
+                break
+            _, _, s, e = slots[i]
+            comp = safe_str(task.get("Component", "")).strip()
+            tname = safe_str(task.get("Task", "")).strip()
+            tid = safe_str(task.get("Task_ID", "")).strip()
+            status = safe_str(task.get("Status", "")).strip()
+            mode = safe_str(task.get("Tracking_Mode", "")).strip()
+            hs = safe_str(task.get("Hours_Source", "")).strip()
+            desc = f"[AUTO-MAINT] {comp} - {tname} (ID:{tid}) | status={status} | mode={mode} | source={hs or 'FURNACE'}"
+            plan_rows.append(
+                {
+                    "Event Type": "Maintenance",
+                    "Start DateTime": s.strftime("%Y-%m-%d %H:%M:%S"),
+                    "End DateTime": e.strftime("%Y-%m-%d %H:%M:%S"),
+                    "Description": desc,
+                    "Recurrence": "",
+                    "Component": comp,
+                    "Task": tname,
+                    "Task_ID": tid,
+                    "Status": status,
+                    "Urgency": float(task.get("_urgency", 0.0)),
+                }
+            )
+
+        plan_df = pd.DataFrame(plan_rows)
+        st.markdown("**Suggested maintenance schedule events**")
+        st.dataframe(plan_df, use_container_width=True, hide_index=True, height=280)
+        st.caption(f"Preferred day order: {', '.join(preferred_days)}")
+
+        # Visual schedule plot for suggestions.
+        if not plan_df.empty:
+            try:
+                import plotly.express as px
+
+                vis = plan_df.copy()
+                vis["start_ts"] = pd.to_datetime(vis["Start DateTime"], errors="coerce")
+                vis["end_ts"] = pd.to_datetime(vis["End DateTime"], errors="coerce")
+                vis["Task Label"] = vis["Component"].astype(str) + " - " + vis["Task"].astype(str)
+                vis = vis.dropna(subset=["start_ts", "end_ts"]).copy()
+
+                if not vis.empty:
+                    fig = px.timeline(
+                        vis,
+                        x_start="start_ts",
+                        x_end="end_ts",
+                        y="Task Label",
+                        color="Status",
+                        hover_data=["Task_ID", "Urgency", "Start DateTime", "End DateTime"],
+                        title="Suggested Maintenance Timeline (Thu prioritized, Fri/Sat excluded)",
+                    )
+                    fig.update_yaxes(autorange="reversed")
+                    fig.update_layout(height=360, margin=dict(l=8, r=8, t=42, b=8))
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+
+        st.caption(f"Current state used: draw_count={current_draw_count}, furnace={furnace_hours:.1f}, uv1={uv1_hours:.1f}, uv2={uv2_hours:.1f}")
+
+        if st.button("💾 Add Suggested Events to Tower Schedule", key="maint_sched_apply_btn", type="primary", use_container_width=True):
+            if plan_df.empty:
+                st.info("No suggestions to save.")
+                return
+
+            to_save = plan_df[["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]].copy()
+            existing_keys = set(
+                zip(
+                    sched_df["Event Type"].astype(str),
+                    sched_df["Start DateTime"].astype(str),
+                    sched_df["End DateTime"].astype(str),
+                    sched_df["Description"].astype(str),
+                    sched_df["Recurrence"].astype(str),
+                )
+            )
+            add_rows = []
+            for _, r in to_save.iterrows():
+                k = (
+                    str(r["Event Type"]),
+                    str(r["Start DateTime"]),
+                    str(r["End DateTime"]),
+                    str(r["Description"]),
+                    str(r["Recurrence"]),
+                )
+                if k not in existing_keys:
+                    add_rows.append(r)
+                    existing_keys.add(k)
+
+            if not add_rows:
+                st.info("All suggested events already exist in schedule.")
+                return
+
+            out = pd.concat([sched_df[["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]], pd.DataFrame(add_rows)], ignore_index=True)
+            out.to_csv(sched_path, index=False)
+            st.success(f"Added {len(add_rows)} maintenance event(s) to schedule.")
+            st.rerun()
     
     def render_maintenance_apply_done(
         edited,
@@ -1581,55 +2153,55 @@ def render_maintenance_tab(P):
                 st.rerun()
     
         # ---- Open faults list ----
-        st.markdown("#### 🔓 Open faults")
-        open_df = faults_csv[faults_csv["_is_closed"] == False].copy()
-        open_df = open_df.sort_values("fault_ts", ascending=False)
-    
-        if open_df.empty:
-            st.success("No open faults 👍")
-        else:
-            for _, r in open_df.iterrows():
-                fid = int(r["fault_id"])
-                comp = safe_str(r.get("fault_component", ""))
-                sev = safe_str(r.get("fault_severity", ""))
-                title = safe_str(r.get("fault_title", "")) or "Fault"
-                ts = safe_str(r.get("fault_ts", ""))
-    
-                c1, c2, c3 = st.columns([3.4, 1.1, 1.1])
-                with c1:
-                    st.markdown(f"**[{sev.upper()}] {comp} — {title}**")
-                    st.caption(f"ID: `{fid}`  |  Time: {ts}")
-    
-                with c2:
-                    @st.dialog(f"Close fault: {comp} — {title} (#{fid})")
-                    def _dlg_close():
-                        fix = st.text_input("Fix summary (short)", key=f"fix_sum__{fid}")
-                        note = st.text_area("Closure notes", height=120, key=f"fix_note__{fid}")
-                        if st.button("✅ Close fault", type="primary", use_container_width=True, key=f"close_do__{fid}"):
-                            _write_fault_action(con, fault_id=fid, action_type="close", actor=actor, note=note, fix_summary=fix)
-                            st.success("Closed.")
-                            st.rerun()
-    
-                    if st.button("✅ Close", use_container_width=True, key=f"btn_close__{fid}"):
-                        _dlg_close()
-    
-                with c3:
-                    @st.dialog(f"Add note: #{fid}")
-                    def _dlg_note():
-                        note = st.text_area("Note", height=120, key=f"note_txt__{fid}")
-                        if st.button("➕ Save note", type="primary", use_container_width=True, key=f"note_do__{fid}"):
-                            _write_fault_action(con, fault_id=fid, action_type="note", actor=actor, note=note, fix_summary="")
-                            st.success("Saved note.")
-                            st.rerun()
-    
-                    if st.button("📝 Note", use_container_width=True, key=f"btn_note__{fid}"):
-                        _dlg_note()
-    
-                with st.expander("Details", expanded=False):
-                    st.write(safe_str(r.get("fault_description", "")) or "—")
+        with st.expander("🔓 Open faults", expanded=False):
+            open_df = faults_csv[faults_csv["_is_closed"] == False].copy()
+            open_df = open_df.sort_values("fault_ts", ascending=False)
+
+            if open_df.empty:
+                st.success("No open faults 👍")
+            else:
+                for _, r in open_df.iterrows():
+                    fid = int(r["fault_id"])
+                    comp = safe_str(r.get("fault_component", ""))
+                    sev = safe_str(r.get("fault_severity", ""))
+                    title = safe_str(r.get("fault_title", "")) or "Fault"
+                    ts = safe_str(r.get("fault_ts", ""))
+
+                    c1, c2, c3 = st.columns([3.4, 1.1, 1.1])
+                    with c1:
+                        st.markdown(f"**[{sev.upper()}] {comp} — {title}**")
+                        st.caption(f"ID: `{fid}`  |  Time: {ts}")
+
+                    with c2:
+                        @st.dialog(f"Close fault: {comp} — {title} (#{fid})")
+                        def _dlg_close():
+                            fix = st.text_input("Fix summary (short)", key=f"fix_sum__{fid}")
+                            note = st.text_area("Closure notes", height=120, key=f"fix_note__{fid}")
+                            if st.button("✅ Close fault", type="primary", use_container_width=True, key=f"close_do__{fid}"):
+                                _write_fault_action(con, fault_id=fid, action_type="close", actor=actor, note=note, fix_summary=fix)
+                                st.success("Closed.")
+                                st.rerun()
+
+                        if st.button("✅ Close", use_container_width=True, key=f"btn_close__{fid}"):
+                            _dlg_close()
+
+                    with c3:
+                        @st.dialog(f"Add note: #{fid}")
+                        def _dlg_note():
+                            note = st.text_area("Note", height=120, key=f"note_txt__{fid}")
+                            if st.button("➕ Save note", type="primary", use_container_width=True, key=f"note_do__{fid}"):
+                                _write_fault_action(con, fault_id=fid, action_type="note", actor=actor, note=note, fix_summary="")
+                                st.success("Saved note.")
+                                st.rerun()
+
+                        if st.button("📝 Note", use_container_width=True, key=f"btn_note__{fid}"):
+                            _dlg_note()
+
+                    desc_txt = safe_str(r.get("fault_description", "")) or "—"
+                    st.caption(f"Details: {desc_txt}")
                     st.caption(f"Source file: {safe_str(r.get('fault_source_file',''))} | Related draw: {safe_str(r.get('fault_related_draw',''))}")
-    
-                st.divider()
+
+                    st.divider()
     
         # ---- All faults table + reopen ----
         with st.expander("📜 All faults (table)", expanded=False):
@@ -1927,61 +2499,140 @@ def render_maintenance_tab(P):
     # =========================================================
     # UI flow
     # =========================================================
+    st.markdown('<div class="maint-section-title">📊 Dashboard</div>', unsafe_allow_html=True)
     render_maintenance_dashboard_metrics(dfm)
-    
-    horizon_hours, horizon_days, horizon_draws = render_maintenance_horizon_selector(current_draw_count)
-    
-    render_maintenance_roadmaps(
-        dfm,
-        current_date,
-        current_draw_count,
-        furnace_hours,
-        uv1_hours,
-        uv2_hours,
-        horizon_hours,
-        horizon_days,
-        horizon_draws,
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+          .maint-group-wrap{
+            display:grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap:10px;
+            margin: 4px 0 10px 0;
+          }
+          .maint-group-card{
+            border-radius:12px;
+            border:1px solid rgba(132,214,255,0.28);
+            background: linear-gradient(180deg, rgba(14,32,56,0.34), rgba(8,16,28,0.24));
+            padding:8px 10px;
+          }
+          .maint-group-title{
+            font-size:0.95rem;
+            font-weight:800;
+            color:rgba(230,246,255,0.98);
+          }
+          .maint-group-sub{
+            font-size:0.78rem;
+            color:rgba(188,224,248,0.88);
+            margin-top:3px;
+          }
+          @media (max-width: 1100px){
+            .maint-group-wrap{ grid-template-columns: 1fr; }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
-    
-    edited = render_maintenance_done_editor(dfm)
-    
-    render_maintenance_apply_done(
-        edited,
-        dfm=dfm,
-        current_date=current_date,
-        current_draw_count=current_draw_count,
-        actor=actor,
-        MAINT_FOLDER=MAINT_FOLDER,
-        con=con,
-        read_file=read_file,
-        write_file=write_file,
-        normalize_df=normalize_df,
-        templateize_df=templateize_df,
-        pick_current_hours=pick_current_hours,
-        mode_norm=mode_norm,
+    st.markdown(
+        """
+        <div class="maint-group-wrap">
+          <div class="maint-group-card"><div class="maint-group-title">🧰 Maintenance</div><div class="maint-group-sub">Tasks, schedule, reschedule, planning, history, editors</div></div>
+          <div class="maint-group-card"><div class="maint-group-title">🚨 Faults</div><div class="maint-group-sub">Open incidents, close/reopen, notes, actions log</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    
-    render_maintenance_history(con)
-    
-    # ✅ Gas report from LOGS (MFC actual)
-    render_gas_report(LOGS_FOLDER)
-    
-    render_faults_section(
-        con=con,
-        MAINT_FOLDER=MAINT_FOLDER,
-        actor=actor,
-    )
-    
-    render_maintenance_load_report(files, load_errors)
-    
-    render_maintenance_tasks_editor(
-        MAINT_FOLDER=MAINT_FOLDER,
-        files=files,
-        read_file=read_file,
-        write_file=write_file,
-        normalize_df=normalize_df,
-        templateize_df=templateize_df,
-    )
-    
-    render_manuals_browser(BASE_DIR)
+
+    st.session_state.setdefault("maint_main_group", "maintenance")
+    if st.session_state.get("maint_main_group") == "gas":
+        st.session_state["maint_main_group"] = "maintenance"
+    g1, g2 = st.columns(2)
+    if g1.button("🧰 Maintenance", key="maint_group_btn_maint", use_container_width=True, type="primary" if st.session_state["maint_main_group"] == "maintenance" else "secondary"):
+        st.session_state["maint_main_group"] = "maintenance"
+        st.rerun()
+    if g2.button("🚨 Faults", key="maint_group_btn_faults", use_container_width=True, type="primary" if st.session_state["maint_main_group"] == "faults" else "secondary"):
+        st.session_state["maint_main_group"] = "faults"
+        st.rerun()
+
+    group = st.session_state.get("maint_main_group", "maintenance")
+
+    if group == "maintenance":
+        with st.expander("📅 Future Schedule", expanded=False):
+            st.caption("Choose type to show timeline.")
+            horizon_hours, horizon_days, horizon_draws = render_maintenance_horizon_selector(current_draw_count)
+            focus = render_future_schedule_focus_selector()
+            render_maintenance_roadmaps(
+                dfm,
+                current_date,
+                current_draw_count,
+                furnace_hours,
+                uv1_hours,
+                uv2_hours,
+                horizon_hours,
+                horizon_days,
+                horizon_draws,
+                focus=focus,
+            )
+
+        with st.expander("✅ Mark Tasks Done", expanded=False):
+            edited = render_maintenance_done_editor(dfm)
+            render_maintenance_apply_done(
+                edited,
+                dfm=dfm,
+                current_date=current_date,
+                current_draw_count=current_draw_count,
+                actor=actor,
+                MAINT_FOLDER=MAINT_FOLDER,
+                con=con,
+                read_file=read_file,
+                write_file=write_file,
+                normalize_df=normalize_df,
+                templateize_df=templateize_df,
+                pick_current_hours=pick_current_hours,
+                mode_norm=mode_norm,
+            )
+
+        with st.expander("⏩ Quick Reschedule", expanded=False):
+            render_quick_reschedule_panel(
+                dfm=dfm,
+                MAINT_FOLDER=MAINT_FOLDER,
+                current_draw_count=current_draw_count,
+                furnace_hours=furnace_hours,
+                uv1_hours=uv1_hours,
+                uv2_hours=uv2_hours,
+                read_file=read_file,
+                write_file=write_file,
+                normalize_df=normalize_df,
+                templateize_df=templateize_df,
+            )
+
+        with st.expander("🗓️ Maintenance Scheduler Bridge", expanded=False):
+            render_maintenance_scheduler_bridge(
+                dfm=dfm,
+                current_date=current_date,
+                current_draw_count=current_draw_count,
+                furnace_hours=furnace_hours,
+                uv1_hours=uv1_hours,
+                uv2_hours=uv2_hours,
+            )
+        # These renderers already contain their own expanders; avoid wrapping to prevent nested-expander errors.
+        render_maintenance_history(con)
+        render_maintenance_load_report(files, load_errors)
+        render_maintenance_tasks_editor(
+            MAINT_FOLDER=MAINT_FOLDER,
+            files=files,
+            read_file=read_file,
+            write_file=write_file,
+            normalize_df=normalize_df,
+            templateize_df=templateize_df,
+        )
+        render_manuals_browser(BASE_DIR)
+
+    elif group == "faults":
+        render_faults_section(
+            con=con,
+            MAINT_FOLDER=MAINT_FOLDER,
+            actor=actor,
+        )
     # ------------------ Correlation & Outliers ------------------

@@ -17,6 +17,7 @@ def render_home_tab(
     import streamlit as st
     import streamlit.components.v1 as components
 
+    st.markdown('<div style="height: 42px;"></div>', unsafe_allow_html=True)
     st.title("️ Tower Management Software")
 
     # =========================================================
@@ -50,6 +51,12 @@ def render_home_tab(
                 0 4px 18px rgba(0,0,0,0.45);
             letter-spacing: 0.2px;
             text-align: center;
+        }}
+        [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stMarkdownContainer"] h3,
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li {{
+            text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
         }}
         .css-1aumxhk {{ background-color: rgba(20, 20, 20, 0.90) !important; }}
         div[data-testid="stDialog"] {{
@@ -171,7 +178,7 @@ def render_home_tab(
                 padding: 10px 12px;
                 border-radius: 14px;
                 border: 1px solid rgba(255,255,255,0.14);
-                background: rgba(7, 12, 20, 0.35);
+                background: rgba(7, 12, 20, 0.54);
                 margin-bottom: 10px;
                 transition: transform 260ms ease, box-shadow 260ms ease, border-color 260ms ease;
             }
@@ -208,7 +215,7 @@ def render_home_tab(
             }
             .failed-card {
                 border: 1px solid rgba(255,255,255,0.12);
-                background: rgba(35, 12, 12, 0.40);
+                background: rgba(35, 12, 12, 0.56);
                 border-radius: 14px;
                 padding: 12px 14px 10px 14px;
                 margin-bottom: 10px;
@@ -386,7 +393,7 @@ def render_home_tab(
                 border: 1px solid rgba(255,255,255,0.14);
                 border-radius: 12px;
                 padding: 10px 12px;
-                background: rgba(7,12,20,0.40);
+                background: rgba(7,12,20,0.58);
             }
             .home-compact-h {
                 font-size: 1.02rem;
@@ -399,7 +406,7 @@ def render_home_tab(
                 border-radius: 10px;
                 padding: 8px 10px;
                 margin-bottom: 8px;
-                background: rgba(20, 50, 34, 0.30);
+                background: rgba(20, 50, 34, 0.46);
             }
             .home-done-mini-main {
                 font-size: 0.93rem;
@@ -423,7 +430,7 @@ def render_home_tab(
                 border-radius: 10px;
                 padding: 8px 10px;
                 margin-bottom: 8px;
-                background: rgba(62, 24, 24, 0.32);
+                background: rgba(62, 24, 24, 0.48);
             }
             .home-failed-mini-main {
                 font-size: 0.93rem;
@@ -555,7 +562,7 @@ def render_home_tab(
             z-index: 2;
             backdrop-filter: blur(3px);
             width: 100%;
-            max-width: 300px;
+            max-width: 262px;
             margin-right: 10px;
         }
         /* Internal hidden option (last item = __none__). */
@@ -618,11 +625,11 @@ def render_home_tab(
             background: linear-gradient(145deg, rgba(16, 30, 52, 0.78), rgba(22, 40, 66, 0.58));
             z-index: 4;
         }
-        .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.18) rotate(-0.6deg); }
-        .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.19) rotate(-0.9deg); }
-        .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.19) rotate(0.8deg); }
-        .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.19) rotate(-0.7deg); }
-        .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.19) rotate(0.7deg); }
+        .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.10) rotate(-0.6deg); }
+        .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.10) rotate(-0.9deg); }
+        .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.10) rotate(0.8deg); }
+        .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.10) rotate(-0.7deg); }
+        .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.10) rotate(0.7deg); }
         .home-manifest-nav > label:hover::before {
             transform: translateY(-50%) scale(1.15);
             box-shadow: 0 0 18px rgba(110,200,255,0.42);
@@ -646,9 +653,147 @@ def render_home_tab(
             border-radius: 18px;
             border: 1px solid rgba(154, 226, 255, 0.22);
             background:
-                linear-gradient(160deg, rgba(7, 18, 33, 0.50), rgba(7, 14, 25, 0.30));
+                linear-gradient(160deg, rgba(7, 18, 33, 0.64), rgba(7, 14, 25, 0.50));
             box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(7px);
+        }
+        .home-panel-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(4, 10, 18, 0.22), rgba(4, 10, 18, 0.30));
+            pointer-events: none;
+            z-index: 0;
+        }
+        .home-panel-shell > * {
+            position: relative;
+            z-index: 1;
+        }
+        .home-panel-shell [data-testid="stMarkdownContainer"] h2,
+        .home-panel-shell [data-testid="stMarkdownContainer"] h3,
+        .home-panel-shell [data-testid="stMarkdownContainer"] p,
+        .home-panel-shell [data-testid="stMarkdownContainer"] li {
+            text-shadow: 0 1px 8px rgba(0, 0, 0, 0.44);
+        }
+        .home-panel-shell div[data-testid="stAlert"],
+        .home-panel-shell div[data-testid="stMetric"],
+        .home-panel-shell div[data-testid="stDataFrame"],
+        .home-panel-shell div[data-testid="stPlotlyChart"] {
+            border-radius: 12px;
+            background: rgba(6, 14, 24, 0.30);
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
+        }
+        .home-maint-shell {
+            border: 1px solid rgba(146, 220, 255, 0.26);
+            border-radius: 14px;
+            padding: 10px 12px;
+            background: linear-gradient(160deg, rgba(6, 14, 24, 0.68), rgba(6, 12, 22, 0.56));
+            box-shadow: 0 10px 22px rgba(0,0,0,0.30);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+        .home-maint-shell [data-testid="stMarkdownContainer"] h3,
+        .home-maint-shell [data-testid="stMarkdownContainer"] p,
+        .home-maint-shell [data-testid="stCaptionContainer"] {
+            color: rgba(236, 248, 255, 0.98) !important;
+            text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+        }
+        .home-maint-shell [data-testid="stMetric"] {
+            background: rgba(6, 14, 24, 0.52) !important;
+            border: 1px solid rgba(140, 220, 255, 0.24);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+        }
+        .home-maint-shell [data-testid="stMetricLabel"] p {
+            color: rgba(220, 240, 255, 0.98) !important;
+            text-shadow: 0 1px 8px rgba(0,0,0,0.55);
+        }
+        .home-maint-shell [data-testid="stMetricValue"] {
+            color: rgba(245, 252, 255, 1) !important;
+            text-shadow: 0 1px 10px rgba(0,0,0,0.60);
+        }
+        .home-maint-shell [data-testid="stAlert"] {
+            background: rgba(10, 18, 30, 0.68) !important;
+            border: 1px solid rgba(140, 220, 255, 0.20) !important;
+        }
+        .home-maint-shell [data-testid="stAlert"] p {
+            color: rgba(236, 248, 255, 0.98) !important;
+            text-shadow: 0 1px 8px rgba(0,0,0,0.55);
+        }
+        .home-faults-block {
+            margin-top: 8px;
+            border: 1px solid rgba(150, 220, 255, 0.24);
+            border-radius: 12px;
+            padding: 8px 10px 10px 10px;
+            background: linear-gradient(160deg, rgba(7, 14, 24, 0.72), rgba(6, 12, 22, 0.62));
+            box-shadow: 0 8px 18px rgba(0,0,0,0.30);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+        .home-faults-title {
+            font-size: 1.85rem;
+            font-weight: 860;
+            color: rgba(246, 252, 255, 0.99);
+            text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+            margin: 2px 0 10px 0;
+        }
+        .home-faults-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1.1fr 1.8fr;
+            gap: 10px;
+        }
+        .home-faults-card {
+            border: 1px solid rgba(142, 214, 255, 0.24);
+            border-radius: 10px;
+            padding: 8px 10px;
+            background: rgba(8, 16, 28, 0.66);
+        }
+        .home-faults-k {
+            font-size: 0.82rem;
+            color: rgba(196, 228, 250, 0.95);
+            margin-bottom: 2px;
+        }
+        .home-faults-v {
+            font-size: 2rem;
+            font-weight: 900;
+            color: rgba(246, 252, 255, 1);
+            text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+            line-height: 1.1;
+        }
+        .home-faults-state-ok {
+            color: rgba(136, 248, 178, 0.98);
+            font-weight: 800;
+        }
+        .home-faults-state-warn {
+            color: rgba(255, 210, 120, 0.98);
+            font-weight: 800;
+        }
+        .home-faults-tip {
+            color: rgba(225, 243, 255, 0.95);
+            font-size: 0.90rem;
+            line-height: 1.35;
+        }
+        @media (max-width: 1100px) {
+            .home-faults-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        /* When viewport is tighter (e.g. sidebar open), keep nav chips further left. */
+        @media (max-width: 1500px) {
+            .home-manifest-nav > label {
+                max-width: 236px;
+            }
+            .home-manifest-nav > label:nth-of-type(1) { margin-left: 32px; }
+            .home-manifest-nav > label:nth-of-type(2) { margin-left: 10px; }
+            .home-manifest-nav > label:nth-of-type(3) { margin-left: 0; }
+            .home-manifest-nav > label:nth-of-type(4) { margin-left: 0; }
+            .home-manifest-nav > label:nth-of-type(5) { margin-left: 0; }
+            .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.06) rotate(-0.5deg); }
+            .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.06) rotate(-0.7deg); }
+            .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.06) rotate(0.6deg); }
+            .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.06) rotate(-0.6deg); }
+            .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.06) rotate(0.6deg); }
         }
         @media (max-width: 900px) {
             .home-manifest-nav {
@@ -694,7 +839,7 @@ def render_home_tab(
         """,
         unsafe_allow_html=True,
     )
-    nav_col, panel_col = st.columns([1.05, 2.95], gap="large")
+    nav_col, panel_col = st.columns([1.22, 2.78], gap="large")
     if "home_focus_panel" not in st.session_state:
         st.session_state["home_focus_panel"] = "__none__"
     with nav_col:
@@ -1089,8 +1234,7 @@ def render_home_tab(
             elif selected_panel == "📅 Schedule":
                 render_schedule_home_minimal()
             elif selected_panel == "🧰 Maintenance + 🚨 Faults":
-                st.subheader("🧰 Maintenance Overview")
-
+                st.markdown('<div class="home-maint-shell">', unsafe_allow_html=True)
                 MAINT_FOLDER = P.maintenance_dir
                 DATASET_DIR = P.dataset_dir
 
@@ -1102,24 +1246,57 @@ def render_home_tab(
                 st.session_state["maint_overdue"] = overdue
                 st.session_state["maint_due_soon"] = due_soon
 
-                c1, c2 = st.columns(2)
-                c1.metric("🔴 Overdue", overdue)
-                c2.metric("🟠 Due soon", due_soon)
+                st.markdown(
+                    f"""
+                    <div class="home-faults-block">
+                      <div class="home-faults-title">🧰 Maintenance Overview</div>
+                      <div class="home-faults-grid">
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">Overdue</div>
+                          <div class="home-faults-v">{overdue}</div>
+                        </div>
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">Due soon</div>
+                          <div class="home-faults-v">{due_soon}</div>
+                        </div>
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">Focus</div>
+                          <div class="home-faults-tip">Open Maintenance tab to review overdue tasks and schedule actions.</div>
+                        </div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                st.subheader("🚨 Faults Overview")
                 open_critical = compute_open_critical_faults(FAULTS_CSV)
-                c1, c2, c3 = st.columns([1, 1, 2])
-                c1.metric("🟥 Critical open faults", open_critical)
+                faults_state = "No critical faults ✅" if open_critical == 0 else "Check Maintenance → Faults"
+                faults_state_cls = "home-faults-state-ok" if open_critical == 0 else "home-faults-state-warn"
+                faults_tip = "Tip: open 🧰 Maintenance → Faults / Incidents to review." if open_critical > 0 else "System status is clear."
 
-                with c2:
-                    if open_critical == 0:
-                        st.success("No critical faults ✅")
-                    else:
-                        st.warning("Check Maintenance → Faults")
-
-                with c3:
-                    if open_critical > 0:
-                        st.caption("Tip: open 🧰 Maintenance → Faults / Incidents to review.")
+                st.markdown(
+                    f"""
+                    <div class="home-faults-block">
+                      <div class="home-faults-title">🚨 Faults Overview</div>
+                      <div class="home-faults-grid">
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">Critical open faults</div>
+                          <div class="home-faults-v">{open_critical}</div>
+                        </div>
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">State</div>
+                          <div class="{faults_state_cls}">{faults_state}</div>
+                        </div>
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">Guide</div>
+                          <div class="home-faults-tip">{faults_tip}</div>
+                        </div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
             elif selected_panel == "🧩 Parts Orders":
                 render_parts_orders_home_all()
             st.markdown("</div></div>", unsafe_allow_html=True)

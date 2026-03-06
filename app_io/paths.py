@@ -164,10 +164,13 @@ class Paths:
     # ✅ Reports (all reports live here)
     reports_dir: str = _abs("reports")
     gas_reports_dir: str = _abs("reports", "gas")
+    weekly_reports_dir: str = _abs("reports", "weekly")
+    report_center_dir: str = _abs("reports", "report_center")
     backups_dir: str = _abs("backups")
 
     # ✅ Gas periodic scheduler state
     gas_reports_state_json: str = _abs("reports", "gas", "_gas_reports_state.json")
+    weekly_reports_state_json: str = _abs("reports", "weekly", "_weekly_reports_state.json")
 
     # configs (json/csv that act like configuration)
     coating_config_json: str = _abs("config", "config_coating.json")
@@ -281,6 +284,16 @@ def ensure_gas_reports_dir() -> str:
     return ensure_dir(P.gas_reports_dir)
 
 
+def ensure_weekly_reports_dir() -> str:
+    ensure_reports_dir()
+    return ensure_dir(P.weekly_reports_dir)
+
+
+def ensure_report_center_dir() -> str:
+    ensure_reports_dir()
+    return ensure_dir(P.report_center_dir)
+
+
 def gas_report_path(filename: str) -> str:
     """
     Absolute path to a report file in reports/gas/.
@@ -288,6 +301,22 @@ def gas_report_path(filename: str) -> str:
     """
     ensure_gas_reports_dir()
     return os.path.join(P.gas_reports_dir, safe_filename(filename))
+
+
+def weekly_report_path(filename: str) -> str:
+    """
+    Absolute path to a weekly report file in reports/weekly/.
+    """
+    ensure_weekly_reports_dir()
+    return os.path.join(P.weekly_reports_dir, safe_filename(filename))
+
+
+def report_center_path(filename: str) -> str:
+    """
+    Absolute path to a report-center file in reports/report_center/.
+    """
+    ensure_report_center_dir()
+    return os.path.join(P.report_center_dir, safe_filename(filename))
 
 
 def ensure_backups_dir() -> str:

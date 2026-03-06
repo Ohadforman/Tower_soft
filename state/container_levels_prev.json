@@ -4,11 +4,11 @@
         "type": "DP-1032"
     },
     "B": {
-        "level": 2.8,
+        "level": 0.5,
         "type": "DS-2015"
     },
     "C": {
-        "level": 3.2,
+        "level": 0.7,
         "type": "Coating_OF_136"
     },
     "D": {

@@ -53,8 +53,6 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
           box-shadow: 0 4px 10px rgba(8,30,58,0.20) !important;
         }
 
-        div[data-baseweb="tag"],
-        span[data-baseweb="tag"],
         div[data-testid="stMultiSelect"] div[data-baseweb="tag"],
         div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
           background: linear-gradient(180deg, rgba(70,160,238,0.92), rgba(32,96,168,0.90)) !important;
@@ -63,14 +61,10 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
           color: rgba(244,252,255,0.99) !important;
           box-shadow: 0 0 0 1px rgba(108,198,255,0.24), 0 4px 10px rgba(10,46,84,0.30) !important;
         }
-        div[data-baseweb="tag"] *,
-        span[data-baseweb="tag"] *,
         div[data-testid="stMultiSelect"] div[data-baseweb="tag"] *,
         div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
           color: rgba(244,252,255,0.99) !important;
         }
-        div[data-baseweb="tag"] svg,
-        span[data-baseweb="tag"] svg,
         div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg,
         div[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg{
           fill: rgba(238,250,255,0.98) !important;

@@ -1,14 +1,14 @@
 {
     "Station 1": {
-        "entry_die_um": 0.0,
+        "entry_die_um": 5.0,
         "primary_die_um": 0.0,
         "primary_on_tower": false,
-        "secondary_on_tower": false
+        "secondary_on_tower": true
     },
     "Station 2": {
-        "entry_die_um": 0.0,
+        "entry_die_um": 8.0,
         "primary_die_um": 0.0,
-        "primary_on_tower": false,
+        "primary_on_tower": true,
         "secondary_on_tower": false
     },
     "Station 3": {
