@@ -56,15 +56,22 @@ def render_schedule_tab(P):
         st.warning("Schedule file was missing. New file with required columns created.")
     
     schedule_df = pd.read_csv(SCHEDULE_FILE)
-    
+
     # Ensure required columns exist
+    needs_persist = False
     missing_columns = [c for c in required_columns if c not in schedule_df.columns]
     for c in missing_columns:
         schedule_df[c] = ""
-    
-    # Enforce column order and persist (keeps file stable)
+
+    if missing_columns:
+        needs_persist = True
+
+    # Enforce column order and persist only when changed (avoid write on each rerun)
+    if list(schedule_df.columns) != required_columns:
+        needs_persist = True
     schedule_df = schedule_df[required_columns]
-    schedule_df.to_csv(SCHEDULE_FILE, index=False)
+    if needs_persist:
+        schedule_df.to_csv(SCHEDULE_FILE, index=False)
     
     # Parse datetimes safely
     schedule_df["Start DateTime"] = pd.to_datetime(schedule_df["Start DateTime"], errors="coerce")
@@ -162,6 +169,10 @@ def render_schedule_tab(P):
             return dt + pd.DateOffset(weeks=1)
         if r == "monthly":
             return dt + pd.DateOffset(months=1)
+        if r in ("every 3 months", "3 months", "quarterly"):
+            return dt + pd.DateOffset(months=3)
+        if r in ("every 6 months", "6 months", "semiannual", "semi-annually"):
+            return dt + pd.DateOffset(months=6)
         if r == "yearly":
             return dt + pd.DateOffset(years=1)
         return dt
@@ -229,10 +240,10 @@ def render_schedule_tab(P):
     st.markdown('<div class="sched-section">📈 Timeline</div>', unsafe_allow_html=True)
     
     event_colors = {
-        "Maintenance": "blue",
-        "Drawing": "green",
-        "Stop": "red",
-        "Management Event": "purple",
+        "Maintenance": "#4C78A8",      # muted steel blue
+        "Drawing": "#5F9E89",          # desaturated teal-green
+        "Stop": "#9A5A5A",             # muted brick red
+        "Management Event": "#7A6D8F", # dusty violet-gray
     }
     
     if not filtered_schedule.empty:
@@ -269,9 +280,22 @@ def render_schedule_tab(P):
                 "Recurrence: %{customdata[2]}<br>"
                 "Description: %{customdata[3]}"
                 "<extra></extra>"
-            )
+            ),
+            marker_line_color="rgba(224,236,248,0.28)",
+            marker_line_width=1.0,
+            opacity=0.86,
         )
-    
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(8,16,28,0.32)",
+            font=dict(color="rgba(220,238,252,0.96)"),
+            legend=dict(
+                bgcolor="rgba(0,0,0,0)",
+                bordercolor="rgba(0,0,0,0)",
+                font=dict(color="rgba(212,232,248,0.94)"),
+            ),
+        )
+
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No events in the selected date range.")
@@ -289,46 +313,46 @@ def render_schedule_tab(P):
     # LEFT: Master table editor
     # -----------------------------
     with left:
-        st.write("### Current Schedule (Master)")
-        st.caption("Master stores recurrence once; timeline shows expanded occurrences.")
-        st.data_editor(schedule_df, height=320, use_container_width=True, key="sched_master_editor")
-    
-        csave, creload = st.columns([1, 1])
-        with csave:
-            if st.button("💾 Save Master Table", use_container_width=True, key="sched_save_master"):
-                edited = st.session_state.get("sched_master_editor", schedule_df)
-    
-                for c in required_columns:
-                    if c not in edited.columns:
-                        edited[c] = ""
-                edited = edited[required_columns].copy()
-    
-                edited["Start DateTime"] = pd.to_datetime(edited["Start DateTime"], errors="coerce")
-                edited["End DateTime"] = pd.to_datetime(edited["End DateTime"], errors="coerce")
-    
-                edited["Description"] = (
-                    edited["Description"]
-                    .astype(str)
-                    .str.replace(r"%\{.*?\}", "", regex=True)
-                    .str.replace("Description=", "", regex=False)
-                    .str.strip()
-                )
-    
-                edited["Recurrence"] = edited["Recurrence"].apply(_norm_recur)
-    
-                edited.to_csv(SCHEDULE_FILE, index=False)
-                st.success("Saved master schedule.")
-                st.rerun()
-    
-        with creload:
-            if st.button("🔄 Reload From File", use_container_width=True, key="sched_reload"):
-                st.rerun()
+        with st.expander("🧩 Current Schedule (Master)", expanded=False):
+            st.caption("Master stores recurrence once; timeline shows expanded occurrences.")
+            st.data_editor(schedule_df, height=320, use_container_width=True, key="sched_master_editor")
+
+            csave, creload = st.columns([1, 1])
+            with csave:
+                if st.button("💾 Save Master Table", use_container_width=True, key="sched_save_master"):
+                    edited = st.session_state.get("sched_master_editor", schedule_df)
+
+                    for c in required_columns:
+                        if c not in edited.columns:
+                            edited[c] = ""
+                    edited = edited[required_columns].copy()
+
+                    edited["Start DateTime"] = pd.to_datetime(edited["Start DateTime"], errors="coerce")
+                    edited["End DateTime"] = pd.to_datetime(edited["End DateTime"], errors="coerce")
+
+                    edited["Description"] = (
+                        edited["Description"]
+                        .astype(str)
+                        .str.replace(r"%\{.*?\}", "", regex=True)
+                        .str.replace("Description=", "", regex=False)
+                        .str.strip()
+                    )
+
+                    edited["Recurrence"] = edited["Recurrence"].apply(_norm_recur)
+
+                    edited.to_csv(SCHEDULE_FILE, index=False)
+                    st.success("Saved master schedule.")
+                    st.rerun()
+
+            with creload:
+                if st.button("🔄 Reload From File", use_container_width=True, key="sched_reload"):
+                    st.rerun()
     
     # -----------------------------
     # RIGHT: Add / Delete
     # -----------------------------
     with right:
-        with st.expander("➕ Add New Event", expanded=True):
+        with st.expander("➕ Add New Event", expanded=False):
             event_type = st.selectbox(
                 "Event Type",
                 ["Maintenance", "Drawing", "Stop", "Management Event"],
@@ -344,7 +368,11 @@ def render_schedule_tab(P):
                 end_date = st.date_input("End Date", pd.Timestamp.now().date(), key="sched_end_date2")
                 end_time = st.time_input("End Time", key="sched_end_time")
     
-            recurrence = st.selectbox("Recurrence", ["None", "Weekly", "Monthly", "Yearly"], key="sched_recur")
+            recurrence = st.selectbox(
+                "Recurrence",
+                ["None", "Weekly", "Monthly", "Every 3 Months", "Every 6 Months", "Yearly"],
+                key="sched_recur",
+            )
     
             start_datetime = pd.to_datetime(f"{start_date} {start_time}")
             end_datetime = pd.to_datetime(f"{end_date} {end_time}")

@@ -99,6 +99,12 @@ Run full health check (all checks + env + release summary):
 python3 scripts/cli/run_full_health_check.py
 ```
 
+Run V2 deployment protocol (go/no-go + debug hints + artifacts):
+
+```bash
+python3 scripts/cli/run_v2_deploy_protocol.py
+```
+
 Run app tests only:
 
 ```bash

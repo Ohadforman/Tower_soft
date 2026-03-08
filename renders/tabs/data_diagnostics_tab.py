@@ -290,6 +290,34 @@ def render_data_diagnostics_tab(P) -> None:
           .diag-ok{ color: rgba(118,236,160,0.96); text-shadow: 0 0 12px rgba(118,236,160,0.28); }
           .diag-bad{ color: rgba(255,120,120,0.96); text-shadow: 0 0 12px rgba(255,120,120,0.26); }
           .diag-na{ color: rgba(186,206,224,0.92); }
+          div[data-testid="stButton"] > button{
+            border-radius: 12px !important;
+            border: 1px solid rgba(138,214,255,0.58) !important;
+            background: linear-gradient(180deg, rgba(28,74,120,0.72), rgba(12,36,68,0.66)) !important;
+            color: rgba(236,248,255,0.98) !important;
+            box-shadow: 0 8px 18px rgba(8,30,58,0.32), 0 0 12px rgba(74,170,255,0.18) !important;
+            transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease !important;
+          }
+          div[data-testid="stButton"] > button:hover{
+            transform: translateY(-1px);
+            border-color: rgba(188,238,255,0.86) !important;
+            box-shadow: 0 12px 24px rgba(8,30,58,0.36), 0 0 16px rgba(96,194,255,0.30) !important;
+          }
+          div[data-testid="stButton"] > button[kind="primary"]{
+            border-color: rgba(170,232,255,0.84) !important;
+            background: linear-gradient(180deg, rgba(76,168,255,0.90), rgba(32,98,172,0.88)) !important;
+            box-shadow: 0 14px 24px rgba(12, 68, 124, 0.40), 0 0 18px rgba(96,194,255,0.34) !important;
+          }
+          div[data-baseweb="tag"],
+          span[data-baseweb="tag"]{
+            background: linear-gradient(180deg, rgba(70,160,238,0.94), rgba(32,96,168,0.92)) !important;
+            border: 1px solid rgba(170,232,255,0.82) !important;
+            color: rgba(244,252,255,0.99) !important;
+          }
+          div[data-baseweb="tag"] *,
+          span[data-baseweb="tag"] *{
+            color: rgba(244,252,255,0.99) !important;
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -307,7 +335,7 @@ def render_data_diagnostics_tab(P) -> None:
     refresh_token = int(st.session_state.get("diag_refresh_token", 0))
 
     st.markdown('<div class="diag-section">Control Panel</div>', unsafe_allow_html=True)
-    st.caption("Run checks and actions from one compact panel.")
+    st.caption("Run all validation checks from one button, then use maintenance actions as needed.")
 
     def _run_and_store(prefix: str, script_name: str) -> None:
         cmd = [sys.executable, os.path.join(P.root_dir, "scripts", "cli", script_name)]
@@ -342,6 +370,7 @@ def render_data_diagnostics_tab(P) -> None:
             st.session_state.get("diag_full_health_output", ""),
             st.session_state.get("diag_full_health_ran_at", ""),
         )
+    st.caption("Run All (Full Health): runs Preflight + App Tests + Path Audit + Env Pretest + Release Check.")
 
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("Refresh", key="refresh_diagnostics_btn", use_container_width=True):
@@ -368,18 +397,11 @@ def render_data_diagnostics_tab(P) -> None:
         st.session_state["diag_bundle_path"] = bundle.bundle_path
         st.session_state["diag_bundle_errors"] = bundle.errors
         st.session_state["diag_bundle_stats"] = (bundle.included_files, bundle.total_bytes)
-
-    r1, r2, r3 = st.columns(3)
-    if r1.button("Run App Tests", key="run_full_app_tests_btn", use_container_width=True):
-        _run_and_store("diag_app_tests", "run_app_tests.py")
-    if r2.button("Run Path Audit", key="run_perm_audit_btn", use_container_width=True):
-        _run_and_store("diag_perm_audit", "run_path_permissions_audit.py")
-    if r3.button("Run Env Pretest", key="run_env_pretest_btn", use_container_width=True):
-        _run_and_store("diag_env_pretest", "run_env_pretest.py")
-
-    q1 = st.columns(1)[0]
-    if q1.button("Run Release Check", key="run_release_check_btn", use_container_width=True):
-        _run_and_store("diag_release_check", "run_release_check.py")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.caption("Reload diagnostics data and clear Streamlit cache.")
+    d2.caption("Create missing dirs/files safely (no destructive changes).")
+    d3.caption("Create a full snapshot under backups for rollback/debug.")
+    d4.caption("Export diagnostics bundle (reports + checks + key artifacts).")
 
     # Keep state keys initialized
     st.session_state.setdefault("diag_app_tests_output", "")

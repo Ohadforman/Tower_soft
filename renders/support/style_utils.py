@@ -129,6 +129,20 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
           box-shadow: 0 8px 16px rgba(18,76,138,0.34), 0 0 14px rgba(84,174,255,0.24) !important;
         }
 
+        input[type="radio"],
+        input[type="checkbox"]{
+          accent-color: #66c5ff !important;
+        }
+        [data-baseweb="radio"] input + div{
+          border-color: rgba(132,214,255,0.52) !important;
+          background: rgba(10,20,36,0.30) !important;
+        }
+        [data-baseweb="radio"] input:checked + div{
+          border-color: rgba(178,236,255,0.92) !important;
+          box-shadow: 0 0 0 1px rgba(120,208,255,0.48), 0 0 12px rgba(100,196,255,0.34) !important;
+          background: linear-gradient(180deg, rgba(66,160,242,0.94), rgba(36,108,184,0.90)) !important;
+        }
+
         [data-testid="stMarkdownContainer"] p,
         [data-testid="stMarkdownContainer"] li,
         [data-testid="stCaptionContainer"]{

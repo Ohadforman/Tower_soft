@@ -1,0 +1,8 @@
+Part Name,Component,Serial Number,Location,Location Serial,Quantity,Min Level,Notes,Last Updated
+Die 140,,345,,,1.0,0.0,Auto from received order,2026-03-08 16:47:53
+Coating::Coating_OF_136,Consumables,,Consumables,COAT-STOCK,0.7,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49
+Coating::Coating_KS_1-002,Consumables,,Consumables,COAT-STOCK,0.0,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49
+Coating::Coating_KS_2-002,Consumables,,Consumables,COAT-STOCK,3.0,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49
+Coating::DS-2015,Consumables,,Consumables,COAT-STOCK,0.5,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49
+Coating::DP-1032,Consumables,,Consumables,COAT-STOCK,1.1,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49
+Coating::DS-2042,Consumables,,Consumables,COAT-STOCK,0.0,0.0,Auto sync from consumables (warehouse + containers),2026-03-08 20:40:49

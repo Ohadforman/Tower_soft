@@ -12,7 +12,6 @@ from renders.components.home_sections import (
     render_schedule_home_minimal,
 )
 from renders.tabs.consumables_tab import render_consumables_tab
-from renders.tabs.corr_outliers import render_corr_outliers_tab
 from renders.tabs.dashboard_tab import render_dashboard_tab
 from renders.tabs.data_diagnostics_tab import render_data_diagnostics_tab
 from renders.tabs.development_process_tab import render_development_process_tab
@@ -66,13 +65,6 @@ def render_selected_tab(tab_selection: str, P, image_base64: str, failed_reason_
         render_protocols_tab()
     elif tab_selection == "🧰 Maintenance":
         render_maintenance_tab(P)
-    elif tab_selection == "📈 Correlation & Outliers":
-        st.title("📈 Correlation & Outliers")
-        st.caption(
-            "Builds a numeric snapshot per log file (time = log file mtime), then plots rolling correlation vs time "
-            "for MANY column pairs."
-        )
-        render_corr_outliers_tab(draw_folder=P.logs_dir, maint_folder=P.maintenance_dir)
     elif tab_selection == "🩺 Data Diagnostics":
         render_data_diagnostics_tab(P)
     elif tab_selection == "🧪 SQL Lab":

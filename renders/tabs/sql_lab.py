@@ -1,5 +1,5 @@
 def render_sql_lab_tab(P):
-    import os, glob, re
+    import os, glob, re, hashlib
     import pandas as pd
     import numpy as np
     import streamlit as st
@@ -54,8 +54,7 @@ def render_sql_lab_tab(P):
         }
         .st-key-sql_ui_step_btn_1 button,
         .st-key-sql_ui_step_btn_2 button,
-        .st-key-sql_ui_step_btn_3 button,
-        .st-key-sql_ui_step_btn_4 button {
+        .st-key-sql_ui_step_btn_3 button {
             border: 1px solid rgba(120, 205, 255, 0.44) !important;
             border-radius: 12px !important;
             background: linear-gradient(145deg, rgba(16, 28, 44, 0.66), rgba(10, 18, 30, 0.48)) !important;
@@ -65,16 +64,14 @@ def render_sql_lab_tab(P):
         }
         .st-key-sql_ui_step_btn_1 button:hover,
         .st-key-sql_ui_step_btn_2 button:hover,
-        .st-key-sql_ui_step_btn_3 button:hover,
-        .st-key-sql_ui_step_btn_4 button:hover {
+        .st-key-sql_ui_step_btn_3 button:hover {
             transform: translateY(-2px) scale(1.015) !important;
             border-color: rgba(156, 224, 255, 0.72) !important;
             box-shadow: 0 14px 28px rgba(0, 0, 0, 0.30), 0 0 18px rgba(92, 190, 255, 0.34) !important;
         }
         .st-key-sql_ui_step_btn_1 button[kind="primary"],
         .st-key-sql_ui_step_btn_2 button[kind="primary"],
-        .st-key-sql_ui_step_btn_3 button[kind="primary"],
-        .st-key-sql_ui_step_btn_4 button[kind="primary"] {
+        .st-key-sql_ui_step_btn_3 button[kind="primary"] {
             border-color: rgba(172, 232, 255, 0.90) !important;
             background: linear-gradient(145deg, rgba(34, 70, 108, 0.88), rgba(18, 42, 72, 0.80)) !important;
             box-shadow: 0 14px 28px rgba(24, 88, 138, 0.40), 0 0 24px rgba(96, 196, 255, 0.45) !important;
@@ -92,25 +89,68 @@ def render_sql_lab_tab(P):
             box-shadow: 0 16px 32px rgba(24, 88, 138, 0.44), 0 0 28px rgba(96, 196, 255, 0.52) !important;
             transform: translateY(-1px) scale(1.01) !important;
         }
-        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextInput"] input,
-        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextArea"] textarea,
-        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stNumberInput"] input,
-        body:has(.st-key-sql_ui_step_btn_1) div[data-testid="stDateInput"] input {
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextInput"] input,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stTextArea"] textarea,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stNumberInput"] input,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stDateInput"] input {
             background: rgba(10, 18, 30, 0.66) !important;
             border: 1px solid rgba(132, 210, 255, 0.30) !important;
             border-radius: 10px !important;
             color: rgba(236, 248, 255, 0.98) !important;
         }
-        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] > div,
-        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] input {
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] > div,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="select"] input {
             background: rgba(10, 18, 30, 0.66) !important;
             border-color: rgba(132, 210, 255, 0.30) !important;
             color: rgba(236, 248, 255, 0.98) !important;
         }
-        body:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="tag"] {
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="tag"],
+        section.main:has(.st-key-sql_ui_step_btn_1) span[data-baseweb="tag"] {
             background: rgba(34, 66, 102, 0.66) !important;
             border: 1px solid rgba(160, 228, 255, 0.44) !important;
             color: rgba(240, 251, 255, 0.98) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] div[data-baseweb="tag"],
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
+            background: linear-gradient(180deg, rgba(70,160,238,0.92), rgba(32,96,168,0.90)) !important;
+            background-color: rgba(44,124,206,0.92) !important;
+            border: 1px solid rgba(170,232,255,0.78) !important;
+            color: rgba(244,252,255,0.99) !important;
+            box-shadow: 0 0 0 1px rgba(108,198,255,0.24), 0 4px 10px rgba(10,46,84,0.30) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] div[data-baseweb="tag"] *,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
+            color: rgba(244,252,255,0.99) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg,
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg{
+            fill: rgba(238,250,255,0.98) !important;
+        }
+        /* Force SQL tab controls to blue accent (avoid default red accents). */
+        section.main:has(.st-key-sql_ui_step_btn_1) {
+            --primary-color: #66c5ff !important;
+            --secondary-background-color: rgba(16, 28, 44, 0.62) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) input[type="radio"],
+        section.main:has(.st-key-sql_ui_step_btn_1) input[type="checkbox"] {
+            accent-color: #66c5ff !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) .stButton > button {
+            border: 1px solid rgba(132, 214, 255, 0.52) !important;
+            background: linear-gradient(145deg, rgba(20, 44, 72, 0.78), rgba(14, 30, 54, 0.68)) !important;
+            color: rgba(236, 248, 255, 0.98) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) .stButton > button:hover {
+            border-color: rgba(182, 236, 255, 0.90) !important;
+            box-shadow: 0 10px 22px rgba(26, 96, 150, 0.34), 0 0 14px rgba(96, 196, 255, 0.35) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="slider"] [role="slider"] {
+            background: #66c5ff !important;
+            border-color: #c6ecff !important;
+            box-shadow: 0 0 10px rgba(102, 197, 255, 0.6) !important;
+        }
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-baseweb="slider"] > div > div {
+            background: rgba(102, 197, 255, 0.35) !important;
         }
         .sql-help {
             border: 1px solid rgba(132, 214, 255, 0.24);
@@ -128,13 +168,13 @@ def render_sql_lab_tab(P):
             color: rgba(170, 226, 255, 0.96);
             margin: 4px 0 6px 0;
         }
-        div[data-testid="stExpander"] {
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stExpander"] {
             border: 1px solid rgba(145, 214, 255, 0.18) !important;
             border-radius: 12px !important;
             background: rgba(8, 14, 24, 0.35) !important;
             overflow: hidden !important;
         }
-        div[data-testid="stExpander"] details[open] {
+        section.main:has(.st-key-sql_ui_step_btn_1) div[data-testid="stExpander"] details[open] {
             border: 1px solid rgba(150, 222, 255, 0.44) !important;
             box-shadow: 0 14px 28px rgba(0,0,0,0.28), 0 0 18px rgba(84, 182, 255, 0.24) !important;
             background: linear-gradient(165deg, rgba(10, 20, 34, 0.72), rgba(8, 14, 24, 0.52)) !important;
@@ -148,28 +188,64 @@ def render_sql_lab_tab(P):
     st.markdown('<div class="sql-title">🧪 SQL Lab</div>', unsafe_allow_html=True)
     st.markdown('<div class="sql-sub">Filter draw CSVs with AND/OR/NOT, then overlay Maintenance and Faults in a separate events lane. Click any point to inspect.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sql-line"></div>', unsafe_allow_html=True)
-    st.session_state.setdefault("sql_ui_step", 1)
-    s1, s2, s3, s4 = st.columns(4)
+    for _s in (1, 2, 3):
+        st.session_state.setdefault(f"sql_ui_step_open_{_s}", False)
+
+    def _is_step_open(step_num: int) -> bool:
+        return bool(st.session_state.get(f"sql_ui_step_open_{step_num}", False))
+
+    def _current_open_step() -> int:
+        for s in (1, 2, 3):
+            if _is_step_open(s):
+                return s
+        return 0
+
+    def _toggle_step(step_num: int) -> None:
+        cur_open = _is_step_open(step_num)
+        # Accordion behavior: open one step at a time.
+        for s in (1, 2, 3):
+            st.session_state[f"sql_ui_step_open_{s}"] = False
+        if not cur_open:
+            st.session_state[f"sql_ui_step_open_{step_num}"] = True
+            st.session_state["sql_ui_step"] = step_num
+        else:
+            st.session_state["sql_ui_step"] = None
+        st.rerun()
+
+    def _open_step(step_num: int) -> None:
+        # Keep-only behavior:
+        # - if all are collapsed, keep collapsed
+        # - never jump between steps from widget callbacks
+        current = _current_open_step()
+        if current == 0:
+            return
+        if step_num != current:
+            return
+        for s in (1, 2, 3):
+            st.session_state[f"sql_ui_step_open_{s}"] = (s == step_num)
+        st.session_state["sql_ui_step"] = step_num
+
+    def _on_pick_mode_change() -> None:
+        mode = st.session_state.get("sql_pick_mode_builder", "Group from search results")
+        if mode == "Group from search results":
+            # Group flow default: ANY (OR)
+            st.session_state["sql_group_logic"] = "ANY (OR)"
+            st.session_state["sql_group_mode_just_selected"] = True
+        _open_step(1)
+
+    s1, s2, s3 = st.columns(3)
     with s1:
-        if st.button("STEP 1 · Pick parameter / group", key="sql_ui_step_btn_1", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 1 else "secondary"):
-            st.session_state["sql_ui_step"] = 1
-            st.rerun()
+        if st.button("STEP 1 · Group / Parameters", key="sql_ui_step_btn_1", use_container_width=True, type="primary" if _is_step_open(1) else "secondary"):
+            _toggle_step(1)
     with s2:
-        if st.button("STEP 2 · Set condition + scope", key="sql_ui_step_btn_2", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 2 else "secondary"):
-            st.session_state["sql_ui_step"] = 2
-            st.rerun()
+        if st.button("STEP 2 · Condition + Scope", key="sql_ui_step_btn_2", use_container_width=True, type="primary" if _is_step_open(2) else "secondary"):
+            _toggle_step(2)
     with s3:
-        if st.button("STEP 3 · Add conditions to filter", key="sql_ui_step_btn_3", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 3 else "secondary"):
-            st.session_state["sql_ui_step"] = 3
-            st.rerun()
-    with s4:
-        if st.button("STEP 4 · Run and inspect results", key="sql_ui_step_btn_4", use_container_width=True, type="primary" if st.session_state["sql_ui_step"] == 4 else "secondary"):
-            st.session_state["sql_ui_step"] = 4
-            st.rerun()
-    active_step = st.session_state.get("sql_ui_step", 1)
+        if st.button("STEP 3 · Build Filter", key="sql_ui_step_btn_3", use_container_width=True, type="primary" if _is_step_open(3) else "secondary"):
+            _toggle_step(3)
 
     def _step_label(base: str, step_num: int) -> str:
-        return f"{base}  •  ACTIVE" if active_step == step_num else base
+        return f"{base}  •  ACTIVE" if _is_step_open(step_num) else base
     
     DATASET_DIR = P.dataset_dir
     DB_PATH = P.duckdb_path
@@ -382,48 +458,53 @@ def render_sql_lab_tab(P):
         """)
         return len(files)
     
-    def ensure_views():
+    def _dataset_signature() -> str:
+        files = glob.glob(os.path.join(DATASET_DIR, "**", "*.csv"), recursive=True)
+        files = [f for f in files if os.path.isfile(f)]
+        files = sorted([f.replace("\\", "/") for f in files])
+        h = hashlib.sha1()
+        for f in files:
+            try:
+                stt = os.stat(f)
+                h.update(f.encode("utf-8", errors="ignore"))
+                h.update(str(stt.st_mtime_ns).encode("ascii"))
+                h.update(str(stt.st_size).encode("ascii"))
+            except Exception:
+                # Ignore broken entries and keep going.
+                continue
+        return h.hexdigest()
+
+    def _clear_sql_results_cache():
+        for k in [
+            "sql_df_all", "sql_matched_draws", "sql_selected_event_key", "math_selected_event_key",
+            "sql_values_found_long", "sql_values_found_wide", "sql_last_filters_summary",
+            "sql_matched_params_only", "sql_plot_params", "sql_group_defs_for_plot",
+        ]:
+            st.session_state.pop(k, None)
+
+    def ensure_views_autosync():
+        sig = _dataset_signature()
+        prev_sig = st.session_state.get("sql_dataset_sig")
+        need_rebuild = False
+        reason = ""
         try:
             con.execute("SELECT COUNT(*) FROM datasets_kv").fetchone()
         except Exception:
+            need_rebuild = True
+            reason = "initial"
+        if prev_sig != sig:
+            need_rebuild = True
+            reason = "changed" if prev_sig is not None else ("initial" if not reason else reason)
+
+        if need_rebuild:
+            _clear_sql_results_cache()
             n = build_datasets_kv_view_from_disk()
-            st.caption(f"Indexed dataset CSVs: {n}")
-    
-    # =========================================================
-    # Indexing controls
-    # =========================================================
-    with st.expander(_step_label("📁 Indexing", 1), expanded=(active_step == 1)):
-        st.markdown(
-            """
-            <div class="sql-help">
-              <b>Indexing control:</b> Rebuild after adding/removing dataset CSV files.
-              Use <b>Reset SQL state</b> only when the tab behaves unexpectedly.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        c1, c2 = st.columns([1, 1])
-        if c1.button("🔄 Rebuild dataset index", use_container_width=True, key="sql_rebuild_kv"):
-            for k in [
-                "sql_df_all", "sql_matched_draws", "sql_selected_event_key", "math_selected_event_key",
-                "ds_conditions", "ds_conditions_human", "ds_conditions_struct",
-                "sql_filter_params_seq", "sql_group_selected_params",
-                "sql_values_found_long", "sql_values_found_wide", "sql_last_filters_summary",
-                "sql_matched_params_only", "sql_plot_params",
-                "sql_group_defs_for_plot",
-            ]:
-                st.session_state.pop(k, None)
-            n = build_datasets_kv_view_from_disk()
-            st.success(f"Rebuilt dataset index. Files: {n}")
-    
-        if c2.button("🧹 Reset SQL state", use_container_width=True, key="sql_reset_state"):
-            for k in list(st.session_state.keys()):
-                if k.startswith(("sql_", "math_", "ds_")):
-                    st.session_state.pop(k, None)
-            st.success("Reset done.")
-            st.stop()
-    
-    ensure_views()
+            st.session_state["sql_dataset_sig"] = sig
+            st.caption(f"📁 Dataset index auto-synced ({reason}): {n} file(s)")
+        else:
+            st.caption("📁 Dataset index up to date")
+
+    ensure_views_autosync()
     
     # =========================================================
     # Filter builder state
@@ -435,9 +516,21 @@ def render_sql_lab_tab(P):
     st.session_state.setdefault("sql_last_human_lines", [])
     st.session_state.setdefault("sql_last_filters_summary", "")
     st.session_state.setdefault("sql_group_selected_params", [])
+    st.session_state.setdefault("sql_group_selected_params_store", list(st.session_state.get("sql_group_selected_params", [])))
     st.session_state.setdefault("sql_matched_params_only", [])
     st.session_state.setdefault("sql_group_defs_for_plot", [])
     st.session_state.setdefault("sql_plot_params", [])
+    st.session_state.setdefault("sql_results_open", False)
+    # Keep condition inputs stable across step toggles/reruns.
+    st.session_state.setdefault("sql_v1", "")
+    st.session_state.setdefault("sql_v2", "")
+    st.session_state.setdefault("sql_v1_text", st.session_state.get("sql_v1", ""))
+    st.session_state.setdefault("sql_v2_text", st.session_state.get("sql_v2", ""))
+    st.session_state.setdefault("sql_v1_pick", st.session_state.get("sql_v1", ""))
+    st.session_state.setdefault("sql_v2_pick", st.session_state.get("sql_v2", ""))
+    # Group is the primary workflow for zone-based data.
+    st.session_state.setdefault("sql_pick_mode_builder", "Group from search results")
+    st.session_state.setdefault("sql_group_logic", "ANY (OR)")
     
     # =========================================================
     # Available params list
@@ -457,44 +550,28 @@ def render_sql_lab_tab(P):
     # =========================================================
     # FILTER UI
     # =========================================================
-    with st.expander(_step_label("1) 🔎 Pick parameter / group", 1), expanded=(active_step == 1)):
-        st.markdown(
-            """
-            <div class="sql-help">
-              <b>Goal:</b> choose the parameter(s) you want to filter.<br>
-              Start with <b>Single parameter</b> for quick runs, or switch to <b>Group</b> for multi-zone filtering.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown("<div class='sql-subhead'>🔎 Parameter Search</div>", unsafe_allow_html=True)
+    with st.expander(_step_label("1) 🔎 Pick parameter / group", 1), expanded=_is_step_open(1)):
+        st.caption("Group mode is default for zone-based analysis. Search, select parameters, then continue to Step 2.")
         search_q = st.text_input(
             "Search parameters",
             placeholder="Examples: zone avg diameter | tension | furnace",
             key="sql_param_search2",
             help="Type multiple words — results must contain ALL words.",
+            on_change=lambda: _open_step(1),
         )
         tokens = _tokenize_search(search_q)
         matches_all = _match_params_by_tokens(all_params, tokens)
         matches = matches_all[:500]
     
-        zone_map = {}
-        for nm in matches:
-            zi = _extract_zone_num(nm)
-            if zi is not None:
-                zone_map.setdefault(zi, []).append(nm)
-        zone_nums = sorted(zone_map.keys())
-        has_zone_matches = len(zone_nums) >= 2
-    
-        cA, cB, cC = st.columns([1.2, 1.2, 1])
+        cA, cB, cC = st.columns([1.15, 1.15, 0.7])
         with cA:
             select_mode = st.radio(
                 "Pick mode",
-                ["Single parameter", "Group from search results"],
+                ["Group from search results", "Single parameter"],
                 horizontal=True,
                 key="sql_pick_mode_builder",
+                on_change=_on_pick_mode_change,
             )
-            st.caption("Single = one parameter rule | Group = one rule over many selected parameters.")
         with cB:
             group_mode = st.radio(
                 "Group logic",
@@ -502,59 +579,38 @@ def render_sql_lab_tab(P):
                 horizontal=True,
                 key="sql_group_logic",
                 help="ALL = every selected parameter must match. ANY = at least one matches.",
+                on_change=lambda: _open_step(1),
             )
-            st.caption("ALL = each selected parameter must pass | ANY = at least one passes.")
         with cC:
-            st.caption(f"Matches: **{len(matches_all):,}**" + (" (showing first 500)" if len(matches_all) > 500 else ""))
-    
+            st.metric("Matches", f"{len(matches_all):,}")
+            if len(matches_all) > 500:
+                st.caption("showing first 500")
+
         param_search = (search_q or "").strip().lower()
         shown_params = [pp for pp in all_params if param_search in pp.lower()] if param_search else all_params
-        p = st.selectbox(
-            "Parameter Name (single)",
-            shown_params,
-            key="sql_param_name",
-            disabled=(select_mode != "Single parameter"),
-        )
-    
-        st.markdown("<div class='sql-subhead'>✅ Group Selection (from search results)</div>", unsafe_allow_html=True)
+        p = st.session_state.get("sql_param_name", shown_params[0] if shown_params else (all_params[0] if all_params else ""))
+
+        st.markdown("<div class='sql-subhead'>✅ Group Selection</div>", unsafe_allow_html=True)
         if select_mode != "Group from search results":
-            st.info("Switch **Pick mode** to **Group from search results** to select many parameters at once.")
+            st.info("Group selection is hidden in Single parameter mode.")
             selected_group = []
         else:
+            if st.session_state.pop("sql_group_mode_just_selected", False):
+                st.caption("Group mode active.")
             if not matches:
                 st.warning("No matches. Type a search above (e.g. `zone avg diameter`).")
                 selected_group = []
             else:
                 zone_filtered_matches = list(matches)
-    
-                if has_zone_matches:
-                    zmin, zmax = min(zone_nums), max(zone_nums)
-                    z1, z2 = st.slider(
-                        "Zone range helper (only affects matches that contain “Zone <n>”)",
-                        min_value=zmin,
-                        max_value=zmax,
-                        value=(zmin, zmax),
-                        step=1,
-                        key="sql_zone_range",
-                    )
-                    zone_keep = set([z for z in zone_nums if z1 <= z <= z2])
-                    tmp = []
-                    for nm in zone_filtered_matches:
-                        zi = _extract_zone_num(nm)
-                        if zi is None or zi in zone_keep:
-                            tmp.append(nm)
-                    zone_filtered_matches = tmp
-    
-                cc1, cc2, cc3, cc4 = st.columns([1, 1, 1, 1])
+
+                cc1, cc2, cc3 = st.columns([1, 1, 1])
                 with cc1:
-                    quick_avg = st.checkbox("Only Avg", value=False, key="sql_quick_avg")
+                    quick_avg = st.checkbox("Only Avg", value=False, key="sql_quick_avg", on_change=lambda: _open_step(1))
                 with cc2:
-                    quick_min = st.checkbox("Only Min", value=False, key="sql_quick_min")
+                    quick_min = st.checkbox("Only Min", value=False, key="sql_quick_min", on_change=lambda: _open_step(1))
                 with cc3:
-                    quick_max = st.checkbox("Only Max", value=False, key="sql_quick_max")
-                with cc4:
-                    quick_diam = st.checkbox("Only ‘diameter’", value=False, key="sql_quick_diam")
-    
+                    quick_max = st.checkbox("Only Max", value=False, key="sql_quick_max", on_change=lambda: _open_step(1))
+
                 def _metric_filter_list(lst):
                     out = list(lst)
                     metric_flags = []
@@ -563,8 +619,6 @@ def render_sql_lab_tab(P):
                     if quick_max: metric_flags.append("max")
                     if metric_flags:
                         out = [nm for nm in out if any(f in nm.lower() for f in metric_flags)]
-                    if quick_diam:
-                        out = [nm for nm in out if "diameter" in nm.lower()]
                     return out
     
                 zone_filtered_matches = _metric_filter_list(zone_filtered_matches)
@@ -572,28 +626,77 @@ def render_sql_lab_tab(P):
                 csel1, csel2 = st.columns([1, 1])
                 with csel1:
                     if st.button("✅ Select all (shown)", use_container_width=True, key="sql_sel_all_shown"):
-                        st.session_state["sql_group_selected_params"] = list(zone_filtered_matches)
+                        st.session_state["sql_group_selected_params_store"] = list(zone_filtered_matches)
+                        st.session_state["sql_group_selected_params_widget"] = list(zone_filtered_matches)
                         st.rerun()
                 with csel2:
                     if st.button("🧼 Clear selection", use_container_width=True, key="sql_clear_group_sel"):
-                        st.session_state["sql_group_selected_params"] = []
+                        st.session_state["sql_group_selected_params_store"] = []
+                        st.session_state["sql_group_selected_params_widget"] = []
                         st.rerun()
                 st.caption("Tip: search → select all shown → use 'Add group' in Step 3.")
-    
+
+                def _sync_group_store_from_widget():
+                    st.session_state["sql_group_selected_params_store"] = _dedupe_keep_order(
+                        st.session_state.get("sql_group_selected_params_widget", []) or []
+                    )
+                    _open_step(1)
+
+                persisted_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+                widget_default = [x for x in persisted_group if x in zone_filtered_matches]
+                st.session_state.setdefault("sql_group_selected_params_widget", widget_default)
+                # When option pool changes, keep only valid items in widget, but do not wipe persisted store.
+                st.session_state["sql_group_selected_params_widget"] = [
+                    x for x in (st.session_state.get("sql_group_selected_params_widget", []) or []) if x in zone_filtered_matches
+                ]
+
                 selected_group = st.multiselect(
-                    "Selected parameters",
+                    "Selected group parameters",
                     options=zone_filtered_matches,
-                    default=[x for x in st.session_state.get("sql_group_selected_params", []) if x in zone_filtered_matches],
-                    key="sql_group_selected_params",
+                    default=st.session_state.get("sql_group_selected_params_widget", []),
+                    key="sql_group_selected_params_widget",
                     help="Tip: search → Select all → add one condition for all zones.",
+                    on_change=_sync_group_store_from_widget,
                 )
+                if selected_group:
+                    st.session_state["sql_group_selected_params_store"] = _dedupe_keep_order(selected_group)
+                st.caption(f"Selected: {len(st.session_state.get('sql_group_selected_params_store', []) or [])}")
+
+                # Always show what is matched vs what is selected, so group content is clear.
+                prev_c1, prev_c2 = st.columns(2)
+                with prev_c1:
+                    st.markdown("**Search matches (current)**")
+                    st.dataframe(
+                        pd.DataFrame({"parameter": zone_filtered_matches}),
+                        use_container_width=True,
+                        height=180,
+                    )
+                with prev_c2:
+                    st.markdown("**Selected group (will be added)**")
+                    selected_now = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+                    st.dataframe(
+                        pd.DataFrame({"parameter": selected_now}),
+                        use_container_width=True,
+                        height=180,
+                    )
+
+        st.markdown("<div class='sql-subhead'>🎯 Single Parameter (optional)</div>", unsafe_allow_html=True)
+        if select_mode == "Single parameter":
+            p = st.selectbox(
+                "Parameter Name (single)",
+                shown_params,
+                key="sql_param_name",
+                on_change=lambda: _open_step(1),
+            )
+        else:
+            st.caption("Switch Pick mode to Single parameter to use this option.")
     
     # ---- detect numeric vs categorical based on param_for_type ----
     is_param_numeric = False
     param_values = []
     param_for_type = p
     if select_mode == "Group from search results":
-        gg = st.session_state.get("sql_group_selected_params", []) or []
+        gg = st.session_state.get("sql_group_selected_params_store", []) or []
         if gg:
             param_for_type = gg[0]
     
@@ -620,7 +723,7 @@ def render_sql_lab_tab(P):
     except Exception:
         pass
     
-    with st.expander(_step_label("2) ⚙️ Condition", 2), expanded=(active_step == 2)):
+    with st.expander(_step_label("2) ⚙️ Condition", 2), expanded=_is_step_open(2)):
         st.markdown(
             """
             <div class="sql-help">
@@ -637,68 +740,81 @@ def render_sql_lab_tab(P):
                 "Operator",
                 ["any", "=", "!=", ">", ">=", "<", "<=", "between", "contains"],
                 key="sql_op",
+                on_change=lambda: _open_step(2),
             )
     
         with c_v1:
             if (not is_param_numeric) and op not in ["any", "contains"] and param_values:
-                v1 = st.selectbox("Value", options=[""] + param_values, key="sql_v1")
+                v1_options = [""] + param_values
+                prev_v1 = str(st.session_state.get("sql_v1", "") or "")
+                if prev_v1 not in v1_options:
+                    prev_v1 = ""
+                v1 = st.selectbox(
+                    "Value",
+                    options=v1_options,
+                    index=v1_options.index(prev_v1),
+                    key="sql_v1_pick",
+                    on_change=lambda: _open_step(2),
+                )
             else:
-                v1 = st.text_input("Value", key="sql_v1")
-    
+                v1 = st.text_input("Value", key="sql_v1_text", on_change=lambda: _open_step(2))
+            st.session_state["sql_v1"] = str(v1 or "")
+
         with c_v2:
             if op == "between":
                 if (not is_param_numeric) and param_values:
-                    v2 = st.selectbox("Second value (between)", options=[""] + param_values, key="sql_v2")
+                    v2_options = [""] + param_values
+                    prev_v2 = str(st.session_state.get("sql_v2", "") or "")
+                    if prev_v2 not in v2_options:
+                        prev_v2 = ""
+                    v2 = st.selectbox(
+                        "Second value (between)",
+                        options=v2_options,
+                        index=v2_options.index(prev_v2),
+                        key="sql_v2_pick",
+                        on_change=lambda: _open_step(2),
+                    )
                 else:
-                    v2 = st.text_input("Second value (between)", key="sql_v2")
+                    v2 = st.text_input("Second value (between)", key="sql_v2_text", on_change=lambda: _open_step(2))
             else:
-                v2 = st.text_input("Second value (between)", key="sql_v2")
+                v2 = st.text_input("Second value (between)", key="sql_v2_text", on_change=lambda: _open_step(2))
+            st.session_state["sql_v2"] = str(v2 or "")
     
         c_join, c_not = st.columns([1, 1])
         with c_join:
-            joiner = st.radio("Join", ["AND", "OR"], horizontal=True, key="sql_joiner")
+            joiner = st.radio("Join", ["AND", "OR"], horizontal=True, key="sql_joiner", on_change=lambda: _open_step(2))
             st.caption("`AND` = must match all rules | `OR` = can match any rule.")
         with c_not:
-            negate = st.checkbox("NOT", value=False, key="sql_negate")
+            negate = st.checkbox("NOT", value=False, key="sql_negate", on_change=lambda: _open_step(2))
             st.caption("`NOT` flips the selected rule (exclude matches).")
     
         st.markdown("<div class='sql-subhead'>🗓️ Time Filter (optional)</div>", unsafe_allow_html=True)
-        time_on = st.checkbox("Enable time filter", value=False, key="sql_time_on")
+        time_on = st.checkbox("Enable time filter", value=False, key="sql_time_on", on_change=lambda: _open_step(2))
         t1, t2 = st.columns(2)
         with t1:
-            d_from = st.date_input("From", value=None, key="sql_time_from")
+            d_from = st.date_input("From", value=None, key="sql_time_from", on_change=lambda: _open_step(2))
         with t2:
-            d_to = st.date_input("To", value=None, key="sql_time_to")
+            d_to = st.date_input("To", value=None, key="sql_time_to", on_change=lambda: _open_step(2))
     
         st.markdown("#### 🧩 Include")
         inc1, inc2, inc3 = st.columns(3)
         with inc1:
-            include_draws = st.checkbox("Draws", value=True, key="sql_inc_draws")
+            include_draws = st.checkbox("Draws", value=True, key="sql_inc_draws", on_change=lambda: _open_step(2))
         with inc2:
-            include_maint = st.checkbox("Maintenance", value=False, key="sql_inc_maint")
+            include_maint = st.checkbox("Maintenance", value=False, key="sql_inc_maint", on_change=lambda: _open_step(2))
         with inc3:
-            include_faults = st.checkbox("Faults", value=False, key="sql_inc_faults")
+            include_faults = st.checkbox("Faults", value=False, key="sql_inc_faults", on_change=lambda: _open_step(2))
     
         if not (include_draws or include_maint or include_faults):
             st.warning("Pick at least one: Draws / Maintenance / Faults.")
             st.stop()
-    
-    # =========================================================
-    # Maintenance + Fault filters (collapsed by default)
-    # =========================================================
-    with st.expander(_step_label("🛠 Maintenance & Fault Filters (optional)", 2), expanded=(active_step == 2)):
-        st.markdown(
-            """
-            <div class="sql-help">
-              <b>Quick recipe:</b> enable one section → add text/component → keep scope as <b>matched draws window</b>.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown("<div class='sql-subhead'>🧰 Event Filters (Maintenance/Faults)</div>", unsafe_allow_html=True)
+        st.caption("Enable only what you need. Keep scope on 'matched draws window' for safest correlation.")
+
+        event_scope = st.session_state.get("sql_event_scope", "Only within matched draws window")
         if include_maint or include_faults:
-            st.markdown("#### ⏱️ Event scope")
             event_scope = st.radio(
-                "How to constrain Maintenance/Faults relative to your draw filter?",
+                "Event scope",
                 [
                     "All events (respect only Maintenance/Fault filters)",
                     "Only within time filter window",
@@ -706,47 +822,32 @@ def render_sql_lab_tab(P):
                 ],
                 index=2,
                 key="sql_event_scope",
-                help="Matched draws window = min/max timestamp of the draws you matched (after timestamp fallback).",
+                help="Matched draws window = min/max timestamp of matched draws after timestamp fallback.",
+                on_change=lambda: _open_step(2),
             )
-            st.markdown("---")
-        else:
-            event_scope = st.session_state.get("sql_event_scope", "Only within matched draws window")
-    
-        st.markdown("##### 🛠 Maintenance")
-        maint_on = st.checkbox("Enable maintenance filter", value=False, key="sql_maint_on")
+
+        maint_on = False
         maint_text = ""
         maint_component = ""
-        if maint_on:
-            m1, m2 = st.columns(2)
-            with m1:
-                maint_text = st.text_input(
-                    "Maintenance text contains",
-                    key="sql_maint_text",
-                    placeholder="task / note / source_file",
-                )
-            with m2:
-                comps = []
-                try:
-                    comps = (
-                        con.execute("""
-                            SELECT DISTINCT component
-                            FROM maintenance_tasks
-                            WHERE component IS NOT NULL AND TRIM(component) <> ''
-                            ORDER BY component
-                        """)
-                        .fetchdf()["component"]
-                        .astype(str)
-                        .tolist()
+        if include_maint:
+            st.markdown("##### 🛠 Maintenance filter")
+            maint_on = st.checkbox("Enable maintenance filter", value=False, key="sql_maint_on", on_change=lambda: _open_step(2))
+            if maint_on:
+                m1, m2 = st.columns(2)
+                with m1:
+                    maint_text = st.text_input(
+                        "Maintenance text contains",
+                        key="sql_maint_text",
+                        placeholder="task / note / source_file",
+                        on_change=lambda: _open_step(2),
                     )
-                except Exception:
+                with m2:
                     comps = []
-    
-                if not comps:
                     try:
                         comps = (
                             con.execute("""
                                 SELECT DISTINCT component
-                                FROM maintenance_actions
+                                FROM maintenance_tasks
                                 WHERE component IS NOT NULL AND TRIM(component) <> ''
                                 ORDER BY component
                             """)
@@ -756,95 +857,117 @@ def render_sql_lab_tab(P):
                         )
                     except Exception:
                         comps = []
-    
-                pick = st.selectbox(
-                    "Maintenance component",
-                    options=["All"] + comps + ["Custom contains…"],
-                    key="sql_maint_comp_pick",
-                )
-                if pick == "All":
-                    maint_component = ""
-                elif pick == "Custom contains…":
-                    maint_component = st.text_input(
-                        "Maintenance component contains",
-                        key="sql_maint_comp",
-                        placeholder="type part of component name…",
+
+                    if not comps:
+                        try:
+                            comps = (
+                                con.execute("""
+                                    SELECT DISTINCT component
+                                    FROM maintenance_actions
+                                    WHERE component IS NOT NULL AND TRIM(component) <> ''
+                                    ORDER BY component
+                                """)
+                                .fetchdf()["component"]
+                                .astype(str)
+                                .tolist()
+                            )
+                        except Exception:
+                            comps = []
+
+                    pick = st.selectbox(
+                        "Maintenance component",
+                        options=["All"] + comps + ["Custom contains…"],
+                        key="sql_maint_comp_pick",
+                        on_change=lambda: _open_step(2),
                     )
-                else:
-                    maint_component = pick
-    
-        st.markdown("---")
-    
-        st.markdown("##### 🚨 Faults")
-        fault_on = st.checkbox("Enable faults filter", value=False, key="sql_fault_on")
+                    if pick == "All":
+                        maint_component = ""
+                    elif pick == "Custom contains…":
+                        maint_component = st.text_input(
+                            "Maintenance component contains",
+                            key="sql_maint_comp",
+                            placeholder="type part of component name…",
+                            on_change=lambda: _open_step(2),
+                        )
+                    else:
+                        maint_component = pick
+
+        fault_on = False
         fault_text = ""
         fault_component = ""
         fault_sev = ""
-        if fault_on:
-            f1, f2, f3 = st.columns([1.2, 1.2, 1])
-            with f1:
-                fault_text = st.text_input(
-                    "Fault text contains",
-                    key="sql_fault_text",
-                    placeholder="title / description / source_file",
-                )
-            with f2:
-                fault_comps = []
-                try:
-                    fault_comps = (
-                        con.execute("""
-                            SELECT DISTINCT component
-                            FROM faults_events
-                            WHERE component IS NOT NULL AND TRIM(component) <> ''
-                            ORDER BY component
-                        """)
-                        .fetchdf()["component"]
-                        .astype(str)
-                        .tolist()
+        if include_faults:
+            st.markdown("##### 🚨 Fault filter")
+            fault_on = st.checkbox("Enable faults filter", value=False, key="sql_fault_on", on_change=lambda: _open_step(2))
+            if fault_on:
+                f1, f2, f3 = st.columns([1.2, 1.2, 1])
+                with f1:
+                    fault_text = st.text_input(
+                        "Fault text contains",
+                        key="sql_fault_text",
+                        placeholder="title / description / source_file",
+                        on_change=lambda: _open_step(2),
                     )
-                except Exception:
+                with f2:
                     fault_comps = []
-    
-                maint_comps = []
-                try:
-                    maint_comps = (
-                        con.execute("""
-                            SELECT DISTINCT component
-                            FROM maintenance_tasks
-                            WHERE component IS NOT NULL AND TRIM(component) <> ''
-                            ORDER BY component
-                        """)
-                        .fetchdf()["component"]
-                        .astype(str)
-                        .tolist()
-                    )
-                except Exception:
+                    try:
+                        fault_comps = (
+                            con.execute("""
+                                SELECT DISTINCT component
+                                FROM faults_events
+                                WHERE component IS NOT NULL AND TRIM(component) <> ''
+                                ORDER BY component
+                            """)
+                            .fetchdf()["component"]
+                            .astype(str)
+                            .tolist()
+                        )
+                    except Exception:
+                        fault_comps = []
+
                     maint_comps = []
-    
-                comp_pool = sorted(set([c for c in (fault_comps + maint_comps) if str(c).strip()]))
-    
-                pick = st.selectbox(
-                    "Fault component",
-                    options=["All"] + comp_pool + ["Custom contains…"],
-                    key="sql_fault_comp_pick",
-                )
-                if pick == "All":
-                    fault_component = ""
-                elif pick == "Custom contains…":
-                    fault_component = st.text_input(
-                        "Fault component contains",
-                        key="sql_fault_comp",
-                        placeholder="type part of component name…",
+                    try:
+                        maint_comps = (
+                            con.execute("""
+                                SELECT DISTINCT component
+                                FROM maintenance_tasks
+                                WHERE component IS NOT NULL AND TRIM(component) <> ''
+                                ORDER BY component
+                            """)
+                            .fetchdf()["component"]
+                            .astype(str)
+                            .tolist()
+                        )
+                    except Exception:
+                        maint_comps = []
+
+                    comp_pool = sorted(set([c for c in (fault_comps + maint_comps) if str(c).strip()]))
+
+                    pick = st.selectbox(
+                        "Fault component",
+                        options=["All"] + comp_pool + ["Custom contains…"],
+                        key="sql_fault_comp_pick",
+                        on_change=lambda: _open_step(2),
                     )
-                else:
-                    fault_component = pick
-            with f3:
-                fault_sev = st.selectbox(
-                    "Severity",
-                    ["", "low", "medium", "high", "critical"],
-                    index=0,
-                    key="sql_fault_sev",
-                )
+                    if pick == "All":
+                        fault_component = ""
+                    elif pick == "Custom contains…":
+                        fault_component = st.text_input(
+                            "Fault component contains",
+                            key="sql_fault_comp",
+                            placeholder="type part of component name…",
+                            on_change=lambda: _open_step(2),
+                        )
+                    else:
+                        fault_component = pick
+                with f3:
+                    fault_sev = st.selectbox(
+                        "Severity",
+                        ["", "low", "medium", "high", "critical"],
+                        index=0,
+                        key="sql_fault_sev",
+                        on_change=lambda: _open_step(2),
+                    )
     
     # =========================================================
     # Condition SQL builder (against draws)
@@ -960,6 +1083,26 @@ def render_sql_lab_tab(P):
             cond = f"{op_map.get(op, op)} {v1s}"
     
         return f"{group_logic}: {len(params)} params [{preview}] → {cond}"
+
+    def _group_base_label(params):
+        """Build a readable base label by removing zone-specific tokens."""
+        if not params:
+            return "Group"
+        cleaned = []
+        for p in params:
+            s = str(p or "")
+            s = re.sub(r"(?i)\\bmarked\\s*zone\\s*\\d+\\b", "", s)
+            s = re.sub(r"(?i)\\bzone\\s*\\d+\\b", "", s)
+            s = s.replace("|", " ").replace("-", " ")
+            s = re.sub(r"\\s+", " ", s).strip()
+            if s:
+                cleaned.append(s)
+        if not cleaned:
+            return "Group"
+        # Pick the shortest common-ish representative string.
+        uniq = _dedupe_keep_order(cleaned)
+        uniq_sorted = sorted(uniq, key=len)
+        return uniq_sorted[0]
     
     def _kv_predicate_sql(op, v1, v2):
         v1 = (v1 or "").strip()
@@ -991,7 +1134,7 @@ def render_sql_lab_tab(P):
     # =========================================================
     # Add/remove conditions (UI)
     # =========================================================
-    with st.expander(_step_label("3) ➕ Build filter", 3), expanded=(active_step == 3)):
+    with st.expander(_step_label("3) ➕ Build filter", 3), expanded=_is_step_open(3)):
         st.markdown(
             """
             <div class="sql-help">
@@ -1000,9 +1143,10 @@ def render_sql_lab_tab(P):
             """,
             unsafe_allow_html=True,
         )
+        st.caption(f"Group selected: {len(st.session_state.get('sql_group_selected_params_store', []) or [])} parameter(s)")
         b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
-    
-        if b1.button("➕ Add condition", use_container_width=True, key="sql_add_cond"):
+
+        if b1.button("➕ Add single condition", use_container_width=True, key="sql_add_cond"):
             sql_raw = build_cond_sql(p, op, v1, v2)
             human_raw = build_cond_human(p, op, v1, v2)
             sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
@@ -1030,14 +1174,28 @@ def render_sql_lab_tab(P):
                     "negate": bool(negate),
                 })
     
-        if b2.button("🧩 Add group (from search)", use_container_width=True, key="sql_add_group"):
-            params_group = st.session_state.get("sql_group_selected_params", []) if select_mode == "Group from search results" else []
+        if b2.button("🧩 Add group condition", use_container_width=True, key="sql_add_group", type="primary"):
+            # Use persisted group selection directly from session state so Step 3 works
+            # even when Step 1 is collapsed.
+            params_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
             sql_raw = build_group_cond_sql(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
             human_raw = build_group_cond_human(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
             sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
-    
+
             if not sql_cond or not human_cond:
-                st.warning("Group condition not complete (select params + set values).")
+                missing = []
+                if not params_group:
+                    missing.append("select at least one group parameter in Step 1")
+                need_v1 = op not in ("any",)
+                need_v2 = (op == "between")
+                if need_v1 and not str(v1 or "").strip():
+                    missing.append("set Value in Step 2")
+                if need_v2 and not str(v2 or "").strip():
+                    missing.append("set Second value (between) in Step 2")
+                if missing:
+                    st.warning("Group condition not complete: " + " | ".join(missing))
+                else:
+                    st.warning("Group condition not complete. Check selected operator/value combination.")
             else:
                 if st.session_state.ds_conditions:
                     st.session_state.ds_conditions.append(f"{joiner} {sql_cond}")
@@ -1292,7 +1450,8 @@ def render_sql_lab_tab(P):
     
                 gl = str(cond.get("group_logic", st.session_state.get("sql_group_logic", "ALL (AND)")))
                 neg = " NOT" if bool(cond.get("negate")) else ""
-                label = f"🧩 Group {i+1}: {gl}{neg} ({len(params)} params) → {rhs}"
+                base_label = _group_base_label(params)
+                label = f"🧩 {base_label}: {gl}{neg} ({len(params)} params) → {rhs}"
     
                 group_defs.append({"label": label, "params": params})
     
@@ -1385,44 +1544,31 @@ def render_sql_lab_tab(P):
         st.session_state["sql_values_found_wide"] = values_wide if values_wide is not None else pd.DataFrame()
         st.session_state["sql_matched_params_only"] = matched_params_only
         st.session_state["sql_group_defs_for_plot"] = group_defs
+        st.session_state["sql_results_open"] = True
     
         st.session_state.pop("sql_selected_event_key", None)
         st.session_state.pop("math_selected_event_key", None)
     
-        with st.expander("✅ Results summary", expanded=True):
+        with st.expander("✅ Results summary", expanded=bool(st.session_state.get("sql_results_open", False))):
             if include_draws:
                 md = st.session_state.get("sql_matched_draws", pd.DataFrame())
                 st.success(f"Matched draws: {0 if md is None else len(md):,}")
-    
-                fs = st.session_state.get("sql_last_filters_summary", "")
-                if fs:
-                    show_filters = st.checkbox(
-                        "🔎 Show filters used to match these draws",
-                        value=False,
-                        key="sql_show_filters_summary",
-                    )
-                    if show_filters:
-                        st.write(fs)
-    
-                show_values = st.checkbox(
-                    "📌 Show values that actually matched your filter",
-                    value=True,
-                    key="sql_show_matched_values",
-                )
-                if show_values:
-                    values_long2 = st.session_state.get("sql_values_found_long", pd.DataFrame())
-                    values_wide2 = st.session_state.get("sql_values_found_wide", pd.DataFrame())
-                    if values_long2 is None or values_long2.empty:
-                        st.info("No supporting matched values found (maybe NOT-only logic or 'any' conditions).")
-                    else:
-                        st.caption("Long view (only rows that satisfied your conditions):")
-                        st.dataframe(values_long2, use_container_width=True, height=260)
-                        if values_wide2 is not None and not values_wide2.empty:
-                            st.caption("Wide view (one row per draw):")
-                            st.dataframe(values_wide2, use_container_width=True, height=260)
-    
-                st.caption("Matched draws table:")
-                st.dataframe(md, use_container_width=True, height=260)
+                values_wide2 = st.session_state.get("sql_values_found_wide", pd.DataFrame())
+                if values_wide2 is None or values_wide2.empty:
+                    st.info("No supporting matched values found for wide view.")
+                else:
+                    md_ts = pd.DataFrame()
+                    if md is not None and not md.empty and "_draw" in md.columns:
+                        md_ts = md[["_draw", "event_ts"]].copy() if "event_ts" in md.columns else md[["_draw"]].copy()
+                    display_wide = values_wide2.copy()
+                    if not md_ts.empty:
+                        display_wide = display_wide.merge(md_ts, on="_draw", how="left")
+                    cols = list(display_wide.columns)
+                    if "event_ts" in cols:
+                        cols = ["_draw", "event_ts"] + [c for c in cols if c not in ("_draw", "event_ts")]
+                        display_wide = display_wide[cols]
+                    st.caption("Matched values (wide view):")
+                    st.dataframe(display_wide, use_container_width=True, height=320)
             else:
                 st.info("Draws excluded (timeline can show only Maintenance/Faults).")
     
@@ -1531,7 +1677,7 @@ def render_sql_lab_tab(P):
     # VISUAL LAB  (Main plot: numeric/group + auto text categorical axes;
     # Events lane: maintenance+fault only)
     # =========================================================
-    st.subheader("📈 Visual Lab")
+    st.subheader("📈 Analysis Studio")
     
     df = df_all.copy()
     df["event_ts"] = pd.to_datetime(df.get("event_ts"), errors="coerce")
@@ -1567,6 +1713,19 @@ def render_sql_lab_tab(P):
             .reset_index()
             .sort_values("event_ts")
         )
+
+        # Keep visual/math on exactly the same filtered draw universe from Run.
+        md_filter = st.session_state.get("sql_matched_draws", pd.DataFrame())
+        if md_filter is not None and not md_filter.empty and "_draw" in md_filter.columns:
+            allowed_keys = set("dataset:" + md_filter["_draw"].dropna().astype(str))
+            if allowed_keys:
+                wide = wide[wide["event_key"].astype(str).isin(allowed_keys)].copy()
+            if "event_ts" in md_filter.columns:
+                tmin = pd.to_datetime(md_filter["event_ts"], errors="coerce").min()
+                tmax = pd.to_datetime(md_filter["event_ts"], errors="coerce").max()
+                if pd.notna(tmin) and pd.notna(tmax):
+                    wide["event_ts"] = pd.to_datetime(wide["event_ts"], errors="coerce")
+                    wide = wide[wide["event_ts"].between(tmin, tmax)].copy()
     
         META = {"event_ts", "event_key"}
         all_plot_params = [c for c in wide.columns if c not in META]
@@ -1574,10 +1733,12 @@ def render_sql_lab_tab(P):
     
     # ------------------- Plot picker -------------------
     numeric_chosen, cat_chosen, group_chosen, chosen_all = [], [], [], []
+    matched_params_only = st.session_state.get("sql_matched_params_only", []) or []
+    used_params2 = _dedupe_keep_order(st.session_state.get("sql_filter_params_seq", []))
+    math_numeric_pool = list(numeric_all)
+    group_defs = []
     
     if wide is not None and not wide.empty:
-        matched_params_only = st.session_state.get("sql_matched_params_only", []) or []
-    
         st.markdown("#### 🎛 Plot helper")
     
         pick_mode = st.radio(
@@ -1591,17 +1752,21 @@ def render_sql_lab_tab(P):
             key="sql_pick_mode",
         )
     
-        used_params2 = _dedupe_keep_order(st.session_state.get("sql_filter_params_seq", []))
+        base_pool = []
         if pick_mode.startswith("Only parameters used"):
-            pool = [pp for pp in used_params2 if pp in wide.columns]
+            base_pool = [pp for pp in used_params2 if pp in wide.columns]
         elif pick_mode.startswith("Only parameters that actually matched"):
-            pool = [pp for pp in matched_params_only if pp in wide.columns]
+            base_pool = [pp for pp in matched_params_only if pp in wide.columns]
         else:
-            pool = [c for c in wide.columns if c not in ("event_ts", "event_key")]
+            base_pool = [c for c in wide.columns if c not in ("event_ts", "event_key")]
+
+        math_numeric_pool = [pp for pp in base_pool if pp in numeric_all]
+        if not math_numeric_pool:
+            math_numeric_pool = list(numeric_all)
     
         group_defs = st.session_state.get("sql_group_defs_for_plot", []) or []
         group_labels = [g.get("label") for g in group_defs if str(g.get("label", "")).strip()]
-        pool = list(group_labels) + [pp for pp in pool if pp not in group_labels]
+        pool = list(group_labels) + [pp for pp in base_pool if pp not in group_labels]
     
         prev = [x for x in (st.session_state.get("sql_plot_params") or []) if x in pool]
         if prev != (st.session_state.get("sql_plot_params") or []):
@@ -1639,6 +1804,104 @@ def render_sql_lab_tab(P):
                     cat_chosen.append(c)
     else:
         st.info("No draw timestamps available. Maintenance/Faults can still show.")
+
+    # ------------------- Math metric (integrated with visual) -------------------
+    st.markdown("#### 🧮 Calculated metric (optional)")
+    st.caption("Define A/B/C expression and overlay it on the same timeline plot.")
+    math_enable = st.toggle(
+        "Enable calculated metric",
+        value=False,
+        key="math_enable_inline",
+    )
+    math_expr_label = ""
+    math_series = pd.Series(dtype=float)
+    math_table = pd.DataFrame()
+    if math_enable:
+        if wide is None or wide.empty:
+            st.info("No draw events available for calculated metric (run filter with Draws enabled).")
+        elif not numeric_all:
+            st.info("No numeric draw parameters available for calculated metric.")
+        else:
+            math_pick_mode = st.radio(
+                "Math parameter scope",
+                [
+                    "Only parameters used in the filter",
+                    "Only parameters that actually matched (supporting rows)",
+                    "Any parameter from matched draws",
+                ],
+                horizontal=True,
+                key="math_pick_mode_inline",
+            )
+            group_labels_all = [g.get("label") for g in (group_defs or []) if str(g.get("label", "")).strip()]
+            if math_pick_mode.startswith("Only parameters used"):
+                math_numeric_pool = [pp for pp in used_params2 if pp in numeric_all]
+            elif math_pick_mode.startswith("Only parameters that actually matched"):
+                math_numeric_pool = [pp for pp in matched_params_only if pp in numeric_all]
+            else:
+                math_numeric_pool = [pp for pp in numeric_all]
+            math_pool_all = list(group_labels_all) + [pp for pp in math_numeric_pool if pp not in group_labels_all]
+            if not math_pool_all:
+                st.info("No numeric parameters available for this Math scope.")
+                math_pool_all = list(group_labels_all) + [pp for pp in numeric_all if pp not in group_labels_all]
+
+            c_m1, c_m2, c_m3, c_m4 = st.columns([1, 1, 1, 2.4])
+            with c_m1:
+                var_count = st.radio("Vars", [1, 2, 3], horizontal=True, key="math_var_count_inline")
+            with c_m2:
+                A_name = st.selectbox("A", math_pool_all, key="math_A_name_inline")
+            B_name = None
+            C_name = None
+            with c_m3:
+                if var_count >= 2:
+                    B_name = st.selectbox("B", [pp for pp in math_pool_all if pp != A_name], key="math_B_name_inline")
+                if var_count >= 3:
+                    C_name = st.selectbox("C", [pp for pp in math_pool_all if pp not in (A_name, B_name)], key="math_C_name_inline")
+            with c_m4:
+                st.session_state.setdefault("math_expr_inline", "A")
+                expr = st.text_input(
+                    "Expression",
+                    value=str(st.session_state["math_expr_inline"]),
+                    key="math_expr_input_inline",
+                    help="Use A/B/C and np, e.g. A/B or np.log10(A).",
+                ).strip()
+                st.session_state["math_expr_inline"] = expr
+
+            if re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr or ""):
+                def _series(name):
+                    if not name:
+                        return pd.Series([np.nan] * len(wide), index=wide.index)
+                    if name in wide.columns:
+                        return pd.to_numeric(wide[name], errors="coerce").astype(float)
+                    by_label = {g.get("label"): g for g in (group_defs or []) if g.get("label")}
+                    g = by_label.get(name)
+                    if g:
+                        params = [p for p in (g.get("params") or []) if p in wide.columns]
+                        if params:
+                            y_stack = pd.concat([pd.to_numeric(wide[p], errors="coerce") for p in params], axis=1)
+                            return y_stack.mean(axis=1, skipna=True)
+                    return pd.Series([np.nan] * len(wide), index=wide.index)
+
+                A = _series(A_name)
+                B = _series(B_name) if var_count >= 2 else pd.Series([np.nan] * len(wide), index=wide.index)
+                C = _series(C_name) if var_count >= 3 else pd.Series([np.nan] * len(wide), index=wide.index)
+
+                try:
+                    Y = eval(expr, {"__builtins__": {}}, {"np": np, "A": A, "B": B, "C": C})
+                    if isinstance(Y, (int, float, np.number)):
+                        Y = pd.Series([float(Y)] * len(wide), index=wide.index)
+                    elif isinstance(Y, np.ndarray):
+                        Y = pd.Series(Y, index=wide.index)
+                    elif not isinstance(Y, pd.Series):
+                        Y = pd.Series(Y, index=wide.index)
+                    math_series = pd.to_numeric(Y, errors="coerce")
+                    math_expr_label = expr
+                    math_table = wide[["event_ts", "event_key"]].copy()
+                    math_table["math"] = math_series
+                    math_table = math_table.dropna(subset=["math"]).sort_values("event_ts")
+                except Exception as e:
+                    st.warning(f"Calculated metric expression error: {e}")
+            else:
+                st.warning("Calculated metric expression contains unsupported characters.")
     
     # =========================================================
     # Plot: row1 main draw plot (MULTI-Y + auto TEXT categorical axes),
@@ -1830,6 +2093,31 @@ def render_sql_lab_tab(P):
                     )
                 }
             )
+
+        # ---------- calculated metric trace ----------
+        if math_enable and (math_series is not None) and len(math_series) == len(wide):
+            y_math = pd.to_numeric(math_series, errors="coerce")
+            if y_math.notna().sum() > 0:
+                idx = len(list(numeric_chosen or [])) + len(list(group_chosen or []))
+                colr = "#7ad0ff"
+                ax_i = idx
+                yaxis_id = _yaxis_id(ax_i)
+                axis_owner[ax_i] = {"name": f"math: {math_expr_label or 'expr'}", "color": colr}
+                fig.add_trace(
+                    go.Scatter(
+                        x=wide["event_ts"],
+                        y=y_math,
+                        mode="lines+markers",
+                        name=f"math: {math_expr_label or 'expr'}",
+                        customdata=wide["event_key"],
+                        hovertemplate="<b>Math</b><br>%{x}<br>%{y}<br>%{customdata}<extra></extra>",
+                        line=dict(color=colr, width=3, dash="dot"),
+                        marker=dict(color=colr, size=6),
+                    ),
+                    row=1, col=1
+                )
+                fig.data[-1].update(xaxis="x", yaxis=yaxis_id)
+                numeric_axis_count = max(int(numeric_axis_count), int(ax_i + 1))
     
     # ---- Configure numeric MULTI Y axes (colored like traces) ----
     base_title = axis_owner.get(0, {}).get("name", "Value")
@@ -1888,19 +2176,14 @@ def render_sql_lab_tab(P):
     # =========================================================
     y_fault = 0.30
     y_maint = 0.70
-    
-    show_maint_overlay = st.toggle(
-        "Show Maintenance overlay",
-        value=not maint_kv.empty,
-        key="sql_show_maint_overlay",
-        disabled=maint_kv.empty,
-    )
-    show_fault_overlay = st.toggle(
-        "Show Faults overlay",
-        value=not fault_kv.empty,
-        key="sql_show_fault_overlay",
-        disabled=fault_kv.empty,
-    )
+
+    # Auto layout from Step-2 Include selection (no extra click required).
+    show_maint_overlay = bool(include_maint and not maint_kv.empty)
+    show_fault_overlay = bool(include_faults and not fault_kv.empty)
+    if include_maint and maint_kv.empty:
+        st.caption("Maintenance included, but no maintenance events matched current filters.")
+    if include_faults and fault_kv.empty:
+        st.caption("Faults included, but no fault events matched current filters.")
     
     if show_maint_overlay and not maint_kv.empty:
         mm = maint_kv.copy()
@@ -1994,7 +2277,9 @@ def render_sql_lab_tab(P):
         title="Timeline: Draws + Events (filtered)",
         hovermode="closest",
     )
-    fig.update_xaxes(title_text="Time", row=2, col=1)
+    # Keep X axis title/ticks visible on the main plot after Visual+Math unification.
+    fig.update_xaxes(title_text="Time", row=1, col=1, showticklabels=True)
+    fig.update_xaxes(title_text="Time", row=2, col=1, showticklabels=True)
     
     sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="sql_vis_plot")
     
@@ -2011,109 +2296,11 @@ def render_sql_lab_tab(P):
         st.session_state["sql_selected_event_key"] = selected_key
     
     if st.session_state.get("sql_selected_event_key"):
-        with st.expander("📌 Clicked event details", expanded=True):
+        with st.expander("📌 Clicked event details", expanded=False):
             render_event_details(st.session_state["sql_selected_event_key"])
-    
-    # =========================================================
-    # 🧮 MATH LAB
-    # =========================================================
-    st.subheader("🧮 Math Lab")
-    
-    if wide is None or wide.empty:
-        st.info("No draw events available for Math Lab (run filter with Draws enabled).")
-        st.stop()
-    
-    if not numeric_all:
-        st.info("No numeric draw parameters available for Math Lab.")
-        st.stop()
-    
-    st.caption("Expressions use **A**, **B**, **C** and **np**. Example: `A/B`, `np.log10(A)`")
-    
-    var_count = st.radio("How many parameters?", [1, 2, 3], horizontal=True, key="math_var_count")
-    
-    A_name = st.selectbox("A", numeric_all, key="math_A_name")
-    B_name = None
-    C_name = None
-    if var_count >= 2:
-        B_name = st.selectbox("B", [pp for pp in numeric_all if pp != A_name], key="math_B_name")
-    if var_count >= 3:
-        C_name = st.selectbox("C", [pp for pp in numeric_all if pp not in (A_name, B_name)], key="math_C_name")
-    
-    st.session_state.setdefault("math_expr", "A")
-    expr = st.text_input("Expression", value=str(st.session_state["math_expr"]), key="math_expr_input").strip()
-    st.session_state["math_expr"] = expr
-    
-    if not re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr or ""):
-        st.error("Expression contains unsupported characters.")
-        st.stop()
-    
-    
-    def _series(name):
-        if not name:
-            return pd.Series([np.nan] * len(wide), index=wide.index)
-        return pd.to_numeric(wide[name], errors="coerce").astype(float)
-    
-    
-    A = _series(A_name)
-    B = _series(B_name) if var_count >= 2 else pd.Series([np.nan] * len(wide), index=wide.index)
-    C = _series(C_name) if var_count >= 3 else pd.Series([np.nan] * len(wide), index=wide.index)
-    
-    try:
-        Y = eval(expr, {"__builtins__": {}}, {"np": np, "A": A, "B": B, "C": C})
-        if isinstance(Y, (int, float, np.number)):
-            Y = pd.Series([float(Y)] * len(wide), index=wide.index)
-        elif isinstance(Y, np.ndarray):
-            Y = pd.Series(Y, index=wide.index)
-        elif not isinstance(Y, pd.Series):
-            Y = pd.Series(Y, index=wide.index)
-        Y = pd.to_numeric(Y, errors="coerce")
-    except Exception as e:
-        st.error(f"Expression error: {e}")
-        st.stop()
-    
-    out = wide[["event_ts", "event_key"]].copy()
-    out["math"] = Y
-    out = out.dropna(subset=["math"]).sort_values("event_ts")
-    
-    if out.empty:
-        st.warning("No values computed.")
-        st.stop()
-    
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=out["event_ts"],
-        y=out["math"],
-        mode="lines+markers",
-        name=expr,
-        customdata=out["event_key"],
-        hovertemplate=f"<b>{expr}</b><br>%{{x}}<br>%{{y}}<br>%{{customdata}}<extra></extra>"
-    ))
-    fig2.update_layout(
-        height=420,
-        margin=dict(l=60, r=30, t=60, b=50),
-        title="Math Lab result (click a point to inspect draw)",
-        xaxis_title="Time",
-        yaxis_title="Value",
-        hovermode="closest",
-    )
-    
-    sel2 = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="math_plot")
-    
-    selected_key2 = None
-    try:
-        if isinstance(sel2, dict):
-            pts = sel2.get("selection", {}).get("points", sel2.get("points", []))
-            if pts:
-                selected_key2 = pts[0].get("customdata")
-    except Exception:
-        selected_key2 = None
-    
-    if selected_key2:
-        st.session_state["math_selected_event_key"] = selected_key2
-    
-    if st.session_state.get("math_selected_event_key"):
-        with st.expander("📌 Clicked event details (Math)", expanded=True):
-            render_event_details(st.session_state["math_selected_event_key"])
-    
-    with st.expander("Math table", expanded=False):
-        st.dataframe(out, use_container_width=True, height=420)
+    if math_enable:
+        with st.expander("🧮 Calculated metric table", expanded=False):
+            if math_table is None or math_table.empty:
+                st.info("No calculated metric values available.")
+            else:
+                st.dataframe(math_table, use_container_width=True, height=320)

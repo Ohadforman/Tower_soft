@@ -17,7 +17,6 @@ NAV_GROUPS = {
         "🧰 Maintenance",
         "📊 Dashboard",
         "✅ Draw Finalize",
-        "📈 Correlation & Outliers",
         "🛠️ Tower Parts",
         "📋 Protocols",
         "🩺 Data Diagnostics",

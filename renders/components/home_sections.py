@@ -95,7 +95,7 @@ def render_home_draw_orders_overview(
         )
 
     # ---------- NOW DRAWING BOX ----------
-    def _now_box(text_left, text_right="", border_color="#b77bff", emoji="🟣"):
+    def _now_box(text_left, text_right="", border_color="#6F87A6", emoji="🟣"):
         st.markdown(
             f"""
             <div style="
@@ -103,7 +103,7 @@ def render_home_draw_orders_overview(
                 padding:18px 22px;
                 border-radius:20px;
                 border:2px solid {border_color};
-                background:rgba(40,20,60,0.66);
+                background:rgba(18,28,44,0.70);
                 box-shadow:0 10px 30px rgba(0,0,0,0.35);
                 display:flex;
                 justify-content:space-between;
@@ -224,13 +224,13 @@ def render_home_draw_orders_overview(
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        _card("Pending", _count("Pending"), "orange", "🟠")
+        _card("Pending", _count("Pending"), "#B98A52", "🟠")
     with c2:
-        _card("Scheduled", _count("Scheduled"), "dodgerblue", "🗓️")
+        _card("Scheduled", _count("Scheduled"), "#5B83AA", "🗓️")
     with c3:
-        _card("Done", _count("Done"), "limegreen", "✅")
+        _card("Done", _count("Done"), "#5E947B", "✅")
     with c4:
-        _card("Failed", _count("Failed"), "crimson", "❌")
+        _card("Failed", _count("Failed"), "#9A5A5A", "❌")
 
 
 def render_schedule_home_minimal():
@@ -320,6 +320,10 @@ def render_schedule_home_minimal():
             def _add_step(ts: pd.Timestamp) -> pd.Timestamp:
                 if "week" in rec_low:
                     return ts + pd.DateOffset(weeks=1)
+                if "every 3 months" in rec_low or "3 months" in rec_low or "quarterly" in rec_low:
+                    return ts + pd.DateOffset(months=3)
+                if "every 6 months" in rec_low or "6 months" in rec_low or "semiannual" in rec_low or "semi-annually" in rec_low:
+                    return ts + pd.DateOffset(months=6)
                 if "month" in rec_low:
                     return ts + pd.DateOffset(months=1)
                 if "year" in rec_low:
@@ -393,10 +397,10 @@ def render_schedule_home_minimal():
     st.write("### Schedule Timeline")
 
     event_colors = {
-        "Maintenance": "blue",
-        "Drawing": "green",
-        "Stop": "red",
-        "Management Event": "purple",
+        "Maintenance": "#4C78A8",
+        "Drawing": "#5F9E89",
+        "Stop": "#9A5A5A",
+        "Management Event": "#7A6D8F",
     }
 
     if filtered.empty:
@@ -433,7 +437,10 @@ def render_schedule_home_minimal():
             "Recurrence: %{customdata[2]}<br>"
             "Description: %{customdata[3]}"
             "<extra></extra>"
-        )
+        ),
+        marker_line_color="rgba(224,236,248,0.28)",
+        marker_line_width=1.0,
+        opacity=0.86,
     )
 
     # Keep your layout exactly as you had it

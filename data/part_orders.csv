@@ -1,5 +1,9 @@
-Status,Part Name,Serial Number,Details,Approved,Approved By,Approval Date,Ordered By,Date Ordered,Company,Opened By,Project Name
-Received,Die 140,345,the first 140 is stuck,Yes,,2025-04-17,,2026-01-23,SG,,
-Opened,coating DS,123,tiger project need,,,,,,,Ohad,Tiger
-Shipped,coating OF,123,tiger project need,Yes,,,,2025-05-08,,Ohad,Tiger
-Opened,גרפית לתנור,202225,,No,,,,,SG,אוהד,Tiger
+Status,Part Name,Serial Number,Details,Approved,Approved By,Approval Date,Ordered By,Date Ordered,Company,Opened By,Project Name,Inventory Synced
+Received,Die 140,345,the first 140 is stuck,Yes,,2025-04-17,,2026-01-23,SG,,,Yes
+Opened,coating DS,123,tiger project need,,,,,,,Ohad,Tiger,
+Shipped,coating OF,123,tiger project need,Yes,,,,2025-05-08,,Ohad,Tiger,
+Opened,גרפית לתנור,202225,,No,,,,,SG,אוהד,Tiger,
+Opened,Coating::Coating_KS_1-002,,Auto-created from low stock alert,No,,,,,,operator,Maintenance,
+Opened,Coating::Coating_OF_136,,Auto-created from low stock alert,No,,,,,,operator,Maintenance,
+Opened,Coating::DS-2015,,Auto-created from low stock alert,No,,,,,,operator,Maintenance,
+Opened,Coating::DS-2042,,Auto-created from low stock alert,No,,,,,,operator,Maintenance,

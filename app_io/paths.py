@@ -135,6 +135,8 @@ class Paths:
     # parts
     parts_orders_csv: str = _abs("data", "part_orders.csv")
     parts_archived_csv: str = _abs("data", "archived_orders.csv")
+    parts_inventory_csv: str = _abs("data", "parts_inventory.csv")
+    parts_locations_csv: str = _abs("data", "parts_locations.csv")
 
     # inventory / consumables
     sap_rods_inventory_csv: str = _abs("data", "sap_rods_inventory.csv")

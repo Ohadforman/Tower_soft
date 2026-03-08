@@ -24,13 +24,26 @@ def _run(cmd: list[str]) -> tuple[int, str]:
     return int(proc.returncode), msg
 
 
+def _project_python() -> str:
+    """
+    Prefer project venv python for stable dependency/import checks.
+    Falls back to current interpreter.
+    """
+    if os.name == "nt":
+        cand = os.path.join(P.root_dir, ".venv", "Scripts", "python.exe")
+    else:
+        cand = os.path.join(P.root_dir, ".venv", "bin", "python")
+    return cand if os.path.exists(cand) else sys.executable
+
+
 def main() -> int:
+    py = _project_python()
     steps = [
-        ("Preflight", [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_preflight.py")]),
-        ("App tests", [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_app_tests.py")]),
+        ("Preflight", [py, os.path.join(P.root_dir, "scripts", "cli", "run_preflight.py")]),
+        ("App tests", [py, os.path.join(P.root_dir, "scripts", "cli", "run_app_tests.py")]),
         (
             "Path permissions audit",
-            [sys.executable, os.path.join(P.root_dir, "scripts", "cli", "run_path_permissions_audit.py")],
+            [py, os.path.join(P.root_dir, "scripts", "cli", "run_path_permissions_audit.py")],
         ),
     ]
 

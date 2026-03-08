@@ -21,7 +21,9 @@ from tests.runners.preflight import run_checks
 configure_page()
 apply_blue_clean_base_theme()
 safe_mode = os.environ.get("TOWER_SAFE_MODE", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
-startup_results = run_checks()
+if "startup_results_cache" not in st.session_state:
+    st.session_state["startup_results_cache"] = run_checks()
+startup_results = st.session_state["startup_results_cache"]
 startup_failures = [r for r in startup_results if not r.ok]
 
 if startup_failures and not safe_mode:
@@ -68,6 +70,9 @@ if "weekly_report_auto_checked" not in st.session_state:
         st.toast("Weekly report auto-generation failed. Check logs.", icon="⚠️")
 
 selected_tab = render_sidebar_navigation(safe_mode=safe_mode and bool(startup_failures))
+if st.session_state.get("_theme_last_tab") != selected_tab:
+    apply_blue_clean_base_theme(force=True)
+    st.session_state["_theme_last_tab"] = selected_tab
 
 # One-time startup popup on first page only (Home).
 if (
@@ -127,6 +132,3 @@ render_selected_tab(
     failed_reason_col=runtime.failed_reason_col,
     orders_file=runtime.orders_file,
 )
-
-# Re-apply after tab render so per-tab CSS cannot override the global look.
-apply_blue_clean_base_theme(force=True)

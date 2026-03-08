@@ -24,6 +24,7 @@ SECTIONS = [
     "Executive Summary",
     "Resources: Gas + SAP + Preforms",
     "Draw Outcomes (Done/Failed + Notes)",
+    "Parts Orders Status",
     "Schedule: Past Week + Next Week",
     "Maintenance + Faults",
     "Consumables Snapshot",
@@ -140,6 +141,59 @@ def _prepare_schedule_windows(schedule_csv_path: str) -> tuple[pd.DataFrame, pd.
     return past, nxt
 
 
+def _prepare_parts_orders(parts_orders_csv_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = _read_csv_safe(parts_orders_csv_path)
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    for c in [
+        "Status",
+        "Part Name",
+        "Serial Number",
+        "Project Name",
+        "Details",
+        "Opened By",
+        "Approved",
+        "Approved By",
+        "Approval Date",
+        "Ordered By",
+        "Date Ordered",
+        "Company",
+    ]:
+        if c not in df.columns:
+            df[c] = ""
+
+    df["Status"] = (
+        df["Status"]
+        .astype(str)
+        .str.strip()
+        .replace({"Needed": "Opened", "needed": "Opened"})
+    )
+    # Remove truly blank rows.
+    keep_mask = (
+        df["Status"].ne("")
+        | df["Part Name"].astype(str).str.strip().ne("")
+        | df["Serial Number"].astype(str).str.strip().ne("")
+        | df["Project Name"].astype(str).str.strip().ne("")
+        | df["Details"].astype(str).str.strip().ne("")
+    )
+    df = df.loc[keep_mask].copy()
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    status_order = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
+    counts = (
+        df.assign(_status=df["Status"].where(df["Status"].isin(status_order), "Opened"))
+        .groupby("_status", as_index=False)
+        .size()
+        .rename(columns={"_status": "status", "size": "count"})
+    )
+    # Keep consistent order.
+    counts["status"] = pd.Categorical(counts["status"], categories=status_order, ordered=True)
+    counts = counts.sort_values("status")
+    return counts, df
+
+
 def _build_custom_pdf(
     out_pdf: str,
     title: str,
@@ -147,6 +201,7 @@ def _build_custom_pdf(
     end_dt: pd.Timestamp,
     sections: list[str],
     orders_csv_path: str,
+    parts_orders_csv_path: str,
     schedule_csv_path: str,
     preforms_csv_path: str,
 ) -> None:
@@ -164,6 +219,7 @@ def _build_custom_pdf(
     containers = _latest_containers_snapshot()
     preforms = _read_csv_safe(preforms_csv_path)
     past_sched, next_sched = _prepare_schedule_windows(schedule_csv_path)
+    parts_counts, parts_rows = _prepare_parts_orders(parts_orders_csv_path)
 
     done = orders[orders["Status"].astype(str).str.strip().str.lower().eq("done")].copy() if not orders.empty else pd.DataFrame()
     failed = orders[orders["Status"].astype(str).str.strip().str.lower().eq("failed")].copy() if not orders.empty else pd.DataFrame()
@@ -332,6 +388,27 @@ def _build_custom_pdf(
         f_tbl = _styled_table(_df_for_pdf_table(failed_rows, limit=18), header_bg="#FFEDEE")
         story += [f_tbl, Spacer(1, 8)]
 
+    if "Parts Orders Status" in sections:
+        story.append(Paragraph("Parts Orders Status", h2))
+        pc_tbl = _styled_table(_df_for_pdf_table(parts_counts, limit=16))
+        story += [pc_tbl, Spacer(1, 5)]
+        story.append(Paragraph("Current parts orders list", body))
+        cols = [
+            "Status",
+            "Part Name",
+            "Serial Number",
+            "Project Name",
+            "Details",
+            "Opened By",
+            "Approved",
+            "Ordered By",
+            "Date Ordered",
+            "Company",
+        ]
+        p_show = parts_rows[[c for c in cols if c in parts_rows.columns]] if not parts_rows.empty else pd.DataFrame()
+        pr_tbl = _styled_table(_df_for_pdf_table(p_show, limit=24))
+        story += [pr_tbl, Spacer(1, 8)]
+
     if "Schedule: Past Week + Next Week" in sections:
         story.append(Paragraph("Schedule: Past Week + Next Week", h2))
         story.append(Paragraph("Past week", body))
@@ -382,6 +459,56 @@ def _build_custom_pdf(
 
 
 def render_report_center_tab(P) -> None:
+    st.markdown(
+        """
+        <style>
+          div[data-testid="stButton"] > button{
+            border-radius: 12px !important;
+            border: 1px solid rgba(138,214,255,0.58) !important;
+            background: linear-gradient(180deg, rgba(28,74,120,0.72), rgba(12,36,68,0.66)) !important;
+            color: rgba(236,248,255,0.98) !important;
+            box-shadow: 0 8px 18px rgba(8,30,58,0.32), 0 0 12px rgba(74,170,255,0.18) !important;
+            transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease !important;
+          }
+          div[data-testid="stButton"] > button:hover{
+            transform: translateY(-1px);
+            border-color: rgba(188,238,255,0.86) !important;
+            box-shadow: 0 12px 24px rgba(8,30,58,0.36), 0 0 16px rgba(96,194,255,0.30) !important;
+          }
+          div[data-testid="stButton"] > button[kind="primary"]{
+            border-color: rgba(170,232,255,0.84) !important;
+            background: linear-gradient(180deg, rgba(76,168,255,0.90), rgba(32,98,172,0.88)) !important;
+            box-shadow: 0 14px 24px rgba(12, 68, 124, 0.40), 0 0 18px rgba(96,194,255,0.34) !important;
+          }
+          div[data-testid="stMultiSelect"] div[data-baseweb="tag"],
+          div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
+            background: linear-gradient(180deg, rgba(70,160,238,0.94), rgba(32,96,168,0.92)) !important;
+            border: 1px solid rgba(170,232,255,0.82) !important;
+            color: rgba(244,252,255,0.99) !important;
+            box-shadow: 0 0 0 1px rgba(108,198,255,0.24), 0 4px 10px rgba(10,46,84,0.30) !important;
+            max-width: none !important;
+            width: auto !important;
+            height: auto !important;
+          }
+          div[data-testid="stMultiSelect"] div[data-baseweb="tag"] *,
+          div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
+            color: rgba(244,252,255,0.99) !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+          }
+          div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg,
+          div[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg{
+            fill: rgba(238,250,255,0.98) !important;
+          }
+          div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div{
+            min-height: 52px !important;
+            height: auto !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="dash-title">🗂️ Report Center</div>', unsafe_allow_html=True)
     st.caption("Build custom PDF reports with operations-focused data for team handover.")
 
@@ -410,13 +537,7 @@ def render_report_center_tab(P) -> None:
     selected_sections = st.multiselect(
         "Choose sections",
         SECTIONS,
-        default=[
-            "Executive Summary",
-            "Resources: Gas + SAP + Preforms",
-            "Draw Outcomes (Done/Failed + Notes)",
-            "Schedule: Past Week + Next Week",
-            "Maintenance + Faults",
-        ],
+        default=SECTIONS,
         key="report_center_sections",
     )
 
@@ -443,6 +564,7 @@ def render_report_center_tab(P) -> None:
                     end_dt=end_dt,
                     sections=selected_sections,
                     orders_csv_path=P.orders_csv,
+                    parts_orders_csv_path=P.parts_orders_csv,
                     schedule_csv_path=P.schedule_csv,
                     preforms_csv_path=P.preform_inventory_csv,
                 )
