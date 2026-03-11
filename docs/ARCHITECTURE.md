@@ -112,11 +112,11 @@ Path governance:
 
 From `app_io/paths.py`:
 
-- default: per-process user-local DB (`tower_<pid>.duckdb`) to avoid lock conflicts.
-- optional shared per-user DB with `TOWER_DUCKDB_SHARED=1`.
+- default: shared per-user DB (`tower.duckdb`) in user-local app-data directory.
+- optional per-process isolation with `TOWER_DUCKDB_ISOLATED=1` (or `TOWER_DUCKDB_SHARED=0`).
 - fallback to `<project>/data` only if local directory cannot be prepared.
 
-This supports multi-user deployments across network shares better than one shared DB file.
+This supports network deployment (one app per computer/user) while still allowing local multi-instance debug mode.
 
 ## 6) Styling Architecture
 
@@ -144,3 +144,23 @@ Operational safeguards:
 - preflight verifies file presence/schema/path layout
 - app tests verify imports, schema contracts, UI smoke, and snapshot integrity
 - path permissions audit for read/write diagnostics
+
+## 8) V2 Operational Flows
+
+Maintenance execution flow:
+
+- task lifecycle state is tracked (`pending` -> `in_progress` -> `done` / `waiting_parts`)
+- readiness gate evaluates required parts and blockers before start
+- reservation model supports reserve/release/consume for required parts
+- scheduler bridge ranks candidate windows with workday constraints
+
+Parts + manuals flow:
+
+- inventory finder is unified (stock + mounted quantities in one grid)
+- manuals/BOM correlation supports part-to-page and page-to-parts lookup
+- work-package builder can append parts from inventory/manual scope
+
+Diagnostics flow:
+
+- control panel runs `preflight`, `app tests`, `env pretest`, `release check`, and `full health`
+- path status, schema checks, and fix guidance are rendered from the same canonical `P` paths

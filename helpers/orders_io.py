@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app_io.paths import P
+from helpers.dataset_io import list_dataset_csvs
 from helpers.constants import (
     STATUS_COL,
     STATUS_UPDATED_COL,
@@ -87,3 +88,35 @@ def write_orders_csv(df: pd.DataFrame, path: str | None = None) -> bool:
         return True
     except Exception:
         return False
+
+
+def count_draw_orders(path: str | None = None) -> int:
+    """
+    Authoritative draw count from draw_orders.csv (not logs / dataset folder file-count).
+    Counts meaningful order rows and ignores fully blank template rows.
+    """
+    df = read_orders_csv(path=path)
+    if df is None or df.empty:
+        return 0
+
+    # Keep rows that have at least one meaningful order field.
+    cols = [c for c in ["Timestamp", "Fiber Project", "Preform Number", "Status"] if c in df.columns]
+    if not cols:
+        return int(len(df))
+
+    keep_mask = pd.Series(False, index=df.index)
+    for c in cols:
+        keep_mask = keep_mask | df[c].astype(str).str.strip().ne("")
+    return int(keep_mask.sum())
+
+
+def count_dataset_draws(dataset_dir: str | None = None) -> int:
+    """
+    Count dataset draw CSV files directly from dataset directory.
+    This reflects actual draw files in data_set_csv.
+    """
+    try:
+        ddir = dataset_dir or P.dataset_dir
+        return int(len(list_dataset_csvs(ddir, full_paths=False)))
+    except Exception:
+        return 0

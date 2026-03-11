@@ -127,6 +127,7 @@ def render_home_tab(
     FAULTS_CSV = os.path.join(P.maintenance_dir, "faults_log.csv")
 
 
+    @st.cache_data(show_spinner=False, ttl=20)
     def compute_open_critical_faults(faults_csv: str) -> int:
         if not os.path.isfile(faults_csv):
             return 0
@@ -161,6 +162,31 @@ def render_home_tab(
             is_open = ~cl.isin(["true", "1", "yes", "y", "closed"])
 
         return int((sev == "critical")[is_open].sum())
+
+    @st.cache_data(show_spinner=False, ttl=10)
+    def compute_maintenance_in_progress() -> int:
+        # Primary signal: lifecycle state.
+        state_file = os.path.join(P.maintenance_dir, "maintenance_task_state.csv")
+        in_progress = 0
+        try:
+            if os.path.isfile(state_file):
+                sdf = pd.read_csv(state_file, keep_default_na=False)
+                if "state" in sdf.columns:
+                    in_progress = int(sdf["state"].astype(str).str.upper().eq("IN_PROGRESS").sum())
+        except Exception:
+            in_progress = 0
+
+        # Fallback signal: currently active maintenance indicator.
+        try:
+            import json
+            if os.path.isfile(P.activity_indicator_json):
+                with open(P.activity_indicator_json, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if bool(payload.get("active", False)) and str(payload.get("activity_type", "")).strip().lower() == "maintenance":
+                    in_progress = max(in_progress, 1)
+        except Exception:
+            pass
+        return int(max(0, in_progress))
 
     # =========================================================
     # ❌ FAILED (last 4 days) — compact list + POPUP reason
@@ -740,7 +766,7 @@ def render_home_tab(
         }
         .home-faults-grid {
             display: grid;
-            grid-template-columns: 1.1fr 1.1fr 1.8fr;
+            grid-template-columns: 1.0fr 1.0fr 1.0fr 1.6fr;
             gap: 10px;
         }
         .home-faults-card {
@@ -863,6 +889,10 @@ def render_home_tab(
         """
         <script>
         (function() {
+            if (window.__homeHoverBootTimer) {
+              clearInterval(window.__homeHoverBootTimer);
+              window.__homeHoverBootTimer = null;
+            }
             const expected = [
             "🚀 Draws Monitor",
             "✅ Done + ❌ Failed",
@@ -933,11 +963,20 @@ def render_home_tab(
             }
             return false;
           }
-
-          // Keep syncing state continuously so "blank when not hovered" is always enforced.
-          setInterval(() => {
-            bindHoverSwitch();
-          }, 120);
+          let attempts = 0;
+          const MAX_ATTEMPTS = 40; // ~8s total
+          function boot() {
+            attempts += 1;
+            const done = bindHoverSwitch();
+            if (done || attempts >= MAX_ATTEMPTS) {
+              if (window.__homeHoverBootTimer) {
+                clearInterval(window.__homeHoverBootTimer);
+                window.__homeHoverBootTimer = null;
+              }
+            }
+          }
+          window.__homeHoverBootTimer = setInterval(boot, 200);
+          boot();
         })();
         </script>
         """,
@@ -949,6 +988,7 @@ def render_home_tab(
     # =========================================================
     # 5) MAINTENANCE OVERVIEW (unchanged below)
     # =========================================================
+    @st.cache_data(show_spinner=False, ttl=20)
     def compute_maintenance_counts_for_home(
             maint_folder: str,
             dataset_dir: str,
@@ -960,13 +1000,12 @@ def render_home_tab(
         import datetime as dt
         import pandas as pd
         import numpy as np
+        from helpers.orders_io import count_dataset_draws
 
         base_dir = base_dir or P.root_dir
 
-        def get_draw_csv_count(folder: str) -> int:
-            if not os.path.isdir(folder):
-                return 0
-            return sum(1 for f in os.listdir(folder) if f.lower().endswith(".csv") and not f.startswith("~$"))
+        def get_draw_orders_count() -> int:
+            return int(count_dataset_draws(P.dataset_dir))
 
         def parse_date(x):
             if pd.isna(x) or x == "":
@@ -1021,7 +1060,7 @@ def render_home_tab(
         warn_days = int(state.get("warn_days", 14) or 14)
         warn_hours = float(state.get("warn_hours", 50.0) or 50.0)
 
-        current_draw_count = get_draw_csv_count(dataset_dir)
+        current_draw_count = get_draw_orders_count()
 
         if not os.path.isdir(maint_folder):
             return 0, 0
@@ -1242,6 +1281,7 @@ def render_home_tab(
                     maint_folder=MAINT_FOLDER,
                     dataset_dir=DATASET_DIR,
                 )
+                maint_in_progress = compute_maintenance_in_progress()
 
                 st.session_state["maint_overdue"] = overdue
                 st.session_state["maint_due_soon"] = due_soon
@@ -1258,6 +1298,10 @@ def render_home_tab(
                         <div class="home-faults-card">
                           <div class="home-faults-k">Due soon</div>
                           <div class="home-faults-v">{due_soon}</div>
+                        </div>
+                        <div class="home-faults-card">
+                          <div class="home-faults-k">In progress</div>
+                          <div class="home-faults-v">{maint_in_progress}</div>
                         </div>
                         <div class="home-faults-card">
                           <div class="home-faults-k">Focus</div>

@@ -67,9 +67,9 @@ Detailed docs:
 - Maintenance
 - Dashboard
 - Draw Finalize
-- Correlation & Outliers
 - Protocols
 - Data Diagnostics
+- Report Center
 - SQL Lab
 - Development Process
 
@@ -133,15 +133,16 @@ python3 scripts/cli/run_update_regression_snapshot.py
 ## DuckDB Policy (multi-user safe)
 
 - DuckDB defaults to user-local storage (`~/Library/Application Support/Tower_work` on macOS, `%LOCALAPPDATA%\\Tower_work` on Windows, `~/.local/share/Tower_work` on Linux).
-- Default mode uses per-process DB filename (`tower_<pid>.duckdb`) to reduce lock collisions.
-- Set `TOWER_DUCKDB_SHARED=1` for a shared per-user DB file (`tower.duckdb`) if needed.
+- Default mode uses one shared per-user DB filename (`tower.duckdb`) per computer/user.
+- Set `TOWER_DUCKDB_ISOLATED=1` (or `TOWER_DUCKDB_SHARED=0`) for per-process DB files (`tower_<pid>.duckdb`) when running multiple local app instances.
 - Fallback uses project `data/` only if local user dir cannot be created.
 
 ## Environment Variables
 
 - `TOWER_ROOT`: override project root for all path building.
 - `TOWER_SAFE_MODE=1`: open app with limited safe tabs when startup checks fail.
-- `TOWER_DUCKDB_SHARED=1`: shared per-user duckdb file (instead of per-process).
+- `TOWER_DUCKDB_SHARED=1`: force shared per-user duckdb file.
+- `TOWER_DUCKDB_ISOLATED=1`: force per-process duckdb file.
 - `TOWER_LOCAL_DB_DIR`: override user-local duckdb directory.
 
 ## Notes

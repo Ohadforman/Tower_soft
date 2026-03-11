@@ -201,6 +201,8 @@ class Paths:
     logo_image: str = _abs("assets", "images", "icap.png")
     coating_stock_json: str = _abs("state", "coating_type_stock.json")
     container_levels_prev_json: str = _abs("state", "container_levels_prev.json")
+    activity_indicator_json: str = _abs("state", "activity_indicator.json")
+    activity_events_csv: str = _abs("state", "activity_events_log.csv")
 
 
 P = Paths()

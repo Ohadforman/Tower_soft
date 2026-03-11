@@ -68,11 +68,18 @@ Run full health check (single command for all readiness checks):
 python3 scripts/cli/run_full_health_check.py
 ```
 
+Run release bundle (single artifact package for deployment handoff):
+
+```bash
+python3 scripts/cli/run_release_bundle.py
+```
+
 Note: if your terminal is inside `docs/`, the same command path still works because `docs/scripts/cli` wrappers forward to the real scripts.
 
 ## Generated Artifacts
 
 - full check reports: `reports/checks/all_checks_*.json`
+- release bundle: `reports/checks/release_bundle_*.zip`
 - path permission reports: `reports/path_audit/path_permissions_*.json` and `.csv`
 - app logs: `logs/`
 - backup snapshots: `backups/`
@@ -81,15 +88,16 @@ Note: if your terminal is inside `docs/`, the same command path still works beca
 
 - `TOWER_ROOT`: override base root for path construction.
 - `TOWER_SAFE_MODE=1`: allow limited app load when checks fail.
-- `TOWER_DUCKDB_SHARED=1`: use shared per-user duckdb file (`tower.duckdb`).
+- `TOWER_DUCKDB_SHARED=1`: force shared per-user duckdb file (`tower.duckdb`).
+- `TOWER_DUCKDB_ISOLATED=1`: force per-process duckdb file (`tower_<pid>.duckdb`).
 - `TOWER_LOCAL_DB_DIR`: override local duckdb directory.
 
 ## DuckDB Multi-user Guidance
 
 For multiple users on networked setups:
 
-- keep default per-process DB naming (`tower_<pid>.duckdb`)
-- keep DB in user-local storage
+- keep default shared-per-user DB naming (`tower.duckdb`) with user-local storage
+- use `TOWER_DUCKDB_ISOLATED=1` only for local parallel-instance debugging
 - avoid one shared DB file for concurrent writers
 
 If a lock error occurs, verify whether two app instances are pointing to the same shared duckdb file and disable shared mode.

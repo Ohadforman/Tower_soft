@@ -16,6 +16,7 @@ from helpers.process_setup_state import apply_order_row_to_process_setup_state
 from helpers.process_setup_state import apply_dataset_process_rows_to_state
 from helpers.app_logger import log_event
 from helpers.dataset_io import most_recent_csv
+from helpers.activity_indicator import record_activity_start
 
 # These are your existing “collect” UIs (already moved out of dash_try)
 from renders.components.coating import render_coating_section
@@ -338,6 +339,23 @@ def render_scheduled_quick_start(
                     preform=preform,
                     status="In Progress",
                 )
+                try:
+                    record_activity_start(
+                        indicator_json_path=P.activity_indicator_json,
+                        events_csv_path=P.activity_events_csv,
+                        activity_type="draw",
+                        title=f"Draw Start | Order #{int(idx)} | {safe_str(row.get('Fiber Project',''))}",
+                        actor=safe_str(st.session_state.get("maint_actor", "operator")),
+                        source="process_setup_quick_start",
+                        meta={
+                            "order_index": int(idx),
+                            "dataset_csv": csv_name,
+                            "preform": preform,
+                            "status": "In Progress",
+                        },
+                    )
+                except Exception:
+                    pass
 
                 st.rerun()
 

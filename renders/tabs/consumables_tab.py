@@ -175,6 +175,10 @@ def render_consumables_tab(P):
         """
         <script>
         (function() {
+          if (window.__consHoverBootTimer) {
+            clearInterval(window.__consHoverBootTimer);
+            window.__consHoverBootTimer = null;
+          }
           const expected = [
             "🧪 Containers","📦 Warehouse","🏷️ Stock by Type","🌡️ Temperatures","🔩 Dies","🧯 Argon Report"
           ];
@@ -217,7 +221,20 @@ def render_consumables_tab(P):
             }
             return false;
           }
-          setInterval(bindHoverSwitch, 140);
+          let attempts = 0;
+          const MAX_ATTEMPTS = 40; // ~8s total
+          function boot() {
+            attempts += 1;
+            const done = bindHoverSwitch();
+            if (done || attempts >= MAX_ATTEMPTS) {
+              if (window.__consHoverBootTimer) {
+                clearInterval(window.__consHoverBootTimer);
+                window.__consHoverBootTimer = null;
+              }
+            }
+          }
+          window.__consHoverBootTimer = setInterval(boot, 200);
+          boot();
         })();
         </script>
         """,

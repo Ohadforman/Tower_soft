@@ -1,9 +1,11 @@
 # Path Map
 
-Generated: 2026-03-03 16:08:57
+Generated: 2026-03-10 21:46:07
 
 | Key | Path | Exists |
 |---|---|---|
+| `activity_events_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/state/activity_events_log.csv` | yes |
+| `activity_indicator_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/state/activity_indicator.json` | yes |
 | `after_done_log` | `/Users/ohadformanair/PycharmProjects/Tower_work/hooks/after_done_last_run.txt` | yes |
 | `assets_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/assets` | yes |
 | `backups_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/backups` | yes |
@@ -20,7 +22,7 @@ Generated: 2026-03-03 16:08:57
 | `dies_config_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/config/dies_6station.json` | yes |
 | `directory_config_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/config/directory_config.json` | yes |
 | `done_snapshots_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/hooks/done_csv_snapshots` | yes |
-| `duckdb_path` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/tower_89017.duckdb` | no |
+| `duckdb_path` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/tower.duckdb` | yes |
 | `experiment_updates_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/experiment_updates.csv` | yes |
 | `gas_reports_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports/gas` | yes |
 | `gas_reports_state_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports/gas/_gas_reports_state.json` | yes |
@@ -35,6 +37,8 @@ Generated: 2026-03-03 16:08:57
 | `orders_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/draw_orders.csv` | yes |
 | `parts_archived_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/archived_orders.csv` | yes |
 | `parts_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/parts` | yes |
+| `parts_inventory_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/parts_inventory.csv` | yes |
+| `parts_locations_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/parts_locations.csv` | yes |
 | `parts_orders_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/part_orders.csv` | yes |
 | `pid_config_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/config/pid_config.json` | yes |
 | `preform_inventory_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/preforms_inventory.csv` | yes |
@@ -43,6 +47,7 @@ Generated: 2026-03-03 16:08:57
 | `protocols_assets_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/protocols_assets` | yes |
 | `protocols_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/protocols.csv` | yes |
 | `protocols_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/config/protocols.json` | yes |
+| `report_center_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports/report_center` | yes |
 | `reports_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports` | yes |
 | `root_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work` | yes |
 | `sap_rods_inventory_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/sap_rods_inventory.csv` | yes |
@@ -51,3 +56,5 @@ Generated: 2026-03-03 16:08:57
 | `state_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/state` | yes |
 | `tower_containers_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/tower_containers.csv` | yes |
 | `tower_temps_csv` | `/Users/ohadformanair/PycharmProjects/Tower_work/data/tower_temps.csv` | yes |
+| `weekly_reports_dir` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports/weekly` | yes |
+| `weekly_reports_state_json` | `/Users/ohadformanair/PycharmProjects/Tower_work/reports/weekly/_weekly_reports_state.json` | yes |

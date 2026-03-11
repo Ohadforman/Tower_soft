@@ -53,20 +53,26 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
           box-shadow: 0 4px 10px rgba(8,30,58,0.20) !important;
         }
 
-        div[data-testid="stMultiSelect"] div[data-baseweb="tag"],
-        div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
+        section.main div[data-baseweb="tag"],
+        section.main span[data-baseweb="tag"],
+        section.main div[data-testid="stMultiSelect"] div[data-baseweb="tag"],
+        section.main div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
           background: linear-gradient(180deg, rgba(70,160,238,0.92), rgba(32,96,168,0.90)) !important;
           background-color: rgba(44,124,206,0.92) !important;
           border: 1px solid rgba(170,232,255,0.78) !important;
           color: rgba(244,252,255,0.99) !important;
           box-shadow: 0 0 0 1px rgba(108,198,255,0.24), 0 4px 10px rgba(10,46,84,0.30) !important;
         }
-        div[data-testid="stMultiSelect"] div[data-baseweb="tag"] *,
-        div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
+        section.main div[data-baseweb="tag"] *,
+        section.main span[data-baseweb="tag"] *,
+        section.main div[data-testid="stMultiSelect"] div[data-baseweb="tag"] *,
+        section.main div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
           color: rgba(244,252,255,0.99) !important;
         }
-        div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg,
-        div[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg{
+        section.main div[data-baseweb="tag"] svg,
+        section.main span[data-baseweb="tag"] svg,
+        section.main div[data-testid="stMultiSelect"] div[data-baseweb="tag"] svg,
+        section.main div[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg{
           fill: rgba(238,250,255,0.98) !important;
         }
 
@@ -133,6 +139,7 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
         input[type="checkbox"]{
           accent-color: #66c5ff !important;
         }
+        /* Strong global radio skin: prevent browser/theme fallback red markers. */
         [data-baseweb="radio"] input + div{
           border-color: rgba(132,214,255,0.52) !important;
           background: rgba(10,20,36,0.30) !important;
@@ -142,11 +149,30 @@ def apply_blue_clean_base_theme(force: bool = False) -> None:
           box-shadow: 0 0 0 1px rgba(120,208,255,0.48), 0 0 12px rgba(100,196,255,0.34) !important;
           background: linear-gradient(180deg, rgba(66,160,242,0.94), rgba(36,108,184,0.90)) !important;
         }
+        [data-baseweb="radio"] input + div > div{
+          border-color: rgba(132,214,255,0.66) !important;
+          background: rgba(10,20,36,0.20) !important;
+        }
+        [data-baseweb="radio"] input:checked + div > div{
+          border-color: rgba(204,244,255,0.96) !important;
+          background: linear-gradient(180deg, rgba(94,194,255,0.98), rgba(48,132,208,0.94)) !important;
+          box-shadow: 0 0 0 1px rgba(130,214,255,0.58), 0 0 10px rgba(102,198,255,0.38) !important;
+        }
 
         [data-testid="stMarkdownContainer"] p,
         [data-testid="stMarkdownContainer"] li,
         [data-testid="stCaptionContainer"]{
           color: var(--tw-text-soft);
+        }
+
+        /* Keep slider/range accents aligned to the blue style baseline. */
+        section.main div[data-baseweb="slider"] [role="slider"]{
+          border-color: rgba(170,232,255,0.86) !important;
+          background: linear-gradient(180deg, rgba(86,184,255,0.96), rgba(40,118,196,0.92)) !important;
+          box-shadow: 0 0 0 1px rgba(108,198,255,0.36), 0 0 12px rgba(100,196,255,0.28) !important;
+        }
+        section.main div[data-baseweb="slider"] [data-testid="stSliderTickBarMin"]{
+          background: linear-gradient(90deg, rgba(86,184,255,0.90), rgba(56,146,228,0.84)) !important;
         }
         </style>
         """,
