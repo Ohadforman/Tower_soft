@@ -28,6 +28,31 @@ from helpers.coating_config import load_config_coating_json
 from renders.components.save_all import render_save_all_block
 
 
+@st.cache_data(show_spinner=False, ttl=20)
+def _cached_distinct_col_values(path: str, col: str, file_mtime: float) -> list[str]:
+    """Fast distinct-values loader for dropdown helpers."""
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path, keep_default_na=False)
+    except Exception:
+        return []
+    if col not in df.columns:
+        return []
+    out = []
+    seen = set()
+    for v in df[col].astype(str).tolist():
+        s = safe_str(v).strip()
+        if not s:
+            continue
+        lk = s.lower()
+        if lk in seen:
+            continue
+        seen.add(lk)
+        out.append(s)
+    return out
+
+
 # ==========================================================
 # Link helpers
 # ==========================================================
@@ -115,6 +140,240 @@ def next_draw_index_for_preform(preform_id: str, orders_df: pd.DataFrame) -> int
                     pass
 
     return max_n + 1
+
+
+# ==========================================================
+# Manual Quick Start (no order)
+# ==========================================================
+def render_manual_quick_start_no_order(
+    orders_df: pd.DataFrame,
+    key_prefix: str = "process_setup_manualqs",
+):
+    st.caption("Start a draw without an order row. Uses order-like fields and auto-creates a dataset CSV.")
+    if orders_df is None:
+        orders_df = pd.DataFrame()
+
+    def _opts(col: str) -> list:
+        if orders_df.empty or col not in orders_df.columns:
+            return []
+        vals = []
+        seen = set()
+        for v in orders_df[col].astype(str).tolist():
+            s = safe_str(v).strip()
+            if not s:
+                continue
+            lk = s.lower()
+            if lk in seen:
+                continue
+            seen.add(lk)
+            vals.append(s)
+        return vals
+
+    def _load_project_options() -> list:
+        fp = P.projects_fiber_csv
+        if not os.path.exists(fp):
+            return _opts("Fiber Project")
+        vals = _cached_distinct_col_values(fp, "Fiber Project", os.path.getmtime(fp))
+        return vals or _opts("Fiber Project")
+
+    def _load_preform_options() -> list:
+        out = []
+        seen = set()
+
+        def _add(v: str):
+            s = safe_str(v).strip()
+            if not s:
+                return
+            lk = s.lower()
+            if lk in seen:
+                return
+            seen.add(lk)
+            out.append(s)
+
+        # 1) from orders
+        for v in _opts("Preform Number"):
+            _add(v)
+
+        # 2) from preform inventory
+        try:
+            if os.path.exists(P.preform_inventory_csv):
+                for v in _cached_distinct_col_values(
+                    P.preform_inventory_csv,
+                    "Preform Number",
+                    os.path.getmtime(P.preform_inventory_csv),
+                ):
+                    _add(v)
+        except Exception:
+            pass
+
+        # 3) from existing dataset csv names: {preform}F_N.csv
+        try:
+            if os.path.exists(P.dataset_dir):
+                pat = re.compile(r"^(.*)F_(\d+)\.csv$", re.IGNORECASE)
+                for fn in os.listdir(P.dataset_dir):
+                    m = pat.match(str(fn).strip())
+                    if m:
+                        _add(m.group(1))
+        except Exception:
+            pass
+        return out
+
+    geometry_options = [
+        "",
+        "PANDA - PM",
+        "TIGER - PM",
+        "Octagonal",
+        "ROUND",
+        "STEP INDEX",
+        "Ring Core",
+        "Hollow Core",
+        "Photonic Crystal",
+        "Custom (write in Notes)",
+    ]
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        project_opts = [""] + _load_project_options()
+        project = safe_str(st.selectbox("Fiber Project", options=project_opts, index=0, key=f"{key_prefix}_project_pick")).strip()
+    with c2:
+        preform_hint = ""
+        preform_opts = _load_preform_options()
+        if preform_opts:
+            preform_hint = f"Examples: {', '.join(preform_opts[:4])}"
+        preform = safe_str(
+            st.text_input(
+                "Preform Number",
+                value="",
+                key=f"{key_prefix}_preform_input",
+                placeholder=preform_hint or "e.g. P0888",
+            )
+        ).strip()
+    with c3:
+        opener = safe_str(
+            st.text_input(
+                "Order Opener",
+                value="",
+                key=f"{key_prefix}_opener_input",
+                placeholder="e.g. Ohad",
+            )
+        ).strip()
+    with c4:
+        priority = st.selectbox("Priority", options=["Low", "Normal", "High"], index=1, key=f"{key_prefix}_priority")
+
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        geom = safe_str(st.selectbox("Fiber Geometry Type", options=geometry_options, index=0, key=f"{key_prefix}_geom_pick")).strip()
+    with g2:
+        req_len = st.text_input("Required Length (m)", value="", key=f"{key_prefix}_req_len")
+    with g3:
+        good_zones = st.text_input("Good Zones Count", value="", key=f"{key_prefix}_good_zones")
+    notes = st.text_area("Order Notes", value="", height=70, key=f"{key_prefix}_notes")
+
+    csv_name = ""
+    if preform.strip():
+        next_n = next_draw_index_for_preform(preform.strip(), orders_df)
+        csv_name = f"{preform.strip()}F_{next_n}.csv"
+        st.info(f"Auto dataset CSV name: `{csv_name}`")
+    else:
+        st.warning("Choose/fill `Preform Number` to enable auto dataset naming and start.")
+
+    if st.button("✅ Start Draw (No Order)", key=f"{key_prefix}_start_btn", use_container_width=True, type="primary", disabled=not bool(preform.strip())):
+        csv_path = dataset_csv_path(csv_name)
+        if os.path.exists(csv_path):
+            st.error(f"Dataset CSV already exists: {csv_name}")
+            return
+
+        def _section(title: str):
+            return {"Parameter Name": f"=== {title} ===", "Value": "", "Units": ""}
+
+        def _blank():
+            return {"Parameter Name": "", "Value": "", "Units": ""}
+
+        def _add_order(rows: list, name: str, val, unit: str = ""):
+            rows.append({"Parameter Name": f"Order__{name}", "Value": val, "Units": unit})
+
+        manual_row = {
+            "Fiber Project": project,
+            "Preform Number": preform,
+            "Order Opener": opener,
+            "Priority": priority,
+            "Fiber Geometry Type": geom,
+            "Required Length (m) (for T&M+costumer)": req_len,
+            "Good Zones Count (required length zones)": good_zones,
+            "Fiber Diameter (µm)": "",
+            "Fiber Diameter Tol (± µm)": "",
+            "Main Coating Diameter (µm)": "",
+            "Main Coating Diameter Tol (± µm)": "",
+            "Secondary Coating Diameter (µm)": "",
+            "Secondary Coating Diameter Tol (± µm)": "",
+            "Tension (g)": "",
+            "Draw Speed (m/min)": "",
+            "Main Coating": "",
+            "Secondary Coating": "",
+            "Tiger Cut (%)": "",
+            "Octagonal F2F (mm)": "",
+            "Notes": notes,
+        }
+
+        base_rows = []
+        base_rows.append(_section("ORDER PARAMETERS"))
+        _add_order(base_rows, "Draw Name", os.path.splitext(os.path.basename(csv_name))[0])
+        _add_order(base_rows, "Draw Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        _add_order(base_rows, "Order Index", "")
+        _add_order(base_rows, "Preform Number", manual_row["Preform Number"])
+        _add_order(base_rows, "Fiber Project", manual_row["Fiber Project"])
+        _add_order(base_rows, "Priority", manual_row["Priority"])
+        _add_order(base_rows, "Order Opener", manual_row["Order Opener"])
+        _add_order(base_rows, "Fiber Geometry Type", manual_row["Fiber Geometry Type"])
+        _add_order(base_rows, "Tiger Cut (%)", manual_row["Tiger Cut (%)"], "%")
+        _add_order(base_rows, "Octagonal F2F (mm)", manual_row["Octagonal F2F (mm)"], "mm")
+        _add_order(base_rows, "Required Length (m) (for T&M+costumer)", manual_row["Required Length (m) (for T&M+costumer)"], "m")
+        _add_order(base_rows, "Good Zones Count (required length zones)", manual_row["Good Zones Count (required length zones)"], "count")
+        _add_order(base_rows, "Fiber Diameter (µm)", manual_row["Fiber Diameter (µm)"], "µm")
+        _add_order(base_rows, "Fiber Diameter Tol (± µm)", manual_row["Fiber Diameter Tol (± µm)"], "µm")
+        _add_order(base_rows, "Main Coating Diameter (µm)", manual_row["Main Coating Diameter (µm)"], "µm")
+        _add_order(base_rows, "Main Coating Diameter Tol (± µm)", manual_row["Main Coating Diameter Tol (± µm)"], "µm")
+        _add_order(base_rows, "Secondary Coating Diameter (µm)", manual_row["Secondary Coating Diameter (µm)"], "µm")
+        _add_order(base_rows, "Secondary Coating Diameter Tol (± µm)", manual_row["Secondary Coating Diameter Tol (± µm)"], "µm")
+        _add_order(base_rows, "Tension (g)", manual_row["Tension (g)"], "g")
+        _add_order(base_rows, "Draw Speed (m/min)", manual_row["Draw Speed (m/min)"], "m/min")
+        _add_order(base_rows, "Main Coating", manual_row["Main Coating"])
+        _add_order(base_rows, "Secondary Coating", manual_row["Secondary Coating"])
+        _add_order(base_rows, "Main Coating Temperature (°C)", "", "°C")
+        _add_order(base_rows, "Secondary Coating Temperature (°C)", "", "°C")
+        _add_order(base_rows, "Order Notes", manual_row["Notes"])
+        base_rows.append(_blank())
+        pd.DataFrame(base_rows).to_csv(csv_path, index=False)
+
+        apply_order_row_to_process_setup_state(manual_row, overwrite=True)
+        st.session_state["process_setup_last_dataset_csv"] = csv_name
+        st.session_state["process_setup_last_order_idx"] = None
+        st.session_state[MSG_SCHED] = f"✅ Manual Quick Start created {csv_name} (No Order mode)"
+        log_event(
+            "process_quick_start_manual_created",
+            dataset_csv=csv_name,
+            preform=preform,
+            project=project,
+            status="In Progress (Manual)",
+        )
+        try:
+            record_activity_start(
+                indicator_json_path=P.activity_indicator_json,
+                events_csv_path=P.activity_events_csv,
+                activity_type="draw",
+                title=f"Draw Start | Manual | {safe_str(project)}",
+                actor=safe_str(st.session_state.get("maint_actor", "operator")),
+                source="process_setup_manual_quick_start",
+                meta={
+                    "dataset_csv": csv_name,
+                    "preform": preform,
+                    "project": project,
+                    "mode": "manual_no_order",
+                },
+            )
+        except Exception:
+            pass
+        st.rerun()
 
 
 # ==========================================================
@@ -476,6 +735,15 @@ def render_process_setup_tab(
     # -------------------------------------------------
     # Scheduled Quick Start (OWN expander)
     # -------------------------------------------------
+    st.markdown('<div class="ps-section">🧭 Manual Quick Start (No Order)</div>', unsafe_allow_html=True)
+    with st.expander("Open Manual Quick Start (No Order)", expanded=False):
+        render_manual_quick_start_no_order(
+            orders_df=orders_df if isinstance(orders_df, pd.DataFrame) else pd.DataFrame(),
+            key_prefix="ps_manualqs",
+        )
+
+    st.divider()
+
     st.markdown('<div class="ps-section">⚡ Scheduled Orders → Quick Start</div>', unsafe_allow_html=True)
     render_scheduled_quick_start(
         orders_df=orders_df,

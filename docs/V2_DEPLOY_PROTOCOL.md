@@ -27,6 +27,8 @@ The protocol writes artifacts to:
 - `reports/checks/v2_deploy_protocol_*.json`
 - `reports/checks/v2_deploy_protocol_*.md`
 
+Tip: if your terminal is inside `docs/`, run with `../scripts/cli/...` paths.
+
 ## 3) Step Order (Control Gates)
 
 1. `Environment pretest`
@@ -85,6 +87,21 @@ python3 scripts/cli/run_preflight.py
 python3 scripts/cli/run_app_tests.py
 ```
 
+Optional strict UI smoke (slower):
+
+```bash
+python3 scripts/cli/run_app_tests.py --ui-smoke --ui-tabs
+```
+
+## 8) Included App Test Coverage (high level)
+
+- Path/data/config/file integrity and schemas
+- Legacy path redirect compatibility
+- Entry compile + module import smoke
+- Path single-source guardrail
+- Navigation/router consistency
+- Base blue theme hook presence
+
 ## 7) Rollback Rule
 
 If deployment is `NOT READY ❌` after remediation attempts:
@@ -93,4 +110,3 @@ If deployment is `NOT READY ❌` after remediation attempts:
 2. Keep current stable commit/tag active.
 3. Open the latest protocol artifact in `reports/checks/`.
 4. Fix blockers and rerun protocol.
-

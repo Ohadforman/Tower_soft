@@ -41,6 +41,8 @@ TEST_DESCRIPTIONS = {
     "Module import smoke": "Imports main tabs/modules to catch import-time failures.",
     "Regression snapshot": "Compares current data snapshot against saved baseline.",
     "Path script single source guardrail": "Scans code for suspicious hardcoded file path usage.",
+    "Navigation/router consistency": "Ensures removed tabs and active tabs are aligned between navigation and router.",
+    "Base blue theme hook": "Ensures the shared blue style baseline is applied from app entry.",
 }
 
 
@@ -348,6 +350,28 @@ def test_path_script_single_source() -> None:
     _assert(not suspicious, "suspicious hardcoded path usage: " + " | ".join(suspicious))
 
 
+def test_navigation_router_consistency() -> None:
+    from app.navigation import NAV_GROUPS
+
+    # Protocols should stay removed from current V2 navigation.
+    all_tabs = [t for tabs in NAV_GROUPS.values() for t in tabs]
+    _assert("📋 Protocols" not in all_tabs, "Protocols tab still present in NAV_GROUPS")
+
+    # Active tabs should have a matching render branch in router.
+    with open(os.path.join(P.root_dir, "app", "router.py"), "r", encoding="utf-8") as f:
+        src = f.read()
+    for tab in sorted(set(all_tabs)):
+        _assert(f'tab_selection == "{tab}"' in src or f'elif tab_selection == "{tab}"' in src, f"router missing tab branch: {tab}")
+    _assert("def render_selected_tab(" in src, "render_selected_tab missing in router")
+
+
+def test_base_blue_theme_hook() -> None:
+    with open(os.path.join(P.root_dir, "dash_try.py"), "r", encoding="utf-8") as f:
+        src = f.read()
+    _assert("from renders.support.style_utils import apply_blue_clean_base_theme" in src, "base theme import missing")
+    _assert("apply_blue_clean_base_theme()" in src, "base theme application missing")
+
+
 def test_no_root_duplicate_files_warning() -> None:
     root_names = [
         "draw_orders.csv",
@@ -455,6 +479,8 @@ def main() -> int:
         ("AT-17", "Module import smoke", test_module_imports, False),
         ("AT-18", "Regression snapshot", test_regression_snapshot, True),
         ("AT-19", "Path script single source guardrail", test_path_script_single_source, False),
+        ("AT-20", "Navigation/router consistency", test_navigation_router_consistency, False),
+        ("AT-21", "Base blue theme hook", test_base_blue_theme_hook, False),
     ]
     for code, name, fn, warning in checks:
         r.check(code, name, fn, warning=warning)
