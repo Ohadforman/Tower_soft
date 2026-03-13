@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import glob
+import json
+import re
 
 import pandas as pd
 import streamlit as st
@@ -30,6 +32,712 @@ SECTIONS = [
     "Maintenance Tests + Measurements",
     "Consumables Snapshot",
 ]
+
+
+def _parse_path_list(value: str) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return []
+    return [x.strip() for x in value.split(";") if x.strip()]
+
+
+def _parse_caption_map(value: str) -> dict[str, str]:
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        raw = json.loads(value)
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _is_image_path(path: str) -> bool:
+    ext = os.path.splitext(str(path).lower())[1]
+    return ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+
+
+def _looks_hebrew(text: str) -> bool:
+    return bool(re.search(r"[\u0590-\u05FF]", str(text or "")))
+
+
+def _pick_pdf_unicode_font() -> str | None:
+    candidates = [
+        "/System/Library/Fonts/SFHebrew.ttf",
+        "/System/Library/Fonts/ArialHB.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _safe_para_text(value: object) -> str:
+    return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
+
+
+def _plain_text(value: object) -> str:
+    s = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    s = re.sub(r"^\s*#+\s*", "", s, flags=re.MULTILINE)
+    s = s.replace("$$", "").replace("$", "")
+    return s.strip()
+
+
+def _prepare_development_project_bundle(data_dir: str, project_name: str) -> dict:
+    projects_fp = os.path.join(data_dir, "development_projects.csv")
+    experiments_fp = os.path.join(data_dir, "development_experiments.csv")
+    updates_fp = os.path.join(data_dir, "experiment_updates.csv")
+
+    projects = _read_csv_safe(projects_fp)
+    experiments = _read_csv_safe(experiments_fp)
+    updates = _read_csv_safe(updates_fp)
+
+    project_row = {}
+    if not projects.empty and "Project Name" in projects.columns:
+        match = projects[projects["Project Name"].astype(str).str.strip() == str(project_name).strip()].copy()
+        if not match.empty:
+            project_row = match.iloc[0].to_dict()
+
+    if not experiments.empty and "Project Name" in experiments.columns:
+        experiments = experiments[experiments["Project Name"].astype(str).str.strip() == str(project_name).strip()].copy()
+    else:
+        experiments = pd.DataFrame()
+
+    if not updates.empty and "Project Name" in updates.columns:
+        updates = updates[updates["Project Name"].astype(str).str.strip() == str(project_name).strip()].copy()
+    else:
+        updates = pd.DataFrame()
+
+    for col in [
+        "Experiment Title", "Date", "Researcher", "Methods", "Purpose", "Observations",
+        "Results", "Is Drawing", "Drawing Details", "Draw CSV", "Attachments",
+        "Attachment Captions", "Markdown Notes"
+    ]:
+        if col not in experiments.columns:
+            experiments[col] = ""
+
+    for col in ["Experiment Title", "Update Date", "Researcher", "Update Notes"]:
+        if col not in updates.columns:
+            updates[col] = ""
+
+    attachment_summary_rows = []
+    image_paths = []
+    for _, row in experiments.iterrows():
+        exp_title = str(row.get("Experiment Title", "")).strip()
+        all_paths = []
+        for field in ["Result Images", "Result Docs", "Attachments"]:
+            if field in row.index:
+                all_paths.extend(_parse_path_list(str(row.get(field, ""))))
+        captions = {}
+        for field in ["Image Captions", "Doc Captions", "Attachment Captions"]:
+            if field in row.index:
+                captions.update(_parse_caption_map(str(row.get(field, ""))))
+        for p in all_paths:
+            cap = captions.get(os.path.basename(p), "") or captions.get(p, "")
+            attachment_summary_rows.append(
+                {
+                    "Experiment": exp_title,
+                    "File": os.path.basename(p),
+                    "Type": os.path.splitext(p)[1].lower().lstrip("."),
+                    "Caption": cap,
+                    "Path": p,
+                }
+            )
+            abs_p = p if os.path.isabs(p) else os.path.join(data_dir, p)
+            if _is_image_path(abs_p) and os.path.exists(abs_p):
+                image_paths.append({"experiment": exp_title, "path": abs_p, "caption": cap or os.path.basename(p)})
+
+    return {
+        "project": project_row,
+        "experiments": experiments,
+        "updates": updates,
+        "attachments": pd.DataFrame(attachment_summary_rows),
+        "images": image_paths,
+    }
+
+
+def _build_development_project_pdf(out_pdf: str, project_name: str, data_dir: str) -> None:
+    try:
+        return _build_development_project_pdf_pil(out_pdf, project_name, data_dir)
+    except Exception:
+        pass
+
+    return _build_development_project_pdf_reportlab(out_pdf, project_name, data_dir)
+
+
+def _build_development_project_pdf_reportlab(out_pdf: str, project_name: str, data_dir: str) -> None:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    bundle = _prepare_development_project_bundle(data_dir, project_name)
+    project = bundle["project"]
+    experiments = bundle["experiments"]
+    updates = bundle["updates"]
+    attachments = bundle["attachments"]
+    images = bundle["images"]
+
+    doc = SimpleDocTemplate(
+        out_pdf,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=f"Development Process Report - {project_name}",
+    )
+    styles = getSampleStyleSheet()
+    sample_text = " ".join(
+        [
+            str(project.get("Project Name", "")),
+            str(project.get("Project Purpose", "")),
+            str(project.get("Target", "")),
+            " ".join(experiments.get("Experiment Title", pd.Series(dtype=str)).astype(str).tolist()) if not experiments.empty else "",
+            " ".join(experiments.get("Markdown Notes", pd.Series(dtype=str)).astype(str).tolist()) if not experiments.empty else "",
+            " ".join(updates.get("Update Notes", pd.Series(dtype=str)).astype(str).tolist()) if not updates.empty else "",
+        ]
+    )
+    use_hebrew = _looks_hebrew(sample_text)
+    base_font = "Helvetica"
+    unicode_font = _pick_pdf_unicode_font()
+    if unicode_font:
+        try:
+            pdfmetrics.registerFont(TTFont("TowerUnicode", unicode_font))
+            base_font = "TowerUnicode"
+        except Exception:
+            pass
+
+    align = TA_RIGHT if use_hebrew else TA_LEFT
+    h1 = ParagraphStyle("DEV_H1", parent=styles["Heading1"], fontName=base_font, fontSize=17, leading=21, textColor=colors.HexColor("#0A3A66"), alignment=align)
+    h2 = ParagraphStyle("DEV_H2", parent=styles["Heading2"], fontName=base_font, fontSize=12.5, leading=15, textColor=colors.HexColor("#114E86"), alignment=align)
+    h3 = ParagraphStyle("DEV_H3", parent=styles["Heading3"], fontName=base_font, fontSize=10.5, leading=13, textColor=colors.HexColor("#15623a"), alignment=align)
+    body = ParagraphStyle("DEV_BODY", parent=styles["BodyText"], fontName=base_font, fontSize=9.2, leading=12, alignment=align)
+    small = ParagraphStyle("DEV_SMALL", parent=styles["BodyText"], fontName=base_font, fontSize=8, leading=10, textColor=colors.HexColor("#56708D"), alignment=align)
+    callout = ParagraphStyle("DEV_CALLOUT", parent=styles["BodyText"], fontName=base_font, fontSize=9.2, leading=12, alignment=align, textColor=colors.HexColor("#113A63"))
+
+    story = [
+        Paragraph(_safe_para_text(f"Development Process Report: {project_name}"), h1),
+        Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", small),
+        Spacer(1, 6),
+    ]
+
+    project_rows = [
+        ["Project Name", str(project.get("Project Name", project_name) or project_name)],
+        ["Project Purpose", str(project.get("Project Purpose", "") or "-")],
+        ["Target", str(project.get("Target", "") or "-")],
+        ["Created At", str(project.get("Created At", "") or "-")],
+        ["Archived", str(project.get("Archived", "") or "False")],
+        ["Experiments", str(int(len(experiments)))],
+        ["Updates", str(int(len(updates)))],
+    ]
+    story.append(Paragraph("Project Summary", h2))
+    p_tbl = Table(project_rows, colWidths=[45 * mm, 130 * mm])
+    p_tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#A5C9E8")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#EEF5FF")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, -1), base_font),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+    story += [p_tbl, Spacer(1, 8)]
+
+    summary_parts = []
+    if str(project.get("Project Purpose", "")).strip():
+        summary_parts.append(f"<b>Project Purpose:</b> {_safe_para_text(_plain_text(project.get('Project Purpose', '')))}")
+    if str(project.get("Target", "")).strip():
+        summary_parts.append(f"<b>Target:</b> {_safe_para_text(_plain_text(project.get('Target', '')))}")
+    if summary_parts:
+        callout_tbl = Table([[Paragraph("<br/>".join(summary_parts), callout)]], colWidths=[175 * mm])
+        callout_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4FAFF")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#B7D7F2")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story += [callout_tbl, Spacer(1, 10)]
+
+    story.append(Paragraph("Experiments", h2))
+    if experiments.empty:
+        story.append(Paragraph("No experiments found for this project.", body))
+        story.append(Spacer(1, 6))
+    else:
+        overview_rows = [["Experiment", "Date", "Researcher", "Has Images", "Has Files"]]
+        for _, row in experiments.iterrows():
+            all_paths = []
+            for field in ["Result Images", "Result Docs", "Attachments"]:
+                if field in row.index:
+                    all_paths.extend(_parse_path_list(str(row.get(field, ""))))
+            has_images = "Yes" if any(_is_image_path(p) for p in all_paths) else "No"
+            has_files = "Yes" if all_paths else "No"
+            overview_rows.append([
+                str(row.get("Experiment Title", "") or "-"),
+                str(row.get("Date", "") or "-"),
+                str(row.get("Researcher", "") or "-"),
+                has_images,
+                has_files,
+            ])
+        story.append(_styled_table(overview_rows, header_font_size=8, body_font_size=8))
+        story.append(Spacer(1, 8))
+
+        for idx, row in experiments.iterrows():
+            exp_title = str(row.get("Experiment Title", "") or "-")
+            if idx > 0:
+                story.append(PageBreak())
+            story.append(Paragraph(_safe_para_text(exp_title), h3))
+            meta_rows = [
+                ["Date", str(row.get("Date", "") or "-")],
+                ["Researcher", str(row.get("Researcher", "") or "-")],
+                ["Is Drawing", str(row.get("Is Drawing", "") or "False")],
+                ["Draw CSV", str(row.get("Draw CSV", "") or "-")],
+                ["Drawing Details", str(row.get("Drawing Details", "") or "-")],
+            ]
+            meta_tbl = Table(meta_rows, colWidths=[34 * mm, 140 * mm])
+            meta_tbl.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#C4D6EA")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F7FBFF")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTNAME", (0, 0), (-1, -1), base_font),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ]))
+            story += [meta_tbl, Spacer(1, 4)]
+            rich_fields = []
+            for label, field in [
+                ("Purpose", "Purpose"),
+                ("Methods", "Methods"),
+                ("Observations", "Observations"),
+                ("Results", "Results"),
+                ("Markdown Notes", "Markdown Notes"),
+            ]:
+                value = _plain_text(row.get(field, ""))
+                if value:
+                    rich_fields.append((label, value))
+            if rich_fields:
+                for label, value in rich_fields:
+                    story.append(Paragraph(f"<b>{_safe_para_text(label)}:</b>", body))
+                    text_box = Table([[Paragraph(_safe_para_text(value), body)]], colWidths=[175 * mm])
+                    text_box.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FBFDFF")),
+                        ("BOX", (0, 0), (-1, -1), 0.35, colors.HexColor("#D5E4F2")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ]))
+                    story += [text_box, Spacer(1, 4)]
+
+            row_attachments = attachments[attachments["Experiment"].astype(str) == exp_title].copy() if not attachments.empty else pd.DataFrame()
+            if not row_attachments.empty:
+                story.append(Spacer(1, 2))
+                story.append(Paragraph("Files attached to this experiment", small))
+                for _, arow in row_attachments.iterrows():
+                    line = f"• {str(arow.get('File', '') or '-')} [{str(arow.get('Type', '') or '-')}]"
+                    cap = _plain_text(arow.get("Caption", ""))
+                    if cap:
+                        line += f" - {cap}"
+                    story.append(Paragraph(_safe_para_text(line), body))
+                story.append(Spacer(1, 4))
+
+            row_images = [img for img in images if img["experiment"] == exp_title]
+            if row_images:
+                story.append(Paragraph("Photos / result images", small))
+                for img in row_images[:3]:
+                    try:
+                        ir = ImageReader(img["path"])
+                        iw, ih = ir.getSize()
+                        max_w = 175 * mm
+                        max_h = 105 * mm
+                        scale = min(max_w / float(iw), max_h / float(ih))
+                        story.append(Paragraph(_safe_para_text(img["caption"]), small))
+                        story.append(Image(img["path"], width=iw * scale, height=ih * scale))
+                        story.append(Spacer(1, 6))
+                    except Exception:
+                        continue
+            story.append(Spacer(1, 6))
+
+    story.append(Paragraph("Experiment Updates", h2))
+    if updates.empty:
+        story.append(Paragraph("No updates found for this project.", body))
+        story.append(Spacer(1, 8))
+    else:
+        upd_show = updates[[c for c in ["Experiment Title", "Update Date", "Researcher", "Update Notes"] if c in updates.columns]].copy()
+        story.append(_styled_table(_df_for_pdf_table(upd_show, limit=200), header_font_size=7, body_font_size=7))
+        story.append(Spacer(1, 8))
+
+    story.append(Paragraph("Attachments + Files", h2))
+    if attachments.empty:
+        story.append(Paragraph("No attachments/files found for this project.", body))
+        story.append(Spacer(1, 8))
+    else:
+        grouped = {}
+        for _, row in attachments.iterrows():
+            grouped.setdefault(str(row.get("Experiment", "") or "-"), []).append(row.to_dict())
+        for exp_name, rows in grouped.items():
+            story.append(Paragraph(_safe_para_text(exp_name), h3))
+            for row in rows:
+                cap = _plain_text(row.get("Caption", ""))
+                line = f"• {str(row.get('File', '') or '-')} [{str(row.get('Type', '') or '-')}]"
+                if cap:
+                    line += f" - {cap}"
+                story.append(Paragraph(_safe_para_text(line), body))
+            story.append(Spacer(1, 4))
+        story.append(Spacer(1, 8))
+
+    doc.build(story)
+
+
+def _build_development_project_pdf_pil(out_pdf: str, project_name: str, data_dir: str) -> None:
+    from PIL import Image as PILImage, ImageDraw, ImageFont
+
+    bundle = _prepare_development_project_bundle(data_dir, project_name)
+    project = bundle["project"]
+    experiments = bundle["experiments"]
+    updates = bundle["updates"]
+    attachments = bundle["attachments"]
+    images = bundle["images"]
+
+    PAGE_W, PAGE_H = 1654, 2339
+    MARGIN = 90
+    CONTENT_W = PAGE_W - (2 * MARGIN)
+    BG = (248, 251, 255)
+    PANEL = (255, 255, 255)
+    BLUE = (17, 78, 134)
+    GREEN = (21, 98, 58)
+    TEXT = (20, 34, 52)
+    MUTED = (92, 113, 136)
+    BORDER = (185, 212, 235)
+
+    font_regular_path = _pick_pdf_unicode_font() or "/System/Library/Fonts/Supplemental/Arial.ttf"
+    font_bold_path = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+    if not os.path.exists(font_bold_path):
+        font_bold_path = font_regular_path
+
+    f_title = ImageFont.truetype(font_bold_path, 42)
+    f_h1 = ImageFont.truetype(font_bold_path, 30)
+    f_h2 = ImageFont.truetype(font_bold_path, 24)
+    f_body = ImageFont.truetype(font_regular_path, 20)
+    f_small = ImageFont.truetype(font_regular_path, 16)
+
+    def rtl_fix(text: str) -> str:
+        s = str(text or "")
+        return s[::-1] if _looks_hebrew(s) else s
+
+    def measure(font, text: str) -> int:
+        box = font.getbbox(text or " ")
+        return box[2] - box[0]
+
+    def wrap_text(text: str, font, max_width: int) -> list[str]:
+        raw = _plain_text(text)
+        if not raw:
+            return []
+        lines = []
+        for para in raw.split("\n"):
+            para = para.strip()
+            if not para:
+                lines.append("")
+                continue
+            words = para.split()
+            cur = ""
+            for word in words:
+                trial = word if not cur else f"{cur} {word}"
+                if measure(font, rtl_fix(trial)) <= max_width:
+                    cur = trial
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = word
+            if cur:
+                lines.append(cur)
+        return lines
+
+    pages = []
+    page = PILImage.new("RGB", (PAGE_W, PAGE_H), BG)
+    draw = ImageDraw.Draw(page)
+    y = MARGIN
+
+    def new_page():
+        nonlocal page, draw, y
+        pages.append(page)
+        page = PILImage.new("RGB", (PAGE_W, PAGE_H), BG)
+        draw = ImageDraw.Draw(page)
+        y = MARGIN
+
+    def ensure_space(height_needed: int):
+        nonlocal y
+        if y + height_needed > PAGE_H - MARGIN:
+            new_page()
+
+    def draw_text_block(text: str, font, fill, *, header=False, max_width=CONTENT_W):
+        nonlocal y
+        lines = wrap_text(text, font, max_width)
+        if not lines:
+            return
+        line_h = font.getbbox("Ag")[3] - font.getbbox("Ag")[1] + 8
+        ensure_space(len(lines) * line_h + 12)
+        for line in lines:
+            shown = rtl_fix(line)
+            if _looks_hebrew(line):
+                w = measure(font, shown)
+                draw.text((PAGE_W - MARGIN - w, y), shown, font=font, fill=fill)
+            else:
+                draw.text((MARGIN, y), shown, font=font, fill=fill)
+            y += line_h
+        y += 6 if header else 2
+
+    def draw_panel(title: str, rows: list[tuple[str, str]]):
+        nonlocal y
+        row_h = 34
+        height = 56 + (len(rows) * row_h)
+        ensure_space(height + 10)
+        draw.rounded_rectangle((MARGIN, y, PAGE_W - MARGIN, y + height), radius=18, fill=PANEL, outline=BORDER, width=2)
+        draw.text((MARGIN + 18, y + 14), title, font=f_h2, fill=BLUE)
+        yy = y + 54
+        for k, v in rows:
+            draw.text((MARGIN + 20, yy), f"{k}:", font=f_small, fill=MUTED)
+            vv = rtl_fix(v)
+            if _looks_hebrew(v):
+                w = measure(f_body, vv)
+                draw.text((PAGE_W - MARGIN - 20 - w, yy), vv, font=f_body, fill=TEXT)
+            else:
+                draw.text((MARGIN + 240, yy), vv, font=f_body, fill=TEXT)
+            yy += row_h
+        y += height + 16
+
+    def draw_bullets(title: str, items: list[str]):
+        nonlocal y
+        if not items:
+            return
+        draw_text_block(title, f_h2, BLUE, header=True)
+        for item in items:
+            line = f"• {item}"
+            draw_text_block(line, f_body, TEXT, max_width=CONTENT_W - 20)
+
+    def draw_image(path: str, caption: str):
+        nonlocal y
+        if not os.path.exists(path):
+            return
+        try:
+            img = PILImage.open(path).convert("RGB")
+        except Exception:
+            return
+        max_w = CONTENT_W
+        max_h = 620
+        scale = min(max_w / img.width, max_h / img.height)
+        nw, nh = int(img.width * scale), int(img.height * scale)
+        ensure_space(nh + 70)
+        img = img.resize((nw, nh))
+        draw_text_block(caption, f_small, MUTED, max_width=CONTENT_W)
+        page.paste(img, (MARGIN, y))
+        y += nh + 18
+
+    draw_text_block(f"Development Process Report", f_title, BLUE, header=True)
+    draw_text_block(project_name, f_h1, GREEN, header=True)
+    draw_text_block(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", f_small, MUTED)
+    draw_panel(
+        "Project Summary",
+        [
+            ("Project Name", str(project.get("Project Name", project_name) or project_name)),
+            ("Project Purpose", str(project.get("Project Purpose", "") or "-")),
+            ("Target", str(project.get("Target", "") or "-")),
+            ("Created At", str(project.get("Created At", "") or "-")),
+            ("Experiments", str(int(len(experiments)))),
+            ("Updates", str(int(len(updates)))),
+        ],
+    )
+
+    if not experiments.empty:
+        for idx, row in experiments.iterrows():
+            if idx > 0:
+                new_page()
+            exp_title = str(row.get("Experiment Title", "") or "-")
+            draw_text_block("Experiment", f_h2, BLUE, header=True)
+            draw_text_block(exp_title, f_h1, GREEN, header=True)
+            draw_panel(
+                "Experiment Meta",
+                [
+                    ("Date", str(row.get("Date", "") or "-")),
+                    ("Researcher", str(row.get("Researcher", "") or "-")),
+                    ("Is Drawing", str(row.get("Is Drawing", "") or "False")),
+                    ("Draw CSV", str(row.get("Draw CSV", "") or "-")),
+                ],
+            )
+
+            for label, field in [
+                ("Purpose", "Purpose"),
+                ("Methods", "Methods"),
+                ("Observations", "Observations"),
+                ("Results", "Results"),
+                ("Markdown Notes", "Markdown Notes"),
+            ]:
+                value = _plain_text(row.get(field, ""))
+                if value:
+                    draw_text_block(label, f_h2, BLUE, header=True)
+                    draw_text_block(value, f_body, TEXT)
+
+            exp_name = str(row.get("Experiment Title", "") or "-")
+            row_attach = attachments[attachments["Experiment"].astype(str) == exp_name].copy() if not attachments.empty else pd.DataFrame()
+            if not row_attach.empty:
+                items = []
+                for _, arow in row_attach.iterrows():
+                    cap = _plain_text(arow.get("Caption", ""))
+                    item = f"{str(arow.get('File', '') or '-')} [{str(arow.get('Type', '') or '-')}]"
+                    if cap:
+                        item += f" - {cap}"
+                    items.append(item)
+                draw_bullets("Files", items)
+
+            row_images = [img for img in images if img["experiment"] == exp_name]
+            for img in row_images[:2]:
+                draw_image(img["path"], img["caption"] or os.path.basename(img["path"]))
+
+    if not updates.empty:
+        new_page()
+        draw_text_block("Experiment Updates", f_h1, BLUE, header=True)
+        for _, row in updates.iterrows():
+            title = f"{str(row.get('Experiment Title', '') or '-') } | {str(row.get('Update Date', '') or '-')}"
+            note = _plain_text(row.get("Update Notes", ""))
+            draw_text_block(title, f_h2, GREEN, header=True)
+            if str(row.get("Researcher", "")).strip():
+                draw_text_block(f"Researcher: {row.get('Researcher')}", f_small, MUTED)
+            if note:
+                draw_text_block(note, f_body, TEXT)
+            y += 10
+
+    pages.append(page)
+    first, rest = pages[0], pages[1:]
+    first.save(out_pdf, "PDF", resolution=150.0, save_all=True, append_images=rest)
+
+
+def _build_development_project_markdown(out_md: str, project_name: str, data_dir: str) -> None:
+    bundle = _prepare_development_project_bundle(data_dir, project_name)
+    project = bundle["project"]
+    experiments = bundle["experiments"]
+    updates = bundle["updates"]
+    attachments = bundle["attachments"]
+    images = bundle["images"]
+
+    lines: list[str] = []
+    lines.append(f"# Development Process Report: {project_name}")
+    lines.append("")
+    lines.append(f"Generated: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`")
+    lines.append("")
+    lines.append("> Structured project report from Development Process records, updates, notes, and attached media.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Project Summary")
+    lines.append("")
+    lines.append(f"- Project Name: `{project.get('Project Name', project_name) or project_name}`")
+    lines.append(f"- Project Purpose: {_plain_text(project.get('Project Purpose', '-')) or '-'}")
+    lines.append(f"- Target: {_plain_text(project.get('Target', '-')) or '-'}")
+    lines.append(f"- Created At: `{_plain_text(project.get('Created At', '-')) or '-'}`")
+    lines.append(f"- Archived: `{_plain_text(project.get('Archived', 'False')) or '-'}`")
+    lines.append(f"- Experiments Count: `{len(experiments)}`")
+    lines.append(f"- Updates Count: `{len(updates)}`")
+    lines.append("")
+
+    if experiments.empty:
+        lines.append("## Experiments")
+        lines.append("")
+        lines.append("No experiments found for this project.")
+        lines.append("")
+    else:
+        lines.append("## Experiments Overview")
+        lines.append("")
+        lines.append("| Experiment | Date | Researcher | Is Drawing | Draw CSV |")
+        lines.append("|---|---|---|---|---|")
+        for _, row in experiments.iterrows():
+            lines.append(
+                f"| {_plain_text(row.get('Experiment Title', '-')) or '-'} | `{_plain_text(row.get('Date', '-')) or '-'}` | {_plain_text(row.get('Researcher', '-')) or '-'} | `{_plain_text(row.get('Is Drawing', '-')) or '-'}` | {_plain_text(row.get('Draw CSV', '-')) or '-'} |"
+            )
+        lines.append("")
+
+        for idx, row in experiments.iterrows():
+            exp_title = _plain_text(row.get("Experiment Title", f"Experiment {idx + 1}")) or f"Experiment {idx + 1}"
+            lines.append("---")
+            lines.append("")
+            lines.append(f"## Experiment {idx + 1}: {exp_title}")
+            lines.append("")
+            lines.append("> This section groups the experiment identity, notes, images, and supporting files in one place.")
+            lines.append("")
+            lines.append(f"- Date: `{_plain_text(row.get('Date', '-')) or '-'}`")
+            lines.append(f"- Researcher: {_plain_text(row.get('Researcher', '-')) or '-'}")
+            lines.append(f"- Is Drawing: `{_plain_text(row.get('Is Drawing', '-')) or '-'}`")
+            lines.append(f"- Draw CSV: {_plain_text(row.get('Draw CSV', '-')) or '-'}")
+            lines.append(f"- Drawing Details: {_plain_text(row.get('Drawing Details', '-')) or '-'}")
+            lines.append("")
+            for label, field in [
+                ("Purpose", "Purpose"),
+                ("Methods", "Methods"),
+                ("Observations", "Observations"),
+                ("Results", "Results"),
+                ("Markdown Notes", "Markdown Notes"),
+            ]:
+                value = _plain_text(row.get(field, ""))
+                if value and value != "-":
+                    lines.append(f"### {label}")
+                    lines.append("")
+                    lines.append(value)
+                    lines.append("")
+
+            row_images = [img for img in images if img["experiment"] == exp_title]
+            if row_images:
+                lines.append("### Images")
+                lines.append("")
+                for img in row_images:
+                    cap = _plain_text(img.get("caption", "")) or os.path.basename(img["path"])
+                    lines.append(f"#### {cap}")
+                    lines.append("")
+                    lines.append(f"![{cap}]({img['path']})")
+                    lines.append("")
+
+            row_attachments = attachments[attachments["Experiment"].astype(str) == exp_title].copy() if not attachments.empty else pd.DataFrame()
+            if not row_attachments.empty:
+                lines.append("### Files")
+                lines.append("")
+                for _, arow in row_attachments.iterrows():
+                    file_name = _plain_text(arow.get("File", "")) or "-"
+                    cap = _plain_text(arow.get("Caption", ""))
+                    label = f"{file_name} - {cap}" if cap and cap != "-" else file_name
+                    path = arow.get("Path", "")
+                    abs_path = path if os.path.isabs(str(path)) else os.path.join(data_dir, str(path))
+                    lines.append(f"- [{label}]({abs_path})")
+                lines.append("")
+
+    lines.append("## Experiment Updates")
+    lines.append("")
+    if updates.empty:
+        lines.append("No updates found for this project.")
+        lines.append("")
+    else:
+        updates = updates.sort_values("Update Date", kind="stable")
+        for _, row in updates.iterrows():
+            lines.append(f"### {_plain_text(row.get('Experiment Title', '-')) or '-'}")
+            lines.append("")
+            lines.append(f"- Update Date: `{_plain_text(row.get('Update Date', '-')) or '-'}`")
+            lines.append(f"- Researcher: {_plain_text(row.get('Researcher', '-')) or '-'}")
+            lines.append("")
+            lines.append(_plain_text(row.get("Update Notes", "-")) or "-")
+            lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("## End of Report")
+    lines.append("")
+    lines.append(f"- Project: `{project_name}`")
+    lines.append(f"- Generated by: `Report Center / Development Process Markdown`")
+    lines.append("")
+
+    with open(out_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).strip() + "\n")
 
 
 def _styled_table(table_data: list[list[str]], *, header_bg: str = "#EDF5FF", header_font_size: int = 8, body_font_size: int = 8):
@@ -576,6 +1284,67 @@ def render_report_center_tab(P) -> None:
     )
     st.markdown('<div class="dash-title">🗂️ Report Center</div>', unsafe_allow_html=True)
     st.caption("Build custom PDF reports with operations-focused data for team handover.")
+
+    st.markdown("---")
+    st.markdown("### 🧪 Development Process Report")
+    st.caption("Choose a development project and build a clean PDF with project summary, experiments, updates, notes, and photos/files.")
+
+    dev_projects_fp = os.path.join(P.data_dir, "development_projects.csv")
+    dev_projects = _read_csv_safe(dev_projects_fp)
+    project_options = []
+    if not dev_projects.empty and "Project Name" in dev_projects.columns:
+        project_options = sorted([str(x).strip() for x in dev_projects["Project Name"].dropna().tolist() if str(x).strip()])
+
+    d1, d2 = st.columns([2, 1])
+    selected_dev_project = d1.selectbox(
+        "Choose development project",
+        [""] + project_options,
+        key="report_center_dev_project",
+        format_func=lambda x: "Select project..." if x == "" else x,
+    )
+    dev_pdf_name = d2.text_input(
+        "Report filename",
+        value=f"development_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+        key="report_center_dev_pdf_name",
+    )
+
+    if selected_dev_project:
+        bundle = _prepare_development_project_bundle(P.data_dir, selected_dev_project)
+        dc1, dc2, dc3 = st.columns(3)
+        dc1.metric("Experiments", int(len(bundle["experiments"])))
+        dc2.metric("Updates", int(len(bundle["updates"])))
+        dc3.metric("Image/files rows", int(len(bundle["attachments"])))
+
+        with st.expander("Preview project content", expanded=False):
+            proj = bundle["project"]
+            if proj:
+                st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', '-')}")
+                st.markdown(f"**Target:** {proj.get('Target', '-')}")
+            if not bundle["experiments"].empty:
+                exp_prev = bundle["experiments"][[c for c in ["Experiment Title", "Date", "Researcher", "Purpose"] if c in bundle["experiments"].columns]]
+                st.dataframe(exp_prev, use_container_width=True, hide_index=True)
+            if not bundle["attachments"].empty:
+                att_prev = bundle["attachments"][[c for c in ["Experiment", "File", "Type", "Caption"] if c in bundle["attachments"].columns]]
+                st.dataframe(att_prev, use_container_width=True, hide_index=True)
+
+    if st.button("Generate Development Process Markdown", key="report_center_generate_dev_md", use_container_width=True):
+        if not selected_dev_project:
+            st.warning("Choose a development project first.")
+            return
+        base_name = (dev_pdf_name.strip() or f"development_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+        if not base_name.lower().endswith(".md"):
+            base_name += ".md"
+        out_md = report_center_path(base_name)
+        with st.spinner("Building development process markdown..."):
+            try:
+                _build_development_project_markdown(
+                    out_md=out_md,
+                    project_name=selected_dev_project,
+                    data_dir=P.data_dir,
+                )
+                st.success(f"Development markdown saved: {out_md}")
+            except Exception as e:
+                st.error(f"Failed to build development markdown: {e}")
 
     if "report_center_start" not in st.session_state:
         st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
