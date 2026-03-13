@@ -27,6 +27,7 @@ SECTIONS = [
     "Parts Orders Status",
     "Schedule: Past Week + Next Week",
     "Maintenance + Faults",
+    "Maintenance Tests + Measurements",
     "Consumables Snapshot",
 ]
 
@@ -194,6 +195,51 @@ def _prepare_parts_orders(parts_orders_csv_path: str) -> tuple[pd.DataFrame, pd.
     return counts, df
 
 
+def _prepare_maintenance_tests(maintenance_dir: str, start_dt: pd.Timestamp, end_dt: pd.Timestamp) -> pd.DataFrame:
+    fp = os.path.join(maintenance_dir, "maintenance_test_records.csv")
+    df = _read_csv_safe(fp)
+    if df.empty:
+        return df
+    for c in [
+        "test_ts",
+        "task_id",
+        "component",
+        "task",
+        "test_preset",
+        "result_mode",
+        "condition_met",
+        "auto_threshold_met",
+        "threshold_hits",
+        "values_json",
+        "condition_text",
+        "action_text",
+        "notes",
+        "actor",
+    ]:
+        if c not in df.columns:
+            df[c] = ""
+    df["_ts"] = df["test_ts"].apply(_parse_dt_robust)
+    mask = df["_ts"].notna() & (df["_ts"] >= start_dt) & (df["_ts"] <= end_dt)
+    out = df.loc[mask].copy()
+    if out.empty:
+        return out
+    out["values_summary"] = out["values_json"].astype(str).str.slice(0, 160)
+    cols = [
+        "test_ts",
+        "component",
+        "task_id",
+        "test_preset",
+        "result_mode",
+        "condition_met",
+        "auto_threshold_met",
+        "threshold_hits",
+        "values_summary",
+        "notes",
+        "actor",
+    ]
+    return out[[c for c in cols if c in out.columns]].copy()
+
+
 def _build_custom_pdf(
     out_pdf: str,
     title: str,
@@ -204,6 +250,7 @@ def _build_custom_pdf(
     parts_orders_csv_path: str,
     schedule_csv_path: str,
     preforms_csv_path: str,
+    maintenance_dir: str,
 ) -> None:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -218,6 +265,7 @@ def _build_custom_pdf(
     faults = _build_fault_summary(start_dt, end_dt)
     containers = _latest_containers_snapshot()
     preforms = _read_csv_safe(preforms_csv_path)
+    maint_tests = _prepare_maintenance_tests(maintenance_dir, start_dt, end_dt)
     past_sched, next_sched = _prepare_schedule_windows(schedule_csv_path)
     parts_counts, parts_rows = _prepare_parts_orders(parts_orders_csv_path)
 
@@ -450,6 +498,23 @@ def _build_custom_pdf(
         fa_tbl = _styled_table(_df_for_pdf_table(faults.fault_actions_rows, limit=18))
         story += [fa_tbl, Spacer(1, 8)]
 
+    if "Maintenance Tests + Measurements" in sections:
+        story.append(Paragraph("Maintenance Tests + Measurements", h2))
+        summary_rows = [
+            ["Saved test records", str(int(len(maint_tests)))],
+            ["Condition met", str(int(maint_tests["condition_met"].astype(str).str.strip().str.lower().eq("yes").sum()) if not maint_tests.empty else 0)],
+            ["Auto threshold hit", str(int(maint_tests["auto_threshold_met"].astype(str).str.strip().str.lower().eq("yes").sum()) if not maint_tests.empty else 0)],
+        ]
+        mt_tbl = Table(summary_rows, colWidths=[80 * mm, 44 * mm])
+        mt_tbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#A5C9E8")),
+            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, colors.HexColor("#F7FBFF")]),
+        ]))
+        story += [mt_tbl, Spacer(1, 5)]
+        story.append(Paragraph("Recorded maintenance measurements/tests in selected period", body))
+        mt_rows_tbl = _styled_table(_df_for_pdf_table(maint_tests, limit=24))
+        story += [mt_rows_tbl, Spacer(1, 8)]
+
     if "Consumables Snapshot" in sections:
         story.append(Paragraph("Consumables Snapshot", h2))
         c_tbl = _styled_table(_df_for_pdf_table(containers, limit=1))
@@ -567,6 +632,7 @@ def render_report_center_tab(P) -> None:
                     parts_orders_csv_path=P.parts_orders_csv,
                     schedule_csv_path=P.schedule_csv,
                     preforms_csv_path=P.preform_inventory_csv,
+                    maintenance_dir=P.maintenance_dir,
                 )
                 st.success(f"Report saved: {out_pdf}")
             except Exception as e:

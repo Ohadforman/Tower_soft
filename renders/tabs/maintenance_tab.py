@@ -906,6 +906,9 @@ def render_maintenance_tab(P):
     MAINT_WAIT_PARTS_CSV = os.path.join(MAINT_FOLDER, "maintenance_wait_parts_log.csv")
     MAINT_TASK_STATE_CSV = os.path.join(MAINT_FOLDER, "maintenance_task_state.csv")
     MAINT_RESERVATIONS_CSV = os.path.join(MAINT_FOLDER, "maintenance_parts_reservations.csv")
+    MAINT_CONDITIONS_LOG_CSV = os.path.join(MAINT_FOLDER, "maintenance_conditions_log.csv")
+    MAINT_TEST_RECORDS_CSV = os.path.join(MAINT_FOLDER, "maintenance_test_records.csv")
+    MAINT_TEST_PRESETS_JSON = os.path.join(MAINT_FOLDER, "maintenance_test_presets.json")
     FAULTS_CSV = os.path.join(MAINT_FOLDER, "faults_log.csv")
     FAULTS_ACTIONS_CSV = os.path.join(MAINT_FOLDER, "faults_actions_log.csv")
     PARTS_ORDERS_CSV = P.parts_orders_csv
@@ -1230,6 +1233,18 @@ def render_maintenance_tab(P):
         "manual page": "Page",
         "procedure summary": "Procedure_Summary",
         "safety/notes": "Notes",
+        "test fields": "Test_Fields",
+        "test inputs": "Test_Fields",
+        "monitor fields": "Test_Fields",
+        "test preset": "Test_Preset",
+        "monitor preset": "Test_Preset",
+        "test thresholds": "Test_Thresholds",
+        "threshold rules": "Test_Thresholds",
+        "condition text": "Test_Condition",
+        "condition trigger": "Test_Condition",
+        "if condition": "Test_Condition",
+        "condition action": "Test_Action",
+        "if met do": "Test_Action",
         "owner": "Owner",
         "last done date": "Last_Done_Date",
         "last done hours": "Last_Done_Hours",
@@ -1248,7 +1263,7 @@ def render_maintenance_tab(P):
         "Due_Threshold_Days",
         "Last_Done_Date", "Last_Done_Hours", "Last_Done_Draw",
         "Manual_Name", "Page", "Document",
-        "Procedure_Summary", "Notes", "Owner",
+        "Procedure_Summary", "Notes", "Test_Preset", "Test_Fields", "Test_Thresholds", "Test_Condition", "Test_Action", "Owner",
         "Hours_Source", "Calendar_Rule",
         "Trigger_Modes", "Trigger_Hours_Source", "Trigger_Hours_Interval",
         "Trigger_Draws_Interval", "Trigger_Calendar_Value", "Trigger_Calendar_Unit",
@@ -1273,6 +1288,134 @@ def render_maintenance_tab(P):
             df.to_csv(path, index=False)
         else:
             df.to_excel(path, index=False)
+
+    def default_maintenance_test_presets() -> dict:
+        return {
+            "Furnace Heating Element Voltage Trend": {
+                "fields": "Voltage (V); Current (A); Temperature (degC)",
+                "thresholds": [
+                    {"Field": "Voltage (V)", "Rule": ">", "Value": "2.0", "Trigger Label": "Voltage drift above expected baseline"},
+                ],
+                "condition": "If voltage trend increases above normal baseline, investigate element aging / replacement.",
+                "action": "Set PREP_NEEDED and schedule replacement/inspection.",
+            },
+            "Pyrometer Alignment + Window Cleanliness": {
+                "fields": "Window cleanliness score; Alignment note; Furnace temp stability note",
+                "thresholds": [
+                    {"Field": "Window cleanliness score", "Rule": "<", "Value": "7", "Trigger Label": "Pyrometer window needs cleaning"},
+                ],
+                "condition": "If pyrometer alignment drifts or the window is dirty, clean and re-check before running.",
+                "action": "Set PREP_NEEDED and inspect pyrometer alignment/window.",
+            },
+            "Storage Vacuum Rise": {
+                "fields": "Vacuum (bar); Pressure Rise (bar); Leak note",
+                "thresholds": [
+                    {"Field": "Pressure Rise (bar)", "Rule": ">", "Value": "0.03", "Trigger Label": "Vacuum rise indicates purge/leak maintenance"},
+                ],
+                "condition": "If storage vacuum rises above the allowed limit, trigger purge / leak maintenance.",
+                "action": "Set PREP_NEEDED and schedule purge/leak check.",
+            },
+            "Clean-Air Velocity": {
+                "fields": "Airflow (m/s); Intake Temp (degC); Fibre position note",
+                "thresholds": [
+                    {"Field": "Airflow (m/s)", "Rule": "<", "Value": "0.25", "Trigger Label": "Airflow too low"},
+                    {"Field": "Airflow (m/s)", "Rule": ">", "Value": "0.50", "Trigger Label": "Airflow too high"},
+                ],
+                "condition": "If clean-air velocity is outside the allowed window, correct airflow and inspect filters.",
+                "action": "Set PREP_NEEDED and schedule airflow/filter maintenance.",
+            },
+            "Interlocks Test": {
+                "fields": "Water flow interlock; Gas flow interlock; Alarm note",
+                "thresholds": [
+                    {"Field": "Water flow interlock", "Rule": "!=", "Value": "PASS", "Trigger Label": "Water interlock failed"},
+                    {"Field": "Gas flow interlock", "Rule": "!=", "Value": "PASS", "Trigger Label": "Gas interlock failed"},
+                ],
+                "condition": "If any furnace water/gas interlock fails, maintenance must be triggered before operation.",
+                "action": "Set PREP_NEEDED and block operation until interlock issue is resolved.",
+            },
+            "X-Y Alignment": {
+                "fields": "X offset (mm); Y offset (mm); Fibre position note",
+                "thresholds": [
+                    {"Field": "X offset (mm)", "Rule": ">", "Value": "0.5", "Trigger Label": "X offset too large"},
+                    {"Field": "Y offset (mm)", "Rule": ">", "Value": "0.5", "Trigger Label": "Y offset too large"},
+                ],
+                "condition": "If X/Y offset grows beyond alignment tolerance, launch alignment maintenance.",
+                "action": "Set PREP_NEEDED and schedule alignment correction.",
+            },
+            "Fibre Position Centering": {
+                "fields": "Fibre position note; Window center error (mm); Line speed note",
+                "thresholds": [
+                    {"Field": "Window center error (mm)", "Rule": ">", "Value": "0.5", "Trigger Label": "Fibre moved too close to measurement window edge"},
+                ],
+                "condition": "If fibre position drifts from center when clean-air starts, correct airflow and alignment before running.",
+                "action": "Set PREP_NEEDED and inspect fibre position / airflow settings.",
+            },
+            "Tension Gauge Calibration": {
+                "fields": "Tare error; Span error; Calibration note",
+                "thresholds": [
+                    {"Field": "Tare error", "Rule": ">", "Value": "0.2", "Trigger Label": "Tare error above tolerance"},
+                    {"Field": "Span error", "Rule": ">", "Value": "0.2", "Trigger Label": "Span error above tolerance"},
+                ],
+                "condition": "If the tension gauge will not calibrate or drifts outside tolerance, trigger calibration service / replacement path.",
+                "action": "Set PREP_NEEDED and inspect/return load cell as required.",
+            },
+            "Bearing Play + Rotation": {
+                "fields": "Bearing play (mm); Rotation feel; Cleanliness note",
+                "thresholds": [
+                    {"Field": "Bearing play (mm)", "Rule": ">", "Value": "0.2", "Trigger Label": "Bearing play above tolerance"},
+                    {"Field": "Rotation feel", "Rule": "contains", "Value": "rough", "Trigger Label": "Rotation feels rough"},
+                ],
+                "condition": "If pulley rotation is rough or bearing play is significant, launch bearing maintenance.",
+                "action": "Set PREP_NEEDED and schedule pulley/bearing maintenance.",
+            },
+            "Top Cap Erosion": {
+                "fields": "Top cap length reduction (mm); Erosion note; Fibre strength note",
+                "thresholds": [
+                    {"Field": "Top cap length reduction (mm)", "Rule": ">", "Value": "3", "Trigger Label": "Top cap erosion exceeds 3 mm"},
+                ],
+                "condition": "If bottom sleeve top cap erosion exceeds the allowed range, replace it.",
+                "action": "Set PREP_NEEDED and schedule top cap replacement.",
+            },
+            "Bottom Door Distortion": {
+                "fields": "Door distortion note; Gas curtain note; Fibre contact note",
+                "thresholds": [
+                    {"Field": "Door distortion note", "Rule": "contains", "Value": "damage", "Trigger Label": "Bottom door damaged/distorted"},
+                ],
+                "condition": "If bottom door distortion or damage is found, replace before further running.",
+                "action": "Set PREP_NEEDED and schedule bottom door replacement.",
+            },
+        }
+
+    def load_maintenance_test_presets() -> dict:
+        presets = default_maintenance_test_presets()
+        if os.path.exists(MAINT_TEST_PRESETS_JSON):
+            try:
+                with open(MAINT_TEST_PRESETS_JSON, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    clean = {}
+                    for name, payload in raw.items():
+                        if not isinstance(payload, dict):
+                            continue
+                        clean[safe_str(name).strip() or "Custom"] = {
+                            "fields": safe_str(payload.get("fields", "")).strip(),
+                            "thresholds": payload.get("thresholds", []) if isinstance(payload.get("thresholds", []), list) else [],
+                            "condition": safe_str(payload.get("condition", "")).strip(),
+                            "action": safe_str(payload.get("action", "")).strip(),
+                        }
+                    presets.update(clean)
+            except Exception:
+                pass
+        presets.setdefault("Custom", {"fields": "", "thresholds": [], "condition": "", "action": ""})
+        return presets
+
+    def save_maintenance_test_presets(presets: dict) -> bool:
+        try:
+            with open(MAINT_TEST_PRESETS_JSON, "w", encoding="utf-8") as f:
+                json.dump(presets, f, ensure_ascii=True, indent=2)
+            return True
+        except Exception:
+            return False
     
     def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -1817,38 +1960,55 @@ def render_maintenance_tab(P):
         blocked_parts_n = int(st_map.eq("BLOCKED_PARTS").sum())
         prep_ready_n = int(st_map.eq("PREP_READY").sum())
 
-        res_df = pd.DataFrame()
-        if os.path.exists(MAINT_RESERVATIONS_CSV):
-            try:
-                res_df = pd.read_csv(MAINT_RESERVATIONS_CSV, keep_default_na=False)
-            except Exception:
-                res_df = pd.DataFrame()
-        if "state" not in res_df.columns:
-            res_df["state"] = ""
-        if "qty" not in res_df.columns:
-            res_df["qty"] = 0.0
-        res_act = res_df[res_df["state"].astype(str).str.upper().eq("ACTIVE")].copy()
-        reserved_rows_n = int(len(res_act))
-        reserved_qty = float(pd.to_numeric(res_act["qty"], errors="coerce").fillna(0.0).sum())
-
-        pkg_path = os.path.join(MAINT_FOLDER, "maintenance_work_packages.csv")
-        pkg_count = 0
-        if os.path.exists(pkg_path):
-            try:
-                pkg_count = int(len(pd.read_csv(pkg_path, keep_default_na=False)))
-            except Exception:
-                pkg_count = 0
-        pkg_cov = 0.0
-        if len(dfm) > 0:
-            pkg_cov = round((float(pkg_count) / float(len(dfm))) * 100.0, 1)
-
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1, k2, k3 = st.columns(3)
         k1.metric("In Progress", in_progress_n)
         k2.metric("Blocked (Parts)", blocked_parts_n)
         k3.metric("Prep Ready", prep_ready_n)
-        k4.metric("Reserved Rows", reserved_rows_n)
-        k5.metric("Reserved Qty", f"{reserved_qty:.1f}")
-        k6.metric("Pkg Coverage", f"{pkg_cov:.1f}%")
+
+    def render_maintenance_test_monitor():
+        cols = [
+            "test_ts",
+            "task_id",
+            "component",
+            "task",
+            "test_preset",
+            "result_mode",
+            "condition_met",
+            "auto_threshold_met",
+            "threshold_hits",
+            "values_json",
+            "condition_text",
+            "action_text",
+            "notes",
+            "actor",
+        ]
+        tests_df = _read_csv_safe(MAINT_TEST_RECORDS_CSV, cols)
+        if tests_df.empty:
+            st.caption("No maintenance test records yet.")
+            return
+        tests_df["test_ts"] = pd.to_datetime(tests_df["test_ts"], errors="coerce")
+        tests_df = tests_df.dropna(subset=["test_ts"]).copy()
+        if tests_df.empty:
+            st.caption("No valid maintenance test timestamps found.")
+            return
+        recent_df = tests_df.sort_values("test_ts", ascending=False).copy()
+        last_7 = recent_df[recent_df["test_ts"] >= (pd.Timestamp.now().tz_localize(None) - pd.Timedelta(days=7))].copy()
+        hit_mask = recent_df["auto_threshold_met"].astype(str).str.strip().str.lower().eq("yes")
+        fail_mask = recent_df["condition_met"].astype(str).str.strip().str.lower().eq("yes")
+
+        st.markdown("#### 🧪 Test Monitor")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Saved tests (7d)", int(len(last_7)))
+        m2.metric("Threshold hits (7d)", int(last_7["auto_threshold_met"].astype(str).str.strip().str.lower().eq("yes").sum()) if not last_7.empty else 0)
+        m3.metric("Condition met (7d)", int(last_7["condition_met"].astype(str).str.strip().str.lower().eq("yes").sum()) if not last_7.empty else 0)
+
+        focus_df = recent_df[hit_mask | fail_mask].copy()
+        if focus_df.empty:
+            st.caption("No recent failed/triggered maintenance tests.")
+            return
+        focus_df["When"] = focus_df["test_ts"].dt.strftime("%Y-%m-%d %H:%M")
+        view_cols = [c for c in ["When", "component", "task_id", "test_preset", "threshold_hits", "notes", "actor"] if c in focus_df.columns]
+        st.dataframe(focus_df[view_cols].head(12), use_container_width=True, hide_index=True, height=min(340, 80 + 34 * len(focus_df.head(12))))
 
         st.session_state.setdefault("maint_dash_focus", "")
         b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -2649,6 +2809,266 @@ def render_maintenance_tab(P):
                 )
             else:
                 st.caption("Manual context hidden for faster execution. Toggle on when needed.")
+
+            test_fields_raw = safe_str(rr.get("Test_Fields", "")).strip()
+            test_preset_raw = safe_str(rr.get("Test_Preset", "")).strip()
+            test_thresholds_raw = safe_str(rr.get("Test_Thresholds", "")).strip()
+            test_condition_raw = safe_str(rr.get("Test_Condition", "")).strip()
+            test_action_raw = safe_str(rr.get("Test_Action", "")).strip()
+
+            def _parse_test_fields(text: str):
+                out = []
+                for token in safe_str(text).replace("\n", ";").split(";"):
+                    lbl = token.strip()
+                    if lbl:
+                        out.append(lbl)
+                uniq = []
+                seen = set()
+                for lbl in out:
+                    lk = lbl.lower()
+                    if lk not in seen:
+                        uniq.append(lbl)
+                        seen.add(lk)
+                return uniq
+
+            test_fields = _parse_test_fields(test_fields_raw)
+            def _parse_exec_threshold_rows(text: str):
+                raw = safe_str(text).strip()
+                if not raw:
+                    return []
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    return []
+                out = []
+                if isinstance(data, list):
+                    for row in data:
+                        if not isinstance(row, dict):
+                            continue
+                        out.append(
+                            {
+                                "Field": safe_str(row.get("Field", "")).strip(),
+                                "Rule": safe_str(row.get("Rule", "")).strip(),
+                                "Value": safe_str(row.get("Value", "")).strip(),
+                                "Trigger Label": safe_str(row.get("Trigger Label", "")).strip(),
+                            }
+                        )
+                return out
+
+            def _threshold_hit(rule_row: dict, values_map: dict):
+                field = safe_str(rule_row.get("Field", "")).strip()
+                rule = safe_str(rule_row.get("Rule", "")).strip()
+                expect = safe_str(rule_row.get("Value", "")).strip()
+                actual = safe_str(values_map.get(field, "")).strip()
+                if not field or not rule:
+                    return False, ""
+                if rule == "contains":
+                    ok = expect.lower() in actual.lower() if actual and expect else False
+                else:
+                    try:
+                        actual_num = float(actual)
+                        expect_num = float(expect)
+                        if rule == ">":
+                            ok = actual_num > expect_num
+                        elif rule == ">=":
+                            ok = actual_num >= expect_num
+                        elif rule == "<":
+                            ok = actual_num < expect_num
+                        elif rule == "<=":
+                            ok = actual_num <= expect_num
+                        elif rule == "=":
+                            ok = actual_num == expect_num
+                        elif rule == "!=":
+                            ok = actual_num != expect_num
+                        else:
+                            ok = False
+                    except Exception:
+                        if rule == "=":
+                            ok = actual == expect
+                        elif rule == "!=":
+                            ok = actual != expect
+                        else:
+                            ok = False
+                label = safe_str(rule_row.get("Trigger Label", "")).strip() or f"{field} {rule} {expect}"
+                return bool(ok), label
+
+            threshold_rows = _parse_exec_threshold_rows(test_thresholds_raw)
+            test_log_cols = [
+                "test_ts",
+                "task_id",
+                "component",
+                "task",
+                "test_preset",
+                "result_mode",
+                "condition_met",
+                "auto_threshold_met",
+                "threshold_hits",
+                "values_json",
+                "condition_text",
+                "action_text",
+                "notes",
+                "actor",
+            ]
+            if test_fields or test_condition_raw or test_action_raw:
+                st.markdown("##### 🧪 Test + Condition Capture")
+                st.markdown(
+                    """
+                    <div class="maint-help-green">
+                      <b>Use this inside execution</b><br/>
+                      Capture the measured values for this maintenance task, then decide whether the condition was met.<br/>
+                      This keeps monitoring data inside the same task workflow instead of a separate condition screen.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if test_fields:
+                    st.caption("Fields to record: " + " | ".join(test_fields))
+                if test_preset_raw:
+                    st.caption(f"Preset: {test_preset_raw}")
+                if test_condition_raw:
+                    st.markdown(f"**Condition to watch:** {test_condition_raw}")
+                if test_action_raw:
+                    st.caption(f"Action if met: {test_action_raw}")
+                if threshold_rows:
+                    st.dataframe(pd.DataFrame(threshold_rows), use_container_width=True, hide_index=True, height=min(220, 80 + 34 * len(threshold_rows)))
+
+                with st.form(f"maint_exec_test_form_{task_id or idx_map[pick]}"):
+                    test_values = {}
+                    field_cols = st.columns(2) if len(test_fields) > 1 else [st.container()]
+                    for idx_field, field_lbl in enumerate(test_fields):
+                        holder = field_cols[idx_field % len(field_cols)]
+                        with holder:
+                            test_values[field_lbl] = st.text_input(
+                                field_lbl,
+                                value="",
+                                key=f"maint_exec_test_val_{task_id}_{idx_field}",
+                                placeholder="enter measured value",
+                            )
+                    result_mode = st.radio(
+                        "Test result",
+                        options=["Auto from thresholds", "Monitor only", "Condition met", "Condition not met"],
+                        horizontal=True,
+                        key=f"maint_exec_test_result_{task_id}",
+                    )
+                    test_notes = st.text_area(
+                        "Test notes",
+                        height=90,
+                        key=f"maint_exec_test_notes_{task_id}",
+                        placeholder="What was measured, what was seen, and what should happen next.",
+                    )
+                    ta1, ta2, ta3 = st.columns(3)
+                    with ta1:
+                        apply_schedule_now = st.checkbox("Schedule now if met", value=False, key=f"maint_exec_test_sched_now_{task_id}")
+                    with ta2:
+                        apply_prep_needed = st.checkbox("Set PREP_NEEDED if met", value=True, key=f"maint_exec_test_prep_needed_{task_id}")
+                    with ta3:
+                        planned_duration_min = st.number_input(
+                            "Duration if scheduled",
+                            min_value=15,
+                            max_value=600,
+                            value=60,
+                            step=15,
+                            key=f"maint_exec_test_duration_{task_id}",
+                        )
+                    save_test = st.form_submit_button("💾 Save test result", use_container_width=True, type="primary")
+
+                if save_test:
+                    test_ts = pd.Timestamp.now().tz_localize(None)
+                    threshold_hits = []
+                    for tr in threshold_rows:
+                        hit, label = _threshold_hit(tr, test_values)
+                        if hit:
+                            threshold_hits.append(label)
+                    auto_cond_met = bool(threshold_hits)
+                    if result_mode == "Condition met":
+                        cond_met = True
+                    elif result_mode == "Condition not met":
+                        cond_met = False
+                    elif result_mode == "Auto from thresholds":
+                        cond_met = auto_cond_met
+                    else:
+                        cond_met = False
+                    _append_csv(
+                        MAINT_TEST_RECORDS_CSV,
+                        test_log_cols,
+                        pd.DataFrame([{
+                            "test_ts": test_ts,
+                            "task_id": task_id,
+                            "component": safe_str(rr.get("Component", "")),
+                            "task": safe_str(rr.get("Task", "")),
+                            "test_preset": test_preset_raw,
+                            "result_mode": result_mode,
+                            "condition_met": "Yes" if cond_met else "No",
+                            "auto_threshold_met": "Yes" if auto_cond_met else "No",
+                            "threshold_hits": " | ".join(threshold_hits),
+                            "values_json": json.dumps(test_values, ensure_ascii=True),
+                            "condition_text": test_condition_raw,
+                            "action_text": test_action_raw,
+                            "notes": safe_str(test_notes).strip(),
+                            "actor": safe_str(actor),
+                        }]),
+                    )
+                    if cond_met and apply_prep_needed:
+                        set_task_state(
+                            MAINT_TASK_STATE_CSV,
+                            rr,
+                            "PREP_NEEDED",
+                            actor=safe_str(actor),
+                            note=f"Test condition met. {safe_str(test_notes).strip()}",
+                            force=True,
+                        )
+                    if cond_met and apply_schedule_now:
+                        sched_path = P.schedule_csv
+                        try:
+                            if os.path.exists(sched_path):
+                                sched_df = pd.read_csv(sched_path, keep_default_na=False)
+                            else:
+                                sched_df = pd.DataFrame()
+                        except Exception:
+                            sched_df = pd.DataFrame()
+                        for c in ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]:
+                            if c not in sched_df.columns:
+                                sched_df[c] = ""
+                        sched_start = pd.Timestamp.now().tz_localize(None).replace(second=0, microsecond=0)
+                        sched_end = sched_start + pd.Timedelta(minutes=int(planned_duration_min))
+                        desc = (
+                            f"[TEST] {safe_str(rr.get('Component',''))} - {safe_str(rr.get('Task',''))} "
+                            f"(ID:{task_id}) | condition met"
+                        )
+                        sched_df = pd.concat(
+                            [
+                                sched_df[["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]],
+                                pd.DataFrame([{
+                                    "Event Type": "Maintenance",
+                                    "Start DateTime": sched_start.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "End DateTime": sched_end.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Description": desc,
+                                    "Recurrence": "",
+                                }]),
+                            ],
+                            ignore_index=True,
+                        )
+                        sched_df.to_csv(sched_path, index=False)
+                    if cond_met:
+                        if threshold_hits:
+                            st.success("Test result saved. Condition met workflow was applied. Hits: " + " | ".join(threshold_hits))
+                        else:
+                            st.success("Test result saved. Condition met workflow was applied.")
+                    else:
+                        st.success("Test result saved.")
+                    st.rerun()
+
+                test_hist = _read_csv_safe(MAINT_TEST_RECORDS_CSV, test_log_cols)
+                if not test_hist.empty:
+                    task_hist = test_hist[test_hist["task_id"].astype(str).str.strip().eq(task_id)].copy()
+                    if not task_hist.empty:
+                        st.caption("Recent saved test results for this task")
+                        st.dataframe(
+                            task_hist.sort_values("test_ts", ascending=False).head(10)[["test_ts", "test_preset", "result_mode", "condition_met", "auto_threshold_met", "threshold_hits", "notes", "actor"]],
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(210, 80 + 34 * len(task_hist.head(10))),
+                        )
             active_res = list_task_reservations(
                 MAINT_RESERVATIONS_CSV,
                 task_id=task_id,
@@ -3923,6 +4343,22 @@ def render_maintenance_tab(P):
             if c not in pkg_df.columns:
                 pkg_df[c] = ""
 
+        def _pkg_exists_for_task(task_row: pd.Series) -> bool:
+            tid_local = safe_str(task_row.get("Task_ID", "")).strip()
+            comp_local = safe_str(task_row.get("Component", "")).strip().lower()
+            task_local = safe_str(task_row.get("Task", "")).strip().lower()
+            if pkg_df.empty:
+                return False
+            if tid_local:
+                mask = pkg_df["Task_ID"].astype(str).str.strip().eq(tid_local)
+                if mask.any():
+                    return True
+            mask = (
+                pkg_df["Component"].astype(str).str.strip().str.lower().eq(comp_local)
+                & pkg_df["Task"].astype(str).str.strip().str.lower().eq(task_local)
+            )
+            return bool(mask.any())
+
         task_opts = []
         task_map = {}
         for i, r in tasks_df.sort_values(["Status", "Component", "Task"]).iterrows():
@@ -3931,12 +4367,14 @@ def render_maintenance_tab(P):
             if not (_valid_task_text(comp_v) and _valid_task_text(task_v)):
                 continue
             tid = safe_str(r.get("Task_ID", "")).strip()
-            lbl = f"[{safe_str(r.get('Status',''))}] {comp_v} — {task_v} (ID:{tid})"
+            pkg_state = "PKG SAVED" if _pkg_exists_for_task(r) else "NEEDS PKG"
+            lbl = f"[{pkg_state}] [{safe_str(r.get('Status',''))}] {comp_v} - {task_v} (ID:{tid})"
             task_opts.append(lbl)
             task_map[lbl] = int(i)
         if not task_opts:
             st.info("No valid tasks to show in Work Package selector.")
             return
+        st.caption("Choose list shows package progress: `PKG SAVED` means this task already has a saved work package.")
         pkg_pick = st.selectbox("Select maintenance task", options=[""] + task_opts, key="maint_pkg_task_pick")
         if not pkg_pick:
             return
@@ -4188,6 +4626,50 @@ def render_maintenance_tab(P):
                 return True
             except Exception as e:
                 st.error(f"Failed to update timing: {e}")
+                return False
+
+        def _save_test_config_for_task(
+            test_preset_txt: str,
+            test_fields_txt: str,
+            test_thresholds_txt: str,
+            test_condition_txt: str,
+            test_action_txt: str,
+        ):
+            src = safe_str(rr.get("Source_File", "")).strip()
+            if not src:
+                st.error("Task has no Source_File, cannot update test config.")
+                return False
+            path = os.path.join(MAINT_FOLDER, src)
+            if not os.path.exists(path):
+                st.error(f"Source file missing: {path}")
+                return False
+            try:
+                raw_src = read_file(path)
+                df_src = normalize_df(raw_src)
+                mask = pd.Series([False] * len(df_src), index=df_src.index)
+                if "Task_ID" in df_src.columns and task_id:
+                    mask = df_src["Task_ID"].astype(str).str.strip().eq(task_id)
+                if not mask.any():
+                    mask = (
+                        df_src["Component"].astype(str).str.strip().eq(task_component)
+                        & df_src["Task"].astype(str).str.strip().eq(task_name)
+                    )
+                if not mask.any():
+                    st.error("Task row was not found in source file.")
+                    return False
+                for c in ["Test_Preset", "Test_Fields", "Test_Thresholds", "Test_Condition", "Test_Action"]:
+                    if c not in df_src.columns:
+                        df_src[c] = ""
+                df_src.loc[mask, "Test_Preset"] = safe_str(test_preset_txt).strip()
+                df_src.loc[mask, "Test_Fields"] = safe_str(test_fields_txt).strip()
+                df_src.loc[mask, "Test_Thresholds"] = safe_str(test_thresholds_txt).strip()
+                df_src.loc[mask, "Test_Condition"] = safe_str(test_condition_txt).strip()
+                df_src.loc[mask, "Test_Action"] = safe_str(test_action_txt).strip()
+                out_src = templateize_df(df_src, list(raw_src.columns))
+                write_file(path, out_src)
+                return True
+            except Exception as e:
+                st.error(f"Failed to update test config: {e}")
                 return False
 
         def _manual_page_override_file() -> str:
@@ -4602,7 +5084,7 @@ def render_maintenance_tab(P):
             group_presets = [
                 "Weekly", "Monthly", "3-Month", "6-Month",
                 "Routine", "On-Condition", "Per-Draw/Startup",
-                "Draw-Count", "Hours",
+                "Draw-Count", "Hours", "Test",
             ]
             known_groups = set(group_presets)
             for _, r in tasks_df.iterrows():
@@ -4753,6 +5235,223 @@ def render_maintenance_tab(P):
                 )
                 if ok:
                     st.success("Timing updated. Triggers reset from current baseline.")
+                    st.rerun()
+
+        with st.expander("🧪 Test + Condition Capture", expanded=False):
+            st.markdown(
+                """
+                <div class="maint-help-green">
+                  <b>Optional task-level monitoring</b><br/>
+                  Use this when the task needs measured values or a pass/fail check during execution.<br/>
+                  Example fields: <b>Voltage (V); Temperature (degC); X offset (mm); Y offset (mm)</b>.<br/>
+                  If the task is only a regular maintenance task, leave this blank.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            def _suggest_test_preset(row) -> str:
+                text = " ".join(
+                    [
+                        safe_str(row.get("Task", "")).strip().lower(),
+                        safe_str(row.get("Procedure_Summary", "")).strip().lower(),
+                        safe_str(row.get("Notes", "")).strip().lower(),
+                    ]
+                )
+                if "voltage trend" in text or ("heating element" in text and "voltage" in text):
+                    return "Furnace Heating Element Voltage Trend"
+                if "pyrometer" in text:
+                    return "Pyrometer Alignment + Window Cleanliness"
+                if "vacuum rose" in text or ("vacuum" in text and "purge" in text):
+                    return "Storage Vacuum Rise"
+                if "clean air velocity" in text or "airflow" in text or "anemometer" in text:
+                    return "Clean-Air Velocity"
+                if "interlock" in text or "alarm" in text:
+                    return "Interlocks Test"
+                if "top cap" in text and ("eroded" in text or "erosion" in text):
+                    return "Top Cap Erosion"
+                if "bottom doors" in text or ("distortion" in text and "door" in text):
+                    return "Bottom Door Distortion"
+                if "fibre position" in text and "center" in text:
+                    return "Fibre Position Centering"
+                if "x/y" in text or "x-y" in text or "offset" in text or "alignment" in text:
+                    return "X-Y Alignment"
+                if "tension gauge calibration" in text or "will not calibrate" in text or "erratic" in text or "load cell" in text:
+                    return "Tension Gauge Calibration"
+                if "bearing play" in text or "rotates freely" in text:
+                    return "Bearing Play + Rotation"
+                return "Custom"
+
+            def _parse_threshold_rows(text: str):
+                raw = safe_str(text).strip()
+                if not raw:
+                    return []
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, list):
+                        out = []
+                        for row in data:
+                            if not isinstance(row, dict):
+                                continue
+                            out.append(
+                                {
+                                    "Field": safe_str(row.get("Field", "")).strip(),
+                                    "Rule": safe_str(row.get("Rule", "")).strip(),
+                                    "Value": safe_str(row.get("Value", "")).strip(),
+                                    "Trigger Label": safe_str(row.get("Trigger Label", "")).strip(),
+                                }
+                            )
+                        return out
+                except Exception:
+                    return []
+                return []
+
+            with st.expander("⚙️ Preset Library (central)", expanded=False):
+                st.caption("Edit the central test preset library once. All tasks can reuse these presets.")
+                preset_library = load_maintenance_test_presets()
+                library_names = sorted(list(preset_library.keys()))
+                lib_pick = st.selectbox("Preset to edit", options=library_names, key="maint_test_library_pick")
+                lib_row = preset_library.get(lib_pick, {"fields": "", "thresholds": [], "condition": "", "action": ""})
+                lib_fields = st.text_area(
+                    "Preset fields",
+                    value=safe_str(lib_row.get("fields", "")).strip(),
+                    height=90,
+                    key="maint_test_library_fields",
+                )
+                lib_condition = st.text_area(
+                    "Preset condition",
+                    value=safe_str(lib_row.get("condition", "")).strip(),
+                    height=90,
+                    key="maint_test_library_condition",
+                )
+                lib_action = st.text_input(
+                    "Preset action",
+                    value=safe_str(lib_row.get("action", "")).strip(),
+                    key="maint_test_library_action",
+                )
+                lib_thresholds = st.data_editor(
+                    pd.DataFrame(lib_row.get("thresholds", []) or [{"Field": "", "Rule": ">", "Value": "", "Trigger Label": ""}]),
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    column_config={
+                        "Field": st.column_config.TextColumn("Field"),
+                        "Rule": st.column_config.SelectboxColumn("Rule", options=[">", ">=", "<", "<=", "=", "!=", "contains"]),
+                        "Value": st.column_config.TextColumn("Value"),
+                        "Trigger Label": st.column_config.TextColumn("Trigger Label"),
+                    },
+                    key="maint_test_library_thresholds",
+                )
+                lp1, lp2 = st.columns(2)
+                with lp1:
+                    new_preset_name = st.text_input("New preset name", value="", key="maint_test_library_new_name", placeholder="optional")
+                with lp2:
+                    if st.button("💾 Save preset library item", key="maint_test_library_save_btn", use_container_width=True):
+                        target_name = safe_str(new_preset_name).strip() or lib_pick
+                        clean_thresholds = []
+                        for _, tr in lib_thresholds.iterrows():
+                            row = {
+                                "Field": safe_str(tr.get("Field", "")).strip(),
+                                "Rule": safe_str(tr.get("Rule", "")).strip(),
+                                "Value": safe_str(tr.get("Value", "")).strip(),
+                                "Trigger Label": safe_str(tr.get("Trigger Label", "")).strip(),
+                            }
+                            if row["Field"] and row["Rule"] and row["Value"]:
+                                clean_thresholds.append(row)
+                        preset_library[target_name] = {
+                            "fields": safe_str(lib_fields).strip(),
+                            "thresholds": clean_thresholds,
+                            "condition": safe_str(lib_condition).strip(),
+                            "action": safe_str(lib_action).strip(),
+                        }
+                        if save_maintenance_test_presets(preset_library):
+                            st.success(f"Saved preset: {target_name}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to save preset library.")
+
+            test_fields_default = safe_str(rr.get("Test_Fields", "")).strip()
+            test_preset_default = safe_str(rr.get("Test_Preset", "")).strip() or _suggest_test_preset(rr)
+            test_thresholds_default = safe_str(rr.get("Test_Thresholds", "")).strip()
+            test_condition_default = safe_str(rr.get("Test_Condition", "")).strip()
+            test_action_default = safe_str(rr.get("Test_Action", "")).strip()
+            preset_map = load_maintenance_test_presets()
+            preset_options = list(preset_map.keys())
+            if test_preset_default not in preset_options:
+                test_preset_default = "Custom"
+            if st.session_state.get("maint_pkg_test_task_key", "") != current_task_key:
+                st.session_state["maint_pkg_test_task_key"] = current_task_key
+                st.session_state["maint_pkg_test_preset"] = test_preset_default
+                st.session_state["maint_pkg_test_fields"] = test_fields_default
+                st.session_state["maint_pkg_test_condition"] = test_condition_default
+                st.session_state["maint_pkg_test_action"] = test_action_default
+                st.session_state["maint_pkg_test_threshold_rows"] = _parse_threshold_rows(test_thresholds_default)
+            p1, p2 = st.columns([1.1, 1.0])
+            with p1:
+                selected_preset = st.selectbox(
+                    "Preset",
+                    options=preset_options,
+                    index=preset_options.index(st.session_state.get("maint_pkg_test_preset", test_preset_default)),
+                    key="maint_pkg_test_preset",
+                )
+            with p2:
+                if st.button("✨ Apply preset", key="maint_pkg_test_apply_preset", use_container_width=True):
+                    preset = preset_map.get(selected_preset, preset_map["Custom"])
+                    st.session_state["maint_pkg_test_fields"] = safe_str(preset.get("fields", "")).strip()
+                    st.session_state["maint_pkg_test_condition"] = safe_str(preset.get("condition", "")).strip()
+                    st.session_state["maint_pkg_test_action"] = safe_str(preset.get("action", "")).strip()
+                    st.session_state["maint_pkg_test_threshold_rows"] = list(preset.get("thresholds", []))
+                    st.rerun()
+            tf1, tf2 = st.columns(2)
+            with tf1:
+                test_fields_txt = st.text_area(
+                    "Fields to capture",
+                    key="maint_pkg_test_fields",
+                    height=110,
+                    placeholder="Voltage (V); Temperature (degC); X offset (mm); Y offset (mm)",
+                )
+            with tf2:
+                test_condition_txt = st.text_area(
+                    "If / condition text",
+                    key="maint_pkg_test_condition",
+                    height=110,
+                    placeholder="If voltage trend increases or fibre strength drops, prepare replacement maintenance.",
+                )
+            test_action_txt = st.text_input(
+                "Action if condition is met",
+                key="maint_pkg_test_action",
+                placeholder="Set PREP_NEEDED and schedule replacement task",
+            )
+            st.caption("Thresholds can auto-evaluate the measured values in Execute + Records.")
+            threshold_rows = st.data_editor(
+                pd.DataFrame(
+                    st.session_state.get("maint_pkg_test_threshold_rows", _parse_threshold_rows(test_thresholds_default))
+                    or [{"Field": "", "Rule": ">", "Value": "", "Trigger Label": ""}]
+                ),
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "Field": st.column_config.TextColumn("Field"),
+                    "Rule": st.column_config.SelectboxColumn("Rule", options=[">", ">=", "<", "<=", "=", "!=", "contains"]),
+                    "Value": st.column_config.TextColumn("Value"),
+                    "Trigger Label": st.column_config.TextColumn("Trigger Label"),
+                },
+                key="maint_pkg_test_threshold_editor",
+            )
+            if st.button("💾 Save test + condition config", key="maint_pkg_test_cfg_save_btn", use_container_width=True):
+                clean_rows = []
+                for _, tr in threshold_rows.iterrows():
+                    row = {
+                        "Field": safe_str(tr.get("Field", "")).strip(),
+                        "Rule": safe_str(tr.get("Rule", "")).strip(),
+                        "Value": safe_str(tr.get("Value", "")).strip(),
+                        "Trigger Label": safe_str(tr.get("Trigger Label", "")).strip(),
+                    }
+                    if row["Field"] and row["Rule"] and row["Value"]:
+                        clean_rows.append(row)
+                thresholds_txt = json.dumps(clean_rows, ensure_ascii=True)
+                if _save_test_config_for_task(selected_preset, test_fields_txt, thresholds_txt, test_condition_txt, test_action_txt):
+                    st.success("Test + condition config saved for this task.")
                     st.rerun()
 
         with st.expander("📘 Manual Context + Page Pinning", expanded=False):
@@ -5404,7 +6103,7 @@ def render_maintenance_tab(P):
                     st.rerun()
         else:
             st.success("All selected-day tasks are parts-ready.")
-    
+
     def _append_parts_order_from_maintenance(
         *,
         part_name: str,
@@ -6822,6 +7521,7 @@ def render_maintenance_tab(P):
     # =========================================================
     st.markdown('<div class="maint-section-title">📊 Dashboard</div>', unsafe_allow_html=True)
     render_maintenance_dashboard_metrics(dfm)
+    render_maintenance_test_monitor()
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown(
         """
@@ -6891,7 +7591,7 @@ def render_maintenance_tab(P):
               0) <b>Builder</b>: define maintenance tasks, Required_Parts (BOM), and source files.<br/>
               1) <b>Prepare Day Pack</b>: check today tasks + parts readiness + work package (prep/safety/procedure).<br/>
               2) <b>Schedule + Forecast</b>: build schedule and auto-add pre-check events for parts.<br/>
-              3) <b>Execute + Records</b>: mark done, update logs, and keep history clean.
+              3) <b>Execute + Records</b>: run the task, capture measurements/tests, mark done, and keep history clean.
             </div>
             """,
             unsafe_allow_html=True,
@@ -6903,6 +7603,8 @@ def render_maintenance_tab(P):
             "3) Execute + Records",
         ]
         st.session_state.setdefault("maint_flow_step", flow_options[0])
+        if st.session_state.get("maint_flow_step") not in flow_options:
+            st.session_state["maint_flow_step"] = flow_options[0]
         f1, f2, f3, f4 = st.columns(4)
         if f1.button(
             flow_options[0],
@@ -7020,6 +7722,7 @@ def render_maintenance_tab(P):
                 <div class="maint-help-green">
                   <b>Step 3 tips</b><br/>
                   Mark completed tasks here to update source files, logs, and inventory consumption automatically.<br/>
+                  If the task has measurement/test fields, capture them inside the execution workspace before you finish the task.<br/>
                   Review history to confirm execution quality and traceability.
                 </div>
                 """,

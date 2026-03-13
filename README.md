@@ -52,6 +52,7 @@ App layers:
 Detailed docs:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations and Runbook](docs/OPERATIONS.md)
+- [Maintenance Operator Guide](docs/MAINTENANCE_OPERATOR_GUIDE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Environment Pretest](docs/ENV_PRETEST.md)
 - [Path Map](docs/path_map.md)
@@ -67,7 +68,6 @@ Detailed docs:
 - Maintenance
 - Dashboard
 - Draw Finalize
-- Protocols
 - Data Diagnostics
 - Report Center
 - SQL Lab

@@ -1,0 +1,181 @@
+{
+  "Custom": {
+    "fields": "",
+    "thresholds": [],
+    "condition": "",
+    "action": ""
+  },
+  "Furnace Heating Element Voltage Trend": {
+    "fields": "Voltage (V); Current (A); Temperature (degC)",
+    "thresholds": [
+      {
+        "Field": "Voltage (V)",
+        "Rule": ">",
+        "Value": "2.0",
+        "Trigger Label": "Voltage drift above expected baseline"
+      }
+    ],
+    "condition": "If voltage trend increases above normal baseline, investigate element aging / replacement.",
+    "action": "Set PREP_NEEDED and schedule replacement/inspection."
+  },
+  "Pyrometer Alignment + Window Cleanliness": {
+    "fields": "Window cleanliness score; Alignment note; Furnace temp stability note",
+    "thresholds": [
+      {
+        "Field": "Window cleanliness score",
+        "Rule": "<",
+        "Value": "7",
+        "Trigger Label": "Pyrometer window needs cleaning"
+      }
+    ],
+    "condition": "If pyrometer alignment drifts or the window is dirty, clean and re-check before running.",
+    "action": "Set PREP_NEEDED and inspect pyrometer alignment/window."
+  },
+  "Storage Vacuum Rise": {
+    "fields": "Vacuum (bar); Pressure Rise (bar); Leak note",
+    "thresholds": [
+      {
+        "Field": "Pressure Rise (bar)",
+        "Rule": ">",
+        "Value": "0.03",
+        "Trigger Label": "Vacuum rise indicates purge/leak maintenance"
+      }
+    ],
+    "condition": "If storage vacuum rises above the allowed limit, trigger purge / leak maintenance.",
+    "action": "Set PREP_NEEDED and schedule purge/leak check."
+  },
+  "Clean-Air Velocity": {
+    "fields": "Airflow (m/s); Intake Temp (degC); Fibre position note",
+    "thresholds": [
+      {
+        "Field": "Airflow (m/s)",
+        "Rule": "<",
+        "Value": "0.25",
+        "Trigger Label": "Airflow too low"
+      },
+      {
+        "Field": "Airflow (m/s)",
+        "Rule": ">",
+        "Value": "0.50",
+        "Trigger Label": "Airflow too high"
+      }
+    ],
+    "condition": "If clean-air velocity is outside the allowed window, correct airflow and inspect filters.",
+    "action": "Set PREP_NEEDED and schedule airflow/filter maintenance."
+  },
+  "Interlocks Test": {
+    "fields": "Water flow interlock; Gas flow interlock; Alarm note",
+    "thresholds": [
+      {
+        "Field": "Water flow interlock",
+        "Rule": "!=",
+        "Value": "PASS",
+        "Trigger Label": "Water interlock failed"
+      },
+      {
+        "Field": "Gas flow interlock",
+        "Rule": "!=",
+        "Value": "PASS",
+        "Trigger Label": "Gas interlock failed"
+      }
+    ],
+    "condition": "If any furnace water/gas interlock fails, maintenance must be triggered before operation.",
+    "action": "Set PREP_NEEDED and block operation until interlock issue is resolved."
+  },
+  "X-Y Alignment": {
+    "fields": "X offset (mm); Y offset (mm); Fibre position note",
+    "thresholds": [
+      {
+        "Field": "X offset (mm)",
+        "Rule": ">",
+        "Value": "0.5",
+        "Trigger Label": "X offset too large"
+      },
+      {
+        "Field": "Y offset (mm)",
+        "Rule": ">",
+        "Value": "0.5",
+        "Trigger Label": "Y offset too large"
+      }
+    ],
+    "condition": "If X/Y offset grows beyond alignment tolerance, launch alignment maintenance.",
+    "action": "Set PREP_NEEDED and schedule alignment correction."
+  },
+  "Fibre Position Centering": {
+    "fields": "Fibre position note; Window center error (mm); Line speed note",
+    "thresholds": [
+      {
+        "Field": "Window center error (mm)",
+        "Rule": ">",
+        "Value": "0.5",
+        "Trigger Label": "Fibre moved too close to measurement window edge"
+      }
+    ],
+    "condition": "If fibre position drifts from center when clean-air starts, correct airflow and alignment before running.",
+    "action": "Set PREP_NEEDED and inspect fibre position / airflow settings."
+  },
+  "Tension Gauge Calibration": {
+    "fields": "Tare error; Span error; Calibration note",
+    "thresholds": [
+      {
+        "Field": "Tare error",
+        "Rule": ">",
+        "Value": "0.2",
+        "Trigger Label": "Tare error above tolerance"
+      },
+      {
+        "Field": "Span error",
+        "Rule": ">",
+        "Value": "0.2",
+        "Trigger Label": "Span error above tolerance"
+      }
+    ],
+    "condition": "If the tension gauge will not calibrate or drifts outside tolerance, trigger calibration service / replacement path.",
+    "action": "Set PREP_NEEDED and inspect/return load cell as required."
+  },
+  "Bearing Play + Rotation": {
+    "fields": "Bearing play (mm); Rotation feel; Cleanliness note",
+    "thresholds": [
+      {
+        "Field": "Bearing play (mm)",
+        "Rule": ">",
+        "Value": "0.2",
+        "Trigger Label": "Bearing play above tolerance"
+      },
+      {
+        "Field": "Rotation feel",
+        "Rule": "contains",
+        "Value": "rough",
+        "Trigger Label": "Rotation feels rough"
+      }
+    ],
+    "condition": "If pulley rotation is rough or bearing play is significant, launch bearing maintenance.",
+    "action": "Set PREP_NEEDED and schedule pulley/bearing maintenance."
+  },
+  "Top Cap Erosion": {
+    "fields": "Top cap length reduction (mm); Erosion note; Fibre strength note",
+    "thresholds": [
+      {
+        "Field": "Top cap length reduction (mm)",
+        "Rule": ">",
+        "Value": "3",
+        "Trigger Label": "Top cap erosion exceeds 3 mm"
+      }
+    ],
+    "condition": "If bottom sleeve top cap erosion exceeds the allowed range, replace it.",
+    "action": "Set PREP_NEEDED and schedule top cap replacement."
+  },
+  "Bottom Door Distortion": {
+    "fields": "Door distortion note; Gas curtain note; Fibre contact note",
+    "thresholds": [
+      {
+        "Field": "Door distortion note",
+        "Rule": "contains",
+        "Value": "damage",
+        "Trigger Label": "Bottom door damaged/distorted"
+      }
+    ],
+    "condition": "If bottom door distortion or damage is found, replace before further running.",
+    "action": "Set PREP_NEEDED and schedule bottom door replacement."
+  }
+}

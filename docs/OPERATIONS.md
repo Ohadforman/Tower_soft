@@ -76,6 +76,20 @@ python3 scripts/cli/run_release_bundle.py
 
 Note: if your terminal is inside `docs/`, the same command path still works because `docs/scripts/cli` wrappers forward to the real scripts.
 
+## Maintenance Operator Workflow
+
+For the live maintenance workflow in the app, use:
+
+- [Maintenance Operator Guide](/Users/ohadformanair/PycharmProjects/Tower_work/docs/MAINTENANCE_OPERATOR_GUIDE.md)
+
+Use that guide for:
+
+- Builder (tasks + BOM)
+- Prepare Day Pack
+- Schedule + Forecast
+- Execute + Records
+- maintenance test presets and threshold-based monitoring
+
 ## Generated Artifacts
 
 - full check reports: `reports/checks/all_checks_*.json`
