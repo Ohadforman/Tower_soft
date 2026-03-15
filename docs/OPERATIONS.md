@@ -90,6 +90,22 @@ Use that guide for:
 - Execute + Records
 - maintenance test presets and threshold-based monitoring
 
+## Code and Deployment Management
+
+For maintaining the codebase itself and moving releases between machines, use:
+
+- [Codebase Maintenance Guide](/Users/ohadformanair/PycharmProjects/Tower_work/docs/CODEBASE_MAINTENANCE_GUIDE.md)
+- [Performance Notes](/Users/ohadformanair/PycharmProjects/Tower_work/docs/PERFORMANCE_NOTES.md)
+- [Offline Transfer Workflow](/Users/ohadformanair/PycharmProjects/Tower_work/docs/OFFLINE_TRANSFER_WORKFLOW.md)
+
+Use those guides for:
+
+- path governance through `app_io.paths.P`
+- release-closeout discipline
+- hard-disk transfer flow
+- middle-computer GitHub sync workflow
+- rollback and update review rules
+
 ## Generated Artifacts
 
 - full check reports: `reports/checks/all_checks_*.json`

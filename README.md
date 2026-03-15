@@ -52,7 +52,12 @@ App layers:
 Detailed docs:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations and Runbook](docs/OPERATIONS.md)
+- [Codebase Maintenance Guide](docs/CODEBASE_MAINTENANCE_GUIDE.md)
+- [Performance Notes](docs/PERFORMANCE_NOTES.md)
+- [Offline Transfer Workflow](docs/OFFLINE_TRANSFER_WORKFLOW.md)
 - [Maintenance Operator Guide](docs/MAINTENANCE_OPERATOR_GUIDE.md)
+- [Role Guide (English)](docs/APP_ROLE_GUIDE_EN.md)
+- [Role Guide (Hebrew)](docs/APP_ROLE_GUIDE_HE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Environment Pretest](docs/ENV_PRETEST.md)
 - [Path Map](docs/path_map.md)
