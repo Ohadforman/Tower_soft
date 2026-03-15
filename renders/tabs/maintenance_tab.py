@@ -6,9 +6,9 @@ def render_maintenance_tab(P):
     import pandas as pd
     import streamlit as st
     import plotly.graph_objects as go
-    import duckdb
     from renders.tabs.corr_outliers import render_corr_outliers_tab
     from helpers.activity_indicator import record_activity_start
+    from helpers.duckdb_io import get_duckdb_conn
     from helpers.maintenance_readiness import compute_readiness, is_parts_conditional
     from helpers.maintenance_state import merge_state_into_df, set_task_state, set_tasks_state
     from helpers.maintenance_parts_reservation import (
@@ -264,6 +264,33 @@ def render_maintenance_tab(P):
         row_set = {g.lower() for g in row_task_groups(row)}
         return any(safe_str(g).strip().lower() in row_set for g in selected_groups)
 
+    def build_group_key(groups) -> str:
+        if not groups:
+            return ""
+        seen = set()
+        out = []
+        for g in groups:
+            gv = safe_str(g).strip().lower()
+            if not gv or gv in seen:
+                continue
+            out.append(gv)
+            seen.add(gv)
+        return "|" + "|".join(out) + "|" if out else ""
+
+    def filter_df_by_groups(df: pd.DataFrame, selected_groups) -> pd.DataFrame:
+        if df is None or df.empty or not selected_groups:
+            return df
+        if "Task_Groups_Key" not in df.columns:
+            return df[df.apply(lambda r: row_has_any_group(r, selected_groups), axis=1)].copy()
+        needles = [f"|{safe_str(g).strip().lower()}|" for g in selected_groups if safe_str(g).strip()]
+        if not needles:
+            return df
+        key_series = df["Task_Groups_Key"].astype(str)
+        mask = pd.Series(False, index=df.index)
+        for needle in needles:
+            mask = mask | key_series.str.contains(needle, regex=False, na=False)
+        return df[mask].copy()
+
     def _clean_txt(s):
         import re
         return re.sub(r"\s+", " ", str(s or "")).strip()
@@ -407,6 +434,22 @@ def render_maintenance_tab(P):
         return out
 
     @st.cache_data(show_spinner=False)
+    def _manual_pdf_signature(manuals_dir: str):
+        sig = []
+        try:
+            for fn in sorted(os.listdir(manuals_dir)):
+                if fn.lower().endswith(".pdf"):
+                    fp = os.path.join(manuals_dir, fn)
+                    sig.append((fn, os.path.getmtime(fp)))
+        except Exception:
+            return tuple()
+        return tuple(sig)
+
+    @st.cache_data(show_spinner=False)
+    def _manual_pdf_files(manuals_dir: str, signature: tuple):
+        return [fn for fn, _ in signature]
+
+    @st.cache_data(show_spinner=False)
     def _render_manual_page_png_for_maintenance(path: str, page_no: int, zoom: float = 1.5):
         import fitz
         doc = fitz.open(path)
@@ -500,9 +543,9 @@ def render_maintenance_tab(P):
             # Require at least a minimal overlap to avoid wrong manual.
             return best[0] if best[1] >= 2 else ""
 
-        try:
-            manual_files = sorted([fn for fn in os.listdir(manuals_dir) if fn.lower().endswith(".pdf")])
-        except Exception:
+        signature = _manual_pdf_signature(manuals_dir)
+        manual_files = _manual_pdf_files(manuals_dir, signature)
+        if not manual_files:
             return ""
 
         task_manual, _ = _resolve_task_manual_and_pages(task_row, fallback_df=fallback_df)
@@ -560,11 +603,8 @@ def render_maintenance_tab(P):
             if best[1] >= 2:
                 return best[0]
 
-        try:
-            if len(manual_files) == 1:
-                return manual_files[0]
-        except Exception:
-            return ""
+        if len(manual_files) == 1:
+            return manual_files[0]
         return ""
 
     def _parse_task_pages(page_raw: str) -> list:
@@ -606,30 +646,17 @@ def render_maintenance_tab(P):
         inter = rt & bt
         return len(inter) >= max(1, min(len(rt), len(bt)) // 2)
 
-    def _build_manual_context_for_task(task_row, req_parts: list[str], fallback_df=None) -> pd.DataFrame:
-        manuals_dir = os.path.join(P.root_dir, "manuals")
-        if not os.path.isdir(manuals_dir):
-            return pd.DataFrame()
-        sig = []
-        try:
-            for fn in sorted(os.listdir(manuals_dir)):
-                if fn.lower().endswith(".pdf"):
-                    fp = os.path.join(manuals_dir, fn)
-                    sig.append((fn, os.path.getmtime(fp)))
-        except Exception:
-            pass
-        bom_df = _build_manual_bom_index_for_maintenance(manuals_dir, tuple(sig))
+    @st.cache_data(show_spinner=False)
+    def _build_manual_context_cached(manuals_dir: str, signature: tuple, task_manual_file: str, req_parts_tuple: tuple) -> pd.DataFrame:
+        bom_df = _build_manual_bom_index_for_maintenance(manuals_dir, signature)
         if bom_df is None or bom_df.empty:
-            return pd.DataFrame()
-
-        task_manual_file = _resolve_task_manual_file(task_row, fallback_df=fallback_df)
+            return pd.DataFrame(columns=["Manual", "Page", "Item", "Part", "Part Number", "Qty/Asm", "Required Part"])
         work = bom_df.copy()
         if task_manual_file:
             work = work[work["Manual"].astype(str).str.lower().eq(task_manual_file.lower())].copy()
-
         req_clean = []
         seen = set()
-        for p in req_parts or []:
+        for p in req_parts_tuple or ():
             pv = safe_str(p).strip()
             if not pv:
                 continue
@@ -662,6 +689,15 @@ def render_maintenance_tab(P):
         out = out[keep].sort_values(["Page", "Item", "Part Number"], ascending=[True, True, True]).reset_index(drop=True)
         return out.head(120)
 
+    def _build_manual_context_for_task(task_row, req_parts: list[str], fallback_df=None) -> pd.DataFrame:
+        manuals_dir = os.path.join(P.root_dir, "manuals")
+        if not os.path.isdir(manuals_dir):
+            return pd.DataFrame()
+        signature = _manual_pdf_signature(manuals_dir)
+        task_manual_file = _resolve_task_manual_file(task_row, fallback_df=fallback_df)
+        req_parts_tuple = tuple(req_parts or [])
+        return _build_manual_context_cached(manuals_dir, signature, task_manual_file, req_parts_tuple)
+
     def _create_or_open_parts_order_for_context(
         *,
         part_name: str,
@@ -680,7 +716,7 @@ def render_maintenance_tab(P):
         os.makedirs(os.path.dirname(PARTS_ORDERS_CSV), exist_ok=True)
         if os.path.exists(PARTS_ORDERS_CSV):
             try:
-                orders_df = pd.read_csv(PARTS_ORDERS_CSV, keep_default_na=False)
+                orders_df = _read_csv_keepna(PARTS_ORDERS_CSV)
             except Exception:
                 orders_df = pd.DataFrame(columns=base_cols)
         else:
@@ -973,7 +1009,7 @@ def render_maintenance_tab(P):
     con = st.session_state.get("sql_duck_con")
     if con is None:
         try:
-            con = duckdb.connect(P.duckdb_path)
+            con = get_duckdb_conn(P.duckdb_path)
             st.session_state["sql_duck_con"] = con
         except Exception as e:
             msg = str(e)
@@ -1109,10 +1145,18 @@ def render_maintenance_tab(P):
             df[tcol] = pd.to_datetime(df[tcol], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
         for dcol in [c for c in cols if c.endswith("_date")]:
             df[dcol] = pd.to_datetime(df[dcol], errors="coerce").dt.strftime("%Y-%m-%d")
-    
+
         df.to_csv(path, mode="a", header=False, index=False)
-    
-    def _read_csv_safe(path: str, cols: list) -> pd.DataFrame:
+
+    def _mtime(path: str) -> float:
+        try:
+            return float(os.path.getmtime(path))
+        except Exception:
+            return 0.0
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_safe_cached(path: str, mtime: float, cols_tuple: tuple) -> pd.DataFrame:
+        cols = list(cols_tuple)
         if not os.path.isfile(path):
             return pd.DataFrame(columns=cols)
         try:
@@ -1125,6 +1169,21 @@ def render_maintenance_tab(P):
             return df[cols].copy()
         except Exception:
             return pd.DataFrame(columns=cols)
+
+    def _read_csv_safe(path: str, cols: list) -> pd.DataFrame:
+        return _read_csv_safe_cached(path, _mtime(path), tuple(cols))
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_keepna_cached(path: str, mtime: float) -> pd.DataFrame:
+        if not os.path.isfile(path):
+            return pd.DataFrame()
+        try:
+            return pd.read_csv(path, keep_default_na=False)
+        except Exception:
+            return pd.DataFrame()
+
+    def _read_csv_keepna(path: str) -> pd.DataFrame:
+        return _read_csv_keepna_cached(path, _mtime(path))
     
     def _latest_fault_state(actions_df: pd.DataFrame) -> dict:
         """
@@ -1289,6 +1348,15 @@ def render_maintenance_tab(P):
         else:
             df.to_excel(path, index=False)
 
+    @st.cache_data(show_spinner=False)
+    def _load_inventory_cached(path: str, mtime: float) -> pd.DataFrame:
+        from helpers.parts_inventory import load_inventory
+
+        return load_inventory(path)
+
+    def load_inventory_cached(path: str) -> pd.DataFrame:
+        return _load_inventory_cached(path, _mtime(path))
+
     def default_maintenance_test_presets() -> dict:
         return {
             "Furnace Heating Element Voltage Trend": {
@@ -1386,11 +1454,12 @@ def render_maintenance_tab(P):
             },
         }
 
-    def load_maintenance_test_presets() -> dict:
+    @st.cache_data(show_spinner=False)
+    def _load_maintenance_test_presets_cached(path: str, mtime: float) -> dict:
         presets = default_maintenance_test_presets()
-        if os.path.exists(MAINT_TEST_PRESETS_JSON):
+        if os.path.exists(path):
             try:
-                with open(MAINT_TEST_PRESETS_JSON, "r", encoding="utf-8") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
                 if isinstance(raw, dict):
                     clean = {}
@@ -1408,6 +1477,9 @@ def render_maintenance_tab(P):
                 pass
         presets.setdefault("Custom", {"fields": "", "thresholds": [], "condition": "", "action": ""})
         return presets
+
+    def load_maintenance_test_presets() -> dict:
+        return _load_maintenance_test_presets_cached(MAINT_TEST_PRESETS_JSON, _mtime(MAINT_TEST_PRESETS_JSON))
 
     def save_maintenance_test_presets(presets: dict) -> bool:
         try:
@@ -1643,6 +1715,8 @@ def render_maintenance_tab(P):
         s = "" if x is None or pd.isna(x) else str(x).strip().lower()
         if s in ("draw", "draws", "draws_count", "draw_count"):
             return "draws"
+        if s in ("either", "any", "both"):
+            return "hours"
         return s
 
     def _split_trigger_modes(row) -> list:
@@ -1704,6 +1778,8 @@ def render_maintenance_tab(P):
     dfm["Current_Hours_For_Task"] = dfm["Hours_Source"].apply(pick_current_hours)
     dfm["Tracking_Mode_norm"] = dfm["Tracking_Mode"].apply(mode_norm)
     dfm["Trigger_Modes_norm"] = dfm.apply(_split_trigger_modes, axis=1)
+    dfm["Task_Groups_List"] = dfm.apply(row_task_groups, axis=1)
+    dfm["Task_Groups_Key"] = dfm["Task_Groups_List"].apply(build_group_key)
     
     def next_due_date(row):
         modes = row.get("Trigger_Modes_norm", [])
@@ -1950,7 +2026,7 @@ def render_maintenance_tab(P):
         lifecycle_df = pd.DataFrame()
         if os.path.exists(MAINT_TASK_STATE_CSV):
             try:
-                lifecycle_df = pd.read_csv(MAINT_TASK_STATE_CSV, keep_default_na=False)
+                lifecycle_df = _read_csv_keepna(MAINT_TASK_STATE_CSV)
             except Exception:
                 lifecycle_df = pd.DataFrame()
         if "state" not in lifecycle_df.columns:
@@ -2318,11 +2394,7 @@ def render_maintenance_tab(P):
         all_components = sorted(
             [x for x in dfm.get("Component", pd.Series([], dtype=str)).astype(str).str.strip().unique().tolist() if x]
         )
-        all_groups_set = set()
-        for _, rr in dfm.iterrows():
-            for g in row_task_groups(rr):
-                all_groups_set.add(g)
-        all_groups = sorted(all_groups_set)
+        all_groups = sorted({g for groups in dfm.get("Task_Groups_List", pd.Series([], dtype=object)) for g in (groups or [])})
         with c_f1:
             focus_components = st.multiselect(
                 "Filter by component",
@@ -2373,10 +2445,10 @@ def render_maintenance_tab(P):
         elif queue_mode == "Group package":
             pack_groups = st.multiselect("Package group(s)", options=all_groups, default=[g for g in ["3-Month"] if g in all_groups], key="maint_exec_pack_groups")
             if pack_groups:
-                work = base[base.apply(lambda r: row_has_any_group(r, pack_groups), axis=1)].copy()
+                work = filter_df_by_groups(base, pack_groups)
             include_ok_group = st.checkbox("Include OK in package queue", value=False, key="maint_exec_pack_include_ok")
             if include_ok_group:
-                work = dfm[dfm.apply(lambda r: row_has_any_group(r, pack_groups), axis=1)].copy() if pack_groups else dfm.copy()
+                work = filter_df_by_groups(dfm, pack_groups) if pack_groups else dfm.copy()
         work = work.sort_values(["Status", "Component", "Task"]).copy()
         if focus_hours_source != "All":
             hs = work.get("Hours_Source", pd.Series([""] * len(work))).astype(str).str.upper().str.strip()
@@ -2387,7 +2459,7 @@ def render_maintenance_tab(P):
         if focus_components:
             work = work[work["Component"].astype(str).isin(focus_components)].copy()
         if focus_groups:
-            work = work[work.apply(lambda r: row_has_any_group(r, focus_groups), axis=1)].copy()
+            work = filter_df_by_groups(work, focus_groups)
         if task_search.strip():
             q = task_search.strip().lower()
             work = work[
@@ -2400,8 +2472,7 @@ def render_maintenance_tab(P):
         inv_tool_map = {}
         inv_effective_qty = {}
         try:
-            from helpers.parts_inventory import load_inventory
-            inv_df = load_inventory(P.parts_inventory_csv)
+            inv_df = load_inventory_cached(P.parts_inventory_csv)
             if not inv_df.empty:
                 inv_df["Part Name"] = inv_df["Part Name"].astype(str).str.strip().str.lower()
                 inv_df["Item Type"] = inv_df.get("Item Type", "").astype(str).str.strip().str.lower()
@@ -2540,7 +2611,7 @@ def render_maintenance_tab(P):
         pkg_df = pd.DataFrame()
         if os.path.exists(pkg_path):
             try:
-                pkg_df = pd.read_csv(pkg_path, keep_default_na=False)
+                pkg_df = _read_csv_keepna(pkg_path)
             except Exception:
                 pkg_df = pd.DataFrame()
 
@@ -2568,7 +2639,7 @@ def render_maintenance_tab(P):
         active_res_keys = set()
         try:
             if os.path.exists(MAINT_RESERVATIONS_CSV):
-                rsv_all = pd.read_csv(MAINT_RESERVATIONS_CSV, keep_default_na=False)
+                rsv_all = _read_csv_keepna(MAINT_RESERVATIONS_CSV)
             else:
                 rsv_all = pd.DataFrame()
             if not rsv_all.empty:
@@ -3021,7 +3092,7 @@ def render_maintenance_tab(P):
                         sched_path = P.schedule_csv
                         try:
                             if os.path.exists(sched_path):
-                                sched_df = pd.read_csv(sched_path, keep_default_na=False)
+                                sched_df = _read_csv_keepna(sched_path)
                             else:
                                 sched_df = pd.DataFrame()
                         except Exception:
@@ -3308,11 +3379,7 @@ def render_maintenance_tab(P):
         all_components = sorted(
             [x for x in dfm.get("Component", pd.Series([], dtype=str)).astype(str).str.strip().unique().tolist() if x]
         )
-        all_groups_set = set()
-        for _, rr in dfm.iterrows():
-            for g in row_task_groups(rr):
-                all_groups_set.add(g)
-        all_groups = sorted(all_groups_set)
+        all_groups = sorted({g for groups in dfm.get("Task_Groups_List", pd.Series([], dtype=object)) for g in (groups or [])})
         default_status = st.session_state.get("maint_focus_status", ["OVERDUE", "DUE SOON", "ROUTINE"])
         default_components = st.session_state.get("maint_focus_components", [])
         default_groups = st.session_state.get("maint_focus_groups", [])
@@ -3354,7 +3421,7 @@ def render_maintenance_tab(P):
         if smart_components:
             todo = todo[todo["Component"].astype(str).isin(smart_components)].copy()
         if smart_groups:
-            todo = todo[todo.apply(lambda r: row_has_any_group(r, smart_groups), axis=1)].copy()
+            todo = filter_df_by_groups(todo, smart_groups)
         if smart_search.strip():
             q = smart_search.strip().lower()
             todo = todo[
@@ -3382,7 +3449,7 @@ def render_maintenance_tab(P):
             if not open_wait.empty:
                 if os.path.exists(P.parts_orders_csv):
                     try:
-                        odf = pd.read_csv(P.parts_orders_csv, keep_default_na=False)
+                        odf = _read_csv_keepna(P.parts_orders_csv)
                     except Exception:
                         odf = pd.DataFrame()
                 else:
@@ -3840,12 +3907,12 @@ def render_maintenance_tab(P):
         elif queue_mode == "Weeks ahead":
             cand = base[base["Status"].isin(["OVERDUE", "DUE SOON"]) | (due_ts <= pd.Timestamp(current_date) + pd.Timedelta(days=int(weeks_ahead) * 7))].copy()
         elif queue_mode == "Task group":
-            cand = base[base.apply(lambda r: row_has_any_group(r, [selected_task_group]), axis=1)].copy()
+            cand = filter_df_by_groups(base, [selected_task_group])
         elif queue_mode == "From existing schedule":
             sched_path = P.schedule_csv
             if os.path.exists(sched_path):
                 try:
-                    sraw = pd.read_csv(sched_path, keep_default_na=False)
+                    sraw = _read_csv_keepna(sched_path)
                 except Exception:
                     sraw = pd.DataFrame()
             else:
@@ -3879,7 +3946,8 @@ def render_maintenance_tab(P):
                     except Exception:
                         pass
                     keys.add((safe_str(task_id).strip().lower(), safe_str(comp).strip().lower(), safe_str(task).strip().lower()))
-                cand = base[base.apply(lambda r: _task_key(r) in keys, axis=1)].copy()
+                base_keys = base.apply(_task_key, axis=1)
+                cand = base[base_keys.isin(keys)].copy()
             else:
                 cand = base.iloc[0:0].copy()
         else:
@@ -3895,8 +3963,7 @@ def render_maintenance_tab(P):
         inv_tool_map = {}
         inv_effective_qty = {}
         try:
-            from helpers.parts_inventory import load_inventory
-            inv_df = load_inventory(P.parts_inventory_csv)
+            inv_df = load_inventory_cached(P.parts_inventory_csv)
             if not inv_df.empty:
                 inv_df["Part Name"] = inv_df["Part Name"].astype(str).str.strip().str.lower()
                 inv_df["Item Type"] = inv_df.get("Item Type", "").astype(str).str.strip().str.lower()
@@ -4035,7 +4102,7 @@ def render_maintenance_tab(P):
         sched_path = P.schedule_csv
         if os.path.exists(sched_path):
             try:
-                sched_df = pd.read_csv(sched_path, keep_default_na=False)
+                sched_df = _read_csv_keepna(sched_path)
             except Exception:
                 sched_df = pd.DataFrame()
         else:
@@ -4334,7 +4401,7 @@ def render_maintenance_tab(P):
         ]
         if os.path.exists(pkg_file):
             try:
-                pkg_df = pd.read_csv(pkg_file, keep_default_na=False)
+                pkg_df = _read_csv_keepna(pkg_file)
             except Exception:
                 pkg_df = pd.DataFrame(columns=pkg_cols)
         else:
@@ -4680,7 +4747,7 @@ def render_maintenance_tab(P):
             fp = _manual_page_override_file()
             if os.path.exists(fp):
                 try:
-                    dfp = pd.read_csv(fp, keep_default_na=False)
+                    dfp = _read_csv_keepna(fp)
                 except Exception:
                     dfp = pd.DataFrame(columns=cols)
             else:
@@ -4706,7 +4773,7 @@ def render_maintenance_tab(P):
             fp = _manual_page_override_file()
             if os.path.exists(fp):
                 try:
-                    all_df = pd.read_csv(fp, keep_default_na=False)
+                    all_df = _read_csv_keepna(fp)
                 except Exception:
                     all_df = pd.DataFrame(columns=cols)
             else:
@@ -4756,8 +4823,7 @@ def render_maintenance_tab(P):
 
         inv_now = pd.DataFrame()
         try:
-            from helpers.parts_inventory import load_inventory
-            inv_now = load_inventory(P.parts_inventory_csv)
+            inv_now = load_inventory_cached(P.parts_inventory_csv)
             inv_now["Part Name"] = inv_now["Part Name"].astype(str).fillna("")
             inv_now["Location"] = inv_now["Location"].astype(str).fillna("")
             inv_now["Quantity"] = pd.to_numeric(inv_now["Quantity"], errors="coerce").fillna(0.0)
@@ -5137,11 +5203,12 @@ def render_maintenance_tab(P):
         with st.expander("⏱️ Timing & Triggers", expanded=False):
             st.caption("Pick up to 2 triggers. Task becomes due by the first trigger that reaches due.")
             timing_modes_opts = ["hours", "draws", "calendar"]
-            default_modes = _split_trigger_modes(rr)
+            default_modes = [m for m in _split_trigger_modes(rr) if m in timing_modes_opts]
             if len(default_modes) > 2:
                 default_modes = default_modes[:2]
             if not default_modes:
-                default_modes = [mode_norm(rr.get("Tracking_Mode", "")) or "calendar"]
+                fallback_mode = mode_norm(rr.get("Tracking_Mode", ""))
+                default_modes = [fallback_mode] if fallback_mode in timing_modes_opts else ["calendar"]
             trig_modes = st.multiselect(
                 "Trigger modes (choose 1-2)",
                 options=timing_modes_opts,
@@ -5305,69 +5372,69 @@ def render_maintenance_tab(P):
                     return []
                 return []
 
-            with st.expander("⚙️ Preset Library (central)", expanded=False):
-                st.caption("Edit the central test preset library once. All tasks can reuse these presets.")
-                preset_library = load_maintenance_test_presets()
-                library_names = sorted(list(preset_library.keys()))
-                lib_pick = st.selectbox("Preset to edit", options=library_names, key="maint_test_library_pick")
-                lib_row = preset_library.get(lib_pick, {"fields": "", "thresholds": [], "condition": "", "action": ""})
-                lib_fields = st.text_area(
-                    "Preset fields",
-                    value=safe_str(lib_row.get("fields", "")).strip(),
-                    height=90,
-                    key="maint_test_library_fields",
-                )
-                lib_condition = st.text_area(
-                    "Preset condition",
-                    value=safe_str(lib_row.get("condition", "")).strip(),
-                    height=90,
-                    key="maint_test_library_condition",
-                )
-                lib_action = st.text_input(
-                    "Preset action",
-                    value=safe_str(lib_row.get("action", "")).strip(),
-                    key="maint_test_library_action",
-                )
-                lib_thresholds = st.data_editor(
-                    pd.DataFrame(lib_row.get("thresholds", []) or [{"Field": "", "Rule": ">", "Value": "", "Trigger Label": ""}]),
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    column_config={
-                        "Field": st.column_config.TextColumn("Field"),
-                        "Rule": st.column_config.SelectboxColumn("Rule", options=[">", ">=", "<", "<=", "=", "!=", "contains"]),
-                        "Value": st.column_config.TextColumn("Value"),
-                        "Trigger Label": st.column_config.TextColumn("Trigger Label"),
-                    },
-                    key="maint_test_library_thresholds",
-                )
-                lp1, lp2 = st.columns(2)
-                with lp1:
-                    new_preset_name = st.text_input("New preset name", value="", key="maint_test_library_new_name", placeholder="optional")
-                with lp2:
-                    if st.button("💾 Save preset library item", key="maint_test_library_save_btn", use_container_width=True):
-                        target_name = safe_str(new_preset_name).strip() or lib_pick
-                        clean_thresholds = []
-                        for _, tr in lib_thresholds.iterrows():
-                            row = {
-                                "Field": safe_str(tr.get("Field", "")).strip(),
-                                "Rule": safe_str(tr.get("Rule", "")).strip(),
-                                "Value": safe_str(tr.get("Value", "")).strip(),
-                                "Trigger Label": safe_str(tr.get("Trigger Label", "")).strip(),
-                            }
-                            if row["Field"] and row["Rule"] and row["Value"]:
-                                clean_thresholds.append(row)
-                        preset_library[target_name] = {
-                            "fields": safe_str(lib_fields).strip(),
-                            "thresholds": clean_thresholds,
-                            "condition": safe_str(lib_condition).strip(),
-                            "action": safe_str(lib_action).strip(),
+            st.markdown("##### ⚙️ Preset Library (central)")
+            st.caption("Edit the central test preset library once. All tasks can reuse these presets.")
+            preset_library = load_maintenance_test_presets()
+            library_names = sorted(list(preset_library.keys()))
+            lib_pick = st.selectbox("Preset to edit", options=library_names, key="maint_test_library_pick")
+            lib_row = preset_library.get(lib_pick, {"fields": "", "thresholds": [], "condition": "", "action": ""})
+            lib_fields = st.text_area(
+                "Preset fields",
+                value=safe_str(lib_row.get("fields", "")).strip(),
+                height=90,
+                key="maint_test_library_fields",
+            )
+            lib_condition = st.text_area(
+                "Preset condition",
+                value=safe_str(lib_row.get("condition", "")).strip(),
+                height=90,
+                key="maint_test_library_condition",
+            )
+            lib_action = st.text_input(
+                "Preset action",
+                value=safe_str(lib_row.get("action", "")).strip(),
+                key="maint_test_library_action",
+            )
+            lib_thresholds = st.data_editor(
+                pd.DataFrame(lib_row.get("thresholds", []) or [{"Field": "", "Rule": ">", "Value": "", "Trigger Label": ""}]),
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "Field": st.column_config.TextColumn("Field"),
+                    "Rule": st.column_config.SelectboxColumn("Rule", options=[">", ">=", "<", "<=", "=", "!=", "contains"]),
+                    "Value": st.column_config.TextColumn("Value"),
+                    "Trigger Label": st.column_config.TextColumn("Trigger Label"),
+                },
+                key="maint_test_library_thresholds",
+            )
+            lp1, lp2 = st.columns(2)
+            with lp1:
+                new_preset_name = st.text_input("New preset name", value="", key="maint_test_library_new_name", placeholder="optional")
+            with lp2:
+                if st.button("💾 Save preset library item", key="maint_test_library_save_btn", use_container_width=True):
+                    target_name = safe_str(new_preset_name).strip() or lib_pick
+                    clean_thresholds = []
+                    for _, tr in lib_thresholds.iterrows():
+                        row = {
+                            "Field": safe_str(tr.get("Field", "")).strip(),
+                            "Rule": safe_str(tr.get("Rule", "")).strip(),
+                            "Value": safe_str(tr.get("Value", "")).strip(),
+                            "Trigger Label": safe_str(tr.get("Trigger Label", "")).strip(),
                         }
-                        if save_maintenance_test_presets(preset_library):
-                            st.success(f"Saved preset: {target_name}")
-                            st.rerun()
-                        else:
-                            st.error("Failed to save preset library.")
+                        if row["Field"] and row["Rule"] and row["Value"]:
+                            clean_thresholds.append(row)
+                    preset_library[target_name] = {
+                        "fields": safe_str(lib_fields).strip(),
+                        "thresholds": clean_thresholds,
+                        "condition": safe_str(lib_condition).strip(),
+                        "action": safe_str(lib_action).strip(),
+                    }
+                    if save_maintenance_test_presets(preset_library):
+                        st.success(f"Saved preset: {target_name}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to save preset library.")
 
             test_fields_default = safe_str(rr.get("Test_Fields", "")).strip()
             test_preset_default = safe_str(rr.get("Test_Preset", "")).strip() or _suggest_test_preset(rr)
@@ -5808,7 +5875,7 @@ def render_maintenance_tab(P):
                 )
 
             if package_groups:
-                day_df = day_df[day_df.apply(lambda r: row_has_any_group(r, package_groups), axis=1)].copy()
+                day_df = filter_df_by_groups(day_df, package_groups)
             horizon = d0 + pd.Timedelta(days=int(package_window_days))
             mask_due = (day_df["Status"] == "OVERDUE") | (next_due.notna() & (next_due <= horizon))
             if include_undated:
@@ -5825,9 +5892,7 @@ def render_maintenance_tab(P):
             return
 
         try:
-            from helpers.parts_inventory import load_inventory
-
-            inv_df = load_inventory(P.parts_inventory_csv)
+            inv_df = load_inventory_cached(P.parts_inventory_csv)
             inv_df["Part Name"] = inv_df["Part Name"].astype(str).str.strip().str.lower()
             inv_df["Item Type"] = inv_df.get("Item Type", "").astype(str).str.strip().str.lower()
             inv_df["Location"] = inv_df.get("Location", "").astype(str).str.strip().str.lower()
@@ -5917,7 +5982,7 @@ def render_maintenance_tab(P):
             def _load_active_orders_df():
                 if os.path.exists(P.parts_orders_csv):
                     try:
-                        odf_local = pd.read_csv(P.parts_orders_csv, keep_default_na=False)
+                        odf_local = _read_csv_keepna(P.parts_orders_csv)
                     except Exception:
                         odf_local = pd.DataFrame()
                 else:
@@ -6127,7 +6192,7 @@ def render_maintenance_tab(P):
         os.makedirs(os.path.dirname(PARTS_ORDERS_CSV), exist_ok=True)
         if os.path.exists(PARTS_ORDERS_CSV):
             try:
-                orders_df = pd.read_csv(PARTS_ORDERS_CSV, keep_default_na=False)
+                orders_df = _read_csv_keepna(PARTS_ORDERS_CSV)
             except Exception:
                 orders_df = pd.DataFrame(columns=base_cols)
         else:
@@ -7168,8 +7233,7 @@ def render_maintenance_tab(P):
 
                     inv_rows = pd.DataFrame()
                     try:
-                        from helpers.parts_inventory import load_inventory
-                        inv_rows = load_inventory(P.parts_inventory_csv)
+                        inv_rows = load_inventory_cached(P.parts_inventory_csv)
                     except Exception:
                         inv_rows = pd.DataFrame()
 
@@ -7663,8 +7727,19 @@ def render_maintenance_tab(P):
 
             st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
             st.markdown("#### 2) 📚 Manuals + Source QA (optional)")
-            render_maintenance_load_report(files, load_errors)
-            render_manuals_browser(BASE_DIR)
+            qa1, qa2 = st.columns(2)
+            with qa1:
+                show_load_report = st.toggle("Open Load Report", value=False, key="maint_open_load_report")
+            with qa2:
+                show_manuals_browser = st.toggle("Open Manuals Browser", value=False, key="maint_open_manuals_browser")
+            if show_load_report:
+                render_maintenance_load_report(files, load_errors)
+            else:
+                st.caption("Load report folded.")
+            if show_manuals_browser:
+                render_manuals_browser(BASE_DIR)
+            else:
+                st.caption("Manuals browser folded.")
 
         elif flow_step == "1) Prepare Day Pack":
             st.markdown(
@@ -7690,7 +7765,8 @@ def render_maintenance_tab(P):
                 """,
                 unsafe_allow_html=True,
             )
-            with st.expander("🗓️ Maintenance Scheduler Bridge", expanded=False):
+            show_sched_bridge = st.toggle("Open Maintenance Scheduler Bridge", value=False, key="maint_open_sched_bridge")
+            if show_sched_bridge:
                 render_maintenance_scheduler_bridge(
                     dfm=dfm,
                     current_date=current_date,
@@ -7699,7 +7775,10 @@ def render_maintenance_tab(P):
                     uv1_hours=uv1_hours,
                     uv2_hours=uv2_hours,
                 )
-            with st.expander("📅 Future Schedule", expanded=False):
+            else:
+                st.caption("Maintenance Scheduler Bridge folded.")
+            show_future_schedule = st.toggle("Open Future Schedule", value=False, key="maint_open_future_schedule")
+            if show_future_schedule:
                 st.caption("Choose type to show timeline.")
                 horizon_hours, horizon_days, horizon_draws = render_maintenance_horizon_selector(current_draw_count)
                 focus = render_future_schedule_focus_selector()
@@ -7715,6 +7794,8 @@ def render_maintenance_tab(P):
                     horizon_draws,
                     focus=focus,
                 )
+            else:
+                st.caption("Future Schedule folded.")
 
         else:
             st.markdown(
@@ -7728,7 +7809,8 @@ def render_maintenance_tab(P):
                 """,
                 unsafe_allow_html=True,
             )
-            with st.expander("✅ Mark Tasks Done", expanded=False):
+            show_mark_done = st.toggle("Open Mark Tasks Done", value=False, key="maint_open_mark_done")
+            if show_mark_done:
                 edited = render_maintenance_done_editor(
                     dfm,
                     current_date=current_date,
@@ -7753,18 +7835,31 @@ def render_maintenance_tab(P):
                     pick_current_hours=pick_current_hours,
                     mode_norm=mode_norm,
                 )
+            else:
+                st.caption("Mark Tasks Done folded.")
             # These renderers already contain their own expanders; avoid wrapping to prevent nested-expander errors.
-            with st.expander("🗃️ Execution History", expanded=False):
+            show_exec_history = st.toggle("Open Execution History", value=False, key="maint_open_exec_history")
+            if show_exec_history:
                 render_maintenance_history(con)
+            else:
+                st.caption("Execution History folded.")
 
     elif group == "faults":
-        render_faults_section(
-            con=con,
-            MAINT_FOLDER=MAINT_FOLDER,
-            actor=actor,
-        )
+        show_faults = st.toggle("Open Faults workspace", value=False, key="maint_open_faults_workspace")
+        if show_faults:
+            render_faults_section(
+                con=con,
+                MAINT_FOLDER=MAINT_FOLDER,
+                actor=actor,
+            )
+        else:
+            st.caption("Faults workspace folded.")
     elif group == "corr":
         st.markdown('<div class="maint-section-title">📈 Correlation & Outliers</div>', unsafe_allow_html=True)
         st.caption("Rolling correlation and outlier tracking from draw logs + maintenance events.")
-        render_corr_outliers_tab(draw_folder=P.logs_dir, maint_folder=P.maintenance_dir)
+        show_corr = st.toggle("Open Correlation & Outliers", value=False, key="maint_open_corr_outliers")
+        if show_corr:
+            render_corr_outliers_tab(draw_folder=P.logs_dir, maint_folder=P.maintenance_dir)
+        else:
+            st.caption("Correlation & Outliers folded.")
     # ------------------ Correlation & Outliers ------------------

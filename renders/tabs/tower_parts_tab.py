@@ -4,12 +4,12 @@ def render_tower_parts_tab(P):
     import pandas as pd
     import streamlit as st
     from helpers.parts_inventory import (
-        load_inventory,
+        load_inventory as _raw_load_inventory,
         save_inventory,
         increment_part,
         ensure_inventory_file,
         ensure_general_tools_seed,
-        load_locations,
+        load_locations as _raw_load_locations,
         save_locations,
         ensure_locations_file,
         decrement_part,
@@ -123,6 +123,42 @@ def render_tower_parts_tab(P):
     coating_stock_file = P.coating_stock_json
     containers_csv = P.tower_containers_csv
     PARTS_DIRECTORY = P.parts_dir
+
+    def _mtime(path: str) -> float:
+        try:
+            return float(os.path.getmtime(path))
+        except Exception:
+            return 0.0
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_cached(path: str, keep_default_na: bool, file_mtime: float) -> pd.DataFrame:
+        if not path or not os.path.exists(path):
+            return pd.DataFrame()
+        return pd.read_csv(path, keep_default_na=keep_default_na)
+
+    @st.cache_data(show_spinner=False)
+    def _load_inventory_cached(path: str, file_mtime: float) -> pd.DataFrame:
+        return _raw_load_inventory(path)
+
+    def load_inventory(path: str) -> pd.DataFrame:
+        return _load_inventory_cached(path, _mtime(path))
+
+    @st.cache_data(show_spinner=False)
+    def _load_locations_cached(path: str, file_mtime: float) -> pd.DataFrame:
+        return _raw_load_locations(path)
+
+    def load_locations(path: str) -> pd.DataFrame:
+        return _load_locations_cached(path, _mtime(path))
+
+    @st.cache_data(show_spinner=False)
+    def _manual_pdf_signature_cached(manuals_dir: str, dir_mtime: float) -> tuple:
+        sig = []
+        if os.path.isdir(manuals_dir):
+            for fn in sorted(os.listdir(manuals_dir)):
+                if fn.lower().endswith(".pdf"):
+                    fp = os.path.join(manuals_dir, fn)
+                    sig.append((fn, _mtime(fp)))
+        return tuple(sig)
     
     # ✅ Status rename (Needed -> Opened)
     STATUS_ORDER = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
@@ -139,7 +175,7 @@ def render_tower_parts_tab(P):
     
     # ---------------- Load / init ----------------
     if os.path.exists(ORDER_FILE):
-        orders_df = pd.read_csv(ORDER_FILE, keep_default_na=False)
+        orders_df = _read_csv_cached(ORDER_FILE, False, _mtime(ORDER_FILE))
     else:
         orders_df = pd.DataFrame(columns=BASE_COLUMNS)
     
@@ -232,7 +268,7 @@ def render_tower_parts_tab(P):
     project_options = ["None"]
     try:
         if os.path.exists(PROJECTS_FILE):
-            projects_df = pd.read_csv(PROJECTS_FILE, keep_default_na=False)
+            projects_df = _read_csv_cached(PROJECTS_FILE, False, _mtime(PROJECTS_FILE))
             projects_df.columns = [str(c).strip() for c in projects_df.columns]
             if PROJECTS_COL in projects_df.columns:
                 vals = (
@@ -736,16 +772,8 @@ def render_tower_parts_tab(P):
             return list(agg.values())
 
         manuals_dir = os.path.join(P.root_dir, "manuals")
-        manual_sig = []
-        if os.path.isdir(manuals_dir):
-            for fn in sorted(os.listdir(manuals_dir)):
-                if fn.lower().endswith(".pdf"):
-                    fp = os.path.join(manuals_dir, fn)
-                    try:
-                        manual_sig.append((fn, os.path.getmtime(fp)))
-                    except Exception:
-                        pass
-        manual_catalog = _extract_manual_bom_catalog(manuals_dir, tuple(manual_sig)) if manual_sig else []
+        manual_sig = _manual_pdf_signature_cached(manuals_dir, _mtime(manuals_dir))
+        manual_catalog = _extract_manual_bom_catalog(manuals_dir, manual_sig) if manual_sig else []
 
         inv_df = load_inventory(inventory_file)
         sheet_components = _load_tower_components()
@@ -927,7 +955,7 @@ def render_tower_parts_tab(P):
             res_file = os.path.join(P.maintenance_dir, "maintenance_parts_reservations.csv")
             try:
                 if os.path.exists(res_file):
-                    res_all = pd.read_csv(res_file, keep_default_na=False)
+                    res_all = _read_csv_cached(res_file, False, _mtime(res_file))
                 else:
                     res_all = pd.DataFrame()
             except Exception:
@@ -1493,14 +1521,7 @@ def render_tower_parts_tab(P):
 
     manuals_dir = os.path.join(P.root_dir, "manuals")
     if os.path.isdir(manuals_dir):
-        sig = []
-        try:
-            for fn in sorted(os.listdir(manuals_dir)):
-                if fn.lower().endswith(".pdf"):
-                    fp = os.path.join(manuals_dir, fn)
-                    sig.append((fn, os.path.getmtime(fp)))
-        except Exception:
-            pass
+        sig = _manual_pdf_signature_cached(manuals_dir, _mtime(manuals_dir))
         bom_df = _build_manual_bom_index(manuals_dir, tuple(sig))
     else:
         bom_df = None

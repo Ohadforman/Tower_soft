@@ -1209,7 +1209,8 @@ def render_dashboard_tab(P):
         # Math Lab (kept minimal)
         # ==========================================================
         st.markdown("---")
-        with st.expander("🧮 Math Lab (advanced)", expanded=False):
+        show_math_lab = st.toggle("Open Math Lab (advanced)", value=False, key="dash_open_math_lab")
+        if show_math_lab:
             st.subheader("A) f(x,y) vs time")
             math_numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
             if len(math_numeric_cols) < 1:
@@ -1247,4 +1248,6 @@ def render_dashboard_tab(P):
                         st.plotly_chart(fig_math, use_container_width=True)
                 except Exception as e:
                     st.error(f"Math Lab error: {e}")
+        else:
+            st.caption("Math Lab folded.")
         # ------------------ Order Finalize Tab ------------------

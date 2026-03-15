@@ -72,6 +72,16 @@ def render_home_tab(
     # =========================================================
     ORDERS_FILE = P.orders_csv
 
+    def _mtime(path: str) -> float:
+        try:
+            return float(os.path.getmtime(path))
+        except Exception:
+            return 0.0
+
+    @st.cache_data(show_spinner=False)
+    def _read_orders_cached(path: str, file_mtime: float):
+        return pd.read_csv(path)
+
     def _ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
         if STATUS_COL not in df.columns:
             df[STATUS_COL] = "Pending"
@@ -86,7 +96,7 @@ def render_home_tab(
             return
 
         try:
-            df = pd.read_csv(ORDERS_FILE)
+            df = _read_orders_cached(ORDERS_FILE, _mtime(ORDERS_FILE))
         except Exception:
             return
 
@@ -274,7 +284,7 @@ def render_home_tab(
             return
 
         try:
-            df = pd.read_csv(ORDERS_FILE)
+            df = _read_orders_cached(ORDERS_FILE, _mtime(ORDERS_FILE))
         except Exception as e:
             st.error(f"Failed to read {ORDERS_FILE}: {e}")
             return
@@ -401,7 +411,7 @@ def render_home_tab(
             return
 
         try:
-            df = pd.read_csv(ORDERS_FILE)
+            df = _read_orders_cached(ORDERS_FILE, _mtime(ORDERS_FILE))
         except Exception as e:
             st.error(f"Failed to read {ORDERS_FILE}: {e}")
             return

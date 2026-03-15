@@ -53,6 +53,42 @@ def _cached_distinct_col_values(path: str, col: str, file_mtime: float) -> list[
     return out
 
 
+def _mtime(path: str) -> float:
+    try:
+        return float(os.path.getmtime(path))
+    except Exception:
+        return 0.0
+
+
+@st.cache_data(show_spinner=False, ttl=20)
+def _cached_dataset_preform_ids(dataset_dir: str, dir_mtime: float) -> list[str]:
+    out = []
+    seen = set()
+    if not os.path.exists(dataset_dir):
+        return out
+    pat = re.compile(r"^(.*)F_(\d+)\.csv$", re.IGNORECASE)
+    for fn in os.listdir(dataset_dir):
+        m = pat.match(str(fn).strip())
+        if not m:
+            continue
+        s = safe_str(m.group(1)).strip()
+        if not s:
+            continue
+        lk = s.lower()
+        if lk in seen:
+            continue
+        seen.add(lk)
+        out.append(s)
+    return out
+
+
+@st.cache_data(show_spinner=False, ttl=20)
+def _cached_read_csv(path: str, keep_default_na: bool, file_mtime: float) -> pd.DataFrame:
+    if not path or not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_csv(path, keep_default_na=keep_default_na)
+
+
 # ==========================================================
 # Link helpers
 # ==========================================================
@@ -209,11 +245,8 @@ def render_manual_quick_start_no_order(
         # 3) from existing dataset csv names: {preform}F_N.csv
         try:
             if os.path.exists(P.dataset_dir):
-                pat = re.compile(r"^(.*)F_(\d+)\.csv$", re.IGNORECASE)
-                for fn in os.listdir(P.dataset_dir):
-                    m = pat.match(str(fn).strip())
-                    if m:
-                        _add(m.group(1))
+                for v in _cached_dataset_preform_ids(P.dataset_dir, _mtime(P.dataset_dir)):
+                    _add(v)
         except Exception:
             pass
         return out
@@ -719,7 +752,7 @@ def render_process_setup_tab(
 
         if restore_file and os.path.exists(restore_file):
             try:
-                dfp = pd.read_csv(restore_file, keep_default_na=False)
+                dfp = _cached_read_csv(restore_file, keep_default_na=False, file_mtime=_mtime(restore_file))
                 restored = apply_dataset_process_rows_to_state(dfp, overwrite=False)
                 if restored > 0:
                     st.caption(f"Loaded last process setup from `{os.path.basename(restore_file)}`")

@@ -9,7 +9,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from app_io.paths import ensure_report_center_dir, report_center_path
+from app_io.paths import P as APP_PATHS, ensure_report_center_dir, report_center_path
 from scripts.cli.run_weekly_report import (
     _build_fault_summary,
     _build_gas_summary,
@@ -17,10 +17,11 @@ from scripts.cli.run_weekly_report import (
     _build_sap_summary,
     _df_for_pdf_table,
     _expand_schedule_for_window,
-    _latest_containers_snapshot,
     _parse_dt_robust,
     _read_csv_safe,
 )
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 SECTIONS = [
     "Executive Summary",
@@ -32,6 +33,18 @@ SECTIONS = [
     "Maintenance Tests + Measurements",
     "Consumables Snapshot",
 ]
+
+
+def _mtime(path: str) -> float:
+    try:
+        return float(os.path.getmtime(path))
+    except Exception:
+        return 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _glob_reports_cached(report_dir: str, pattern: str, dir_mtime: float) -> list[str]:
+    return sorted(glob.glob(os.path.join(report_dir, pattern)), key=os.path.getmtime, reverse=True)
 
 
 def _parse_path_list(value: str) -> list[str]:
@@ -53,6 +66,20 @@ def _parse_caption_map(value: str) -> dict[str, str]:
 def _is_image_path(path: str) -> bool:
     ext = os.path.splitext(str(path).lower())[1]
     return ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+
+
+def _resolve_report_media_path(data_dir: str, raw_path: str) -> str:
+    if not raw_path:
+        return ""
+    if os.path.isabs(raw_path):
+        return raw_path
+    primary = os.path.join(data_dir, raw_path)
+    if os.path.exists(primary):
+        return primary
+    fallback = os.path.join(ROOT_DIR, raw_path)
+    if os.path.exists(fallback):
+        return fallback
+    return primary
 
 
 def _looks_hebrew(text: str) -> bool:
@@ -82,6 +109,29 @@ def _plain_text(value: object) -> str:
     s = re.sub(r"^\s*#+\s*", "", s, flags=re.MULTILINE)
     s = s.replace("$$", "").replace("$", "")
     return s.strip()
+
+
+def _safe_report_slug(value: str, fallback: str = "report") -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return fallback
+    text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
+    text = re.sub(r"[-\s]+", "_", text, flags=re.UNICODE).strip("_")
+    return text or fallback
+
+
+def _next_available_report_filename(base_name: str, ext: str, directory: str) -> str:
+    clean_base = str(base_name or "").strip() or "Report"
+    clean_ext = ext if str(ext).startswith(".") else f".{ext}"
+    candidate = f"{clean_base}{clean_ext}"
+    if not os.path.exists(os.path.join(directory, candidate)):
+        return candidate
+    idx = 2
+    while True:
+        candidate = f"{clean_base} ({idx}){clean_ext}"
+        if not os.path.exists(os.path.join(directory, candidate)):
+            return candidate
+        idx += 1
 
 
 def _prepare_development_project_bundle(data_dir: str, project_name: str) -> dict:
@@ -135,16 +185,16 @@ def _prepare_development_project_bundle(data_dir: str, project_name: str) -> dic
                 captions.update(_parse_caption_map(str(row.get(field, ""))))
         for p in all_paths:
             cap = captions.get(os.path.basename(p), "") or captions.get(p, "")
+            abs_p = _resolve_report_media_path(data_dir, p)
             attachment_summary_rows.append(
                 {
                     "Experiment": exp_title,
                     "File": os.path.basename(p),
                     "Type": os.path.splitext(p)[1].lower().lstrip("."),
                     "Caption": cap,
-                    "Path": p,
+                    "Path": abs_p,
                 }
             )
-            abs_p = p if os.path.isabs(p) else os.path.join(data_dir, p)
             if _is_image_path(abs_p) and os.path.exists(abs_p):
                 image_paths.append({"experiment": exp_title, "path": abs_p, "caption": cap or os.path.basename(p)})
 
@@ -617,6 +667,9 @@ def _build_development_project_pdf_pil(out_pdf: str, project_name: str, data_dir
 
 
 def _build_development_project_markdown(out_md: str, project_name: str, data_dir: str) -> None:
+    def _md_path(path: str) -> str:
+        return f"<{path}>"
+
     bundle = _prepare_development_project_bundle(data_dir, project_name)
     project = bundle["project"]
     experiments = bundle["experiments"]
@@ -696,7 +749,7 @@ def _build_development_project_markdown(out_md: str, project_name: str, data_dir
                     cap = _plain_text(img.get("caption", "")) or os.path.basename(img["path"])
                     lines.append(f"#### {cap}")
                     lines.append("")
-                    lines.append(f"![{cap}]({img['path']})")
+                    lines.append(f"![{cap}]({_md_path(str(img['path']))})")
                     lines.append("")
 
             row_attachments = attachments[attachments["Experiment"].astype(str) == exp_title].copy() if not attachments.empty else pd.DataFrame()
@@ -707,9 +760,8 @@ def _build_development_project_markdown(out_md: str, project_name: str, data_dir
                     file_name = _plain_text(arow.get("File", "")) or "-"
                     cap = _plain_text(arow.get("Caption", ""))
                     label = f"{file_name} - {cap}" if cap and cap != "-" else file_name
-                    path = arow.get("Path", "")
-                    abs_path = path if os.path.isabs(str(path)) else os.path.join(data_dir, str(path))
-                    lines.append(f"- [{label}]({abs_path})")
+                    abs_path = _resolve_report_media_path(data_dir, str(arow.get("Path", "")))
+                    lines.append(f"- [{label}]({_md_path(str(abs_path))})")
                 lines.append("")
 
     lines.append("## Experiment Updates")
@@ -948,6 +1000,60 @@ def _prepare_maintenance_tests(maintenance_dir: str, start_dt: pd.Timestamp, end
     return out[[c for c in cols if c in out.columns]].copy()
 
 
+def _latest_consumables_totals_snapshot() -> pd.DataFrame:
+    try:
+        with open(APP_PATHS.coating_stock_json, "r") as f:
+            warehouse_stock = json.load(f)
+            if not isinstance(warehouse_stock, dict):
+                warehouse_stock = {}
+    except Exception:
+        warehouse_stock = {}
+
+    container_df = _read_csv_safe(APP_PATHS.tower_containers_csv)
+    container_last = container_df.tail(1).iloc[0].to_dict() if not container_df.empty else {}
+
+    try:
+        with open(APP_PATHS.coating_config_json, "r") as f:
+            cfg = json.load(f)
+            cfg_types = list((cfg.get("coatings") or {}).keys())
+    except Exception:
+        cfg_types = []
+
+    container_totals: dict[str, float] = {}
+    for lab in ["A", "B", "C", "D"]:
+        ctype = str(container_last.get(f"{lab}_type", "") or "").strip()
+        clevel = pd.to_numeric(container_last.get(f"{lab}_level_kg", 0.0), errors="coerce")
+        clevel = float(0.0 if pd.isna(clevel) else clevel)
+        if ctype:
+            container_totals[ctype] = container_totals.get(ctype, 0.0) + clevel
+
+    all_types = []
+    for t in list(cfg_types) + list(warehouse_stock.keys()) + list(container_totals.keys()):
+        t = str(t or "").strip()
+        if t and t not in all_types:
+            all_types.append(t)
+
+    rows = []
+    updated_at = str(container_last.get("updated_at", "") or "")
+    for ctype in all_types:
+        warehouse_kg = float(pd.to_numeric(warehouse_stock.get(ctype, 0.0), errors="coerce") or 0.0)
+        containers_kg = float(pd.to_numeric(container_totals.get(ctype, 0.0), errors="coerce") or 0.0)
+        rows.append(
+            {
+                "updated_at": updated_at,
+                "coating_type": ctype,
+                "warehouse_kg": warehouse_kg,
+                "containers_kg": containers_kg,
+                "total_kg": warehouse_kg + containers_kg,
+            }
+        )
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.sort_values(["total_kg", "coating_type"], ascending=[False, True]).reset_index(drop=True)
+
+
 def _build_custom_pdf(
     out_pdf: str,
     title: str,
@@ -971,7 +1077,7 @@ def _build_custom_pdf(
     sap = _build_sap_summary(start_dt, end_dt)
     maintenance = _build_maintenance_summary(start_dt, end_dt)
     faults = _build_fault_summary(start_dt, end_dt)
-    containers = _latest_containers_snapshot()
+    containers = _latest_consumables_totals_snapshot()
     preforms = _read_csv_safe(preforms_csv_path)
     maint_tests = _prepare_maintenance_tests(maintenance_dir, start_dt, end_dt)
     past_sched, next_sched = _prepare_schedule_windows(schedule_csv_path)
@@ -1225,7 +1331,8 @@ def _build_custom_pdf(
 
     if "Consumables Snapshot" in sections:
         story.append(Paragraph("Consumables Snapshot", h2))
-        c_tbl = _styled_table(_df_for_pdf_table(containers, limit=1))
+        story.append(Paragraph("Per coating type: warehouse + containers total.", body))
+        c_tbl = _styled_table(_df_for_pdf_table(containers, limit=24))
         story += [c_tbl, Spacer(1, 8)]
 
     doc.build(story)
@@ -1235,6 +1342,40 @@ def render_report_center_tab(P) -> None:
     st.markdown(
         """
         <style>
+          .report-center-hero{
+            padding: 16px 18px 14px 18px;
+            border-radius: 18px;
+            border: 1px solid rgba(110,196,255,0.28);
+            background:
+              linear-gradient(135deg, rgba(9,27,52,0.94), rgba(8,18,36,0.86)),
+              radial-gradient(circle at top right, rgba(56,138,219,0.20), transparent 34%);
+            box-shadow: 0 18px 32px rgba(4,16,34,0.22);
+            margin-bottom: 12px;
+          }
+          .report-center-hero h2{
+            margin: 0 0 6px 0;
+            color: rgba(244,250,255,0.98);
+            font-size: 1.9rem;
+            line-height: 1.05;
+          }
+          .report-center-hero p{
+            margin: 0;
+            color: rgba(195,220,241,0.92);
+            font-size: 0.98rem;
+          }
+          .report-center-note{
+            margin: 10px 0 18px 0;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(90,176,255,0.22);
+            background: linear-gradient(180deg, rgba(9,27,52,0.58), rgba(5,16,31,0.54));
+            color: rgba(198,229,250,0.92);
+          }
+          .report-center-subtle{
+            color: rgba(168,202,230,0.82);
+            font-size: 0.93rem;
+            margin-top: 4px;
+          }
           div[data-testid="stButton"] > button{
             border-radius: 12px !important;
             border: 1px solid rgba(138,214,255,0.58) !important;
@@ -1278,149 +1419,256 @@ def render_report_center_tab(P) -> None:
             min-height: 52px !important;
             height: auto !important;
           }
+          div[role="radiogroup"]{
+            gap: 10px !important;
+          }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="dash-title">🗂️ Report Center</div>', unsafe_allow_html=True)
-    st.caption("Build custom PDF reports with operations-focused data for team handover.")
+    st.markdown(
+        """
+        <div class="report-center-hero">
+          <h2>🗂️ Report Center</h2>
+          <p>Build clean handover reports for operations and structured markdown reports for development projects.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("---")
-    st.markdown("### 🧪 Development Process Report")
-    st.caption("Choose a development project and build a clean PDF with project summary, experiments, updates, notes, and photos/files.")
+    mode = st.radio(
+        "Report mode",
+        ["Operations Report", "Development Process", "Recent Exports"],
+        key="report_center_mode",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    st.markdown(
+        f"""
+        <div class="report-center-note">
+          <strong>Current workspace:</strong> {mode}
+          <div class="report-center-subtle">
+            {"Operations handover PDF with schedule, maintenance, consumables, and outcomes." if mode == "Operations Report" else
+             "Markdown-first development report with experiments, updates, notes, files, and inline photos." if mode == "Development Process" else
+             "Quick access to the latest generated report files from this tab."}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     dev_projects_fp = os.path.join(P.data_dir, "development_projects.csv")
     dev_projects = _read_csv_safe(dev_projects_fp)
     project_options = []
     if not dev_projects.empty and "Project Name" in dev_projects.columns:
         project_options = sorted([str(x).strip() for x in dev_projects["Project Name"].dropna().tolist() if str(x).strip()])
-
-    d1, d2 = st.columns([2, 1])
-    selected_dev_project = d1.selectbox(
-        "Choose development project",
-        [""] + project_options,
-        key="report_center_dev_project",
-        format_func=lambda x: "Select project..." if x == "" else x,
-    )
-    dev_pdf_name = d2.text_input(
-        "Report filename",
-        value=f"development_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-        key="report_center_dev_pdf_name",
-    )
-
-    if selected_dev_project:
-        bundle = _prepare_development_project_bundle(P.data_dir, selected_dev_project)
-        dc1, dc2, dc3 = st.columns(3)
-        dc1.metric("Experiments", int(len(bundle["experiments"])))
-        dc2.metric("Updates", int(len(bundle["updates"])))
-        dc3.metric("Image/files rows", int(len(bundle["attachments"])))
-
-        with st.expander("Preview project content", expanded=False):
-            proj = bundle["project"]
-            if proj:
-                st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', '-')}")
-                st.markdown(f"**Target:** {proj.get('Target', '-')}")
-            if not bundle["experiments"].empty:
-                exp_prev = bundle["experiments"][[c for c in ["Experiment Title", "Date", "Researcher", "Purpose"] if c in bundle["experiments"].columns]]
-                st.dataframe(exp_prev, use_container_width=True, hide_index=True)
-            if not bundle["attachments"].empty:
-                att_prev = bundle["attachments"][[c for c in ["Experiment", "File", "Type", "Caption"] if c in bundle["attachments"].columns]]
-                st.dataframe(att_prev, use_container_width=True, hide_index=True)
-
-    if st.button("Generate Development Process Markdown", key="report_center_generate_dev_md", use_container_width=True):
-        if not selected_dev_project:
-            st.warning("Choose a development project first.")
-            return
-        base_name = (dev_pdf_name.strip() or f"development_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
-        if not base_name.lower().endswith(".md"):
-            base_name += ".md"
-        out_md = report_center_path(base_name)
-        with st.spinner("Building development process markdown..."):
-            try:
-                _build_development_project_markdown(
-                    out_md=out_md,
-                    project_name=selected_dev_project,
-                    data_dir=P.data_dir,
-                )
-                st.success(f"Development markdown saved: {out_md}")
-            except Exception as e:
-                st.error(f"Failed to build development markdown: {e}")
-
-    if "report_center_start" not in st.session_state:
-        st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
-    if "report_center_end" not in st.session_state:
-        st.session_state["report_center_end"] = pd.Timestamp.now().date()
-
-    p1, p2 = st.columns([1, 1])
-    if p1.button("📆 Week Before + Week After", key="report_center_range_prev_next", use_container_width=True):
-        st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
-        st.session_state["report_center_end"] = (pd.Timestamp.now() + pd.Timedelta(days=7)).date()
-        st.rerun()
-    if p2.button("📅 Last 7 Days", key="report_center_range_last7", use_container_width=True):
-        st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
-        st.session_state["report_center_end"] = pd.Timestamp.now().date()
-        st.rerun()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        start_date = st.date_input("Start date", key="report_center_start")
-    with c2:
-        end_date = st.date_input("End date", key="report_center_end")
-
-    title = st.text_input("Report title", value="Tower Operations Report", key="report_center_title")
-    selected_sections = st.multiselect(
-        "Choose sections",
-        SECTIONS,
-        default=SECTIONS,
-        key="report_center_sections",
-    )
-
     ensure_report_center_dir()
-    default_name = f"report_center_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    if st.button("Generate PDF Report", key="report_center_generate", use_container_width=True):
-        if not selected_sections:
-            st.warning("Choose at least one section.")
-            return
+    if mode == "Development Process":
+        st.markdown("### 🧪 Development Process Report")
+        st.caption("Choose one project, preview its content, then export a clean markdown report with inline images.")
+
+        d1, d2 = st.columns([2, 1])
+        selected_dev_project = d1.selectbox(
+            "Choose development project",
+            [""] + project_options,
+            key="report_center_dev_project",
+            format_func=lambda x: "Select project..." if x == "" else x,
+        )
+        if selected_dev_project:
+            suggested_name = _next_available_report_filename(
+                f"{selected_dev_project} - Development Report",
+                ".md",
+                P.report_center_dir,
+            )
+        else:
+            suggested_name = _next_available_report_filename(
+                "Development Report",
+                ".md",
+                P.report_center_dir,
+            )
+        current_name = st.session_state.get("report_center_dev_pdf_name", "").strip()
+        if (
+            not current_name
+            or current_name.startswith("development_process_")
+            or current_name == "Development Report.md"
+            or current_name.endswith(" - Development Report.md")
+            or re.match(r"^.+ - Development Report \(\d+\)\.md$", current_name)
+        ):
+            st.session_state["report_center_dev_pdf_name"] = suggested_name
+        dev_pdf_name = d2.text_input(
+            "Report filename",
+            value=st.session_state.get("report_center_dev_pdf_name", suggested_name),
+            key="report_center_dev_pdf_name",
+        )
+
+        if selected_dev_project:
+            bundle = _prepare_development_project_bundle(P.data_dir, selected_dev_project)
+            dc1, dc2, dc3 = st.columns(3)
+            dc1.metric("Experiments", int(len(bundle["experiments"])))
+            dc2.metric("Updates", int(len(bundle["updates"])))
+            dc3.metric("Media rows", int(len(bundle["attachments"])))
+
+            with st.expander("Preview project content", expanded=False):
+                proj = bundle["project"]
+                if proj:
+                    st.markdown(f"**Project Purpose:** {proj.get('Project Purpose', '-')}")
+                    st.markdown(f"**Target:** {proj.get('Target', '-')}")
+                if not bundle["experiments"].empty:
+                    exp_prev = bundle["experiments"][[c for c in ["Experiment Title", "Date", "Researcher", "Purpose"] if c in bundle["experiments"].columns]]
+                    st.dataframe(exp_prev, use_container_width=True, hide_index=True)
+                if not bundle["attachments"].empty:
+                    att_prev = bundle["attachments"][[c for c in ["Experiment", "File", "Type", "Caption"] if c in bundle["attachments"].columns]]
+                    st.dataframe(att_prev, use_container_width=True, hide_index=True)
+
+        if st.button("Generate Development Process Markdown", key="report_center_generate_dev_md", use_container_width=True):
+            if not selected_dev_project:
+                st.warning("Choose a development project first.")
+                return
+            base_name = (
+                dev_pdf_name.strip()
+                or _next_available_report_filename(
+                    f"{selected_dev_project} - Development Report",
+                    ".md",
+                    P.report_center_dir,
+                )
+            )
+            if not base_name.lower().endswith(".md"):
+                base_name += ".md"
+            out_md = report_center_path(base_name)
+            if os.path.exists(out_md):
+                stem, ext = os.path.splitext(base_name)
+                base_name = _next_available_report_filename(stem, ext or ".md", P.report_center_dir)
+            out_md = report_center_path(base_name)
+            with st.spinner("Building development process markdown..."):
+                try:
+                    _build_development_project_markdown(
+                        out_md=out_md,
+                        project_name=selected_dev_project,
+                        data_dir=P.data_dir,
+                    )
+                    st.success(f"Development markdown saved: {out_md}")
+                except Exception as e:
+                    st.error(f"Failed to build development markdown: {e}")
+
+        st.markdown("---")
+        st.markdown("**Recent Development Reports**")
+        md_files = _glob_reports_cached(P.report_center_dir, "*.md", _mtime(P.report_center_dir))
+        if not md_files:
+            st.info("No development markdown reports yet.")
+        else:
+            for p in md_files[:12]:
+                st.code(p)
+
+    elif mode == "Operations Report":
+        st.markdown("### 📊 Operations Report")
+        st.caption("Build the operations handover PDF for the selected period, with schedule, maintenance, outcomes, resources, and tests.")
+
+        if "report_center_start" not in st.session_state:
+            st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
+        if "report_center_end" not in st.session_state:
+            st.session_state["report_center_end"] = pd.Timestamp.now().date()
+
+        p1, p2 = st.columns([1, 1])
+        if p1.button("📆 Week Before + Week After", key="report_center_range_prev_next", use_container_width=True):
+            st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
+            st.session_state["report_center_end"] = (pd.Timestamp.now() + pd.Timedelta(days=7)).date()
+            st.rerun()
+        if p2.button("📅 Last 7 Days", key="report_center_range_last7", use_container_width=True):
+            st.session_state["report_center_start"] = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
+            st.session_state["report_center_end"] = pd.Timestamp.now().date()
+            st.rerun()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            start_date = st.date_input("Start date", key="report_center_start")
+        with c2:
+            end_date = st.date_input("End date", key="report_center_end")
+
+        title = st.text_input("Report title", value="Tower Operations Report", key="report_center_title")
+        selected_sections = st.multiselect(
+            "Choose sections",
+            SECTIONS,
+            default=SECTIONS,
+            key="report_center_sections",
+        )
+
         start_dt = pd.Timestamp(datetime.combine(start_date, datetime.min.time()))
         end_dt = pd.Timestamp(datetime.combine(end_date, datetime.max.time()))
-        if end_dt < start_dt:
-            st.error("End date must be after start date.")
-            return
+        prev = _prepare_orders_period(P.orders_csv, start_dt, end_dt)
+        done_count = int(prev["Status"].astype(str).str.strip().str.lower().eq("done").sum()) if not prev.empty else 0
+        failed_count = int(prev["Status"].astype(str).str.strip().str.lower().eq("failed").sum()) if not prev.empty else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Orders in period", int(len(prev)))
+        c2.metric("Done", done_count)
+        c3.metric("Failed", failed_count)
 
-        out_pdf = report_center_path(default_name)
-        with st.spinner("Building report..."):
-            try:
-                _build_custom_pdf(
-                    out_pdf=out_pdf,
-                    title=title.strip() or "Tower Operations Report",
-                    start_dt=start_dt,
-                    end_dt=end_dt,
-                    sections=selected_sections,
-                    orders_csv_path=P.orders_csv,
-                    parts_orders_csv_path=P.parts_orders_csv,
-                    schedule_csv_path=P.schedule_csv,
-                    preforms_csv_path=P.preform_inventory_csv,
-                    maintenance_dir=P.maintenance_dir,
-                )
-                st.success(f"Report saved: {out_pdf}")
-            except Exception as e:
-                st.error(f"Failed to build report: {e}")
+        default_name = f"report_center_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        if st.button("Generate PDF Report", key="report_center_generate", use_container_width=True):
+            if not selected_sections:
+                st.warning("Choose at least one section.")
+                return
+            if end_dt < start_dt:
+                st.error("End date must be after start date.")
+                return
 
-    st.markdown("**Quick preview (selected period)**")
-    prev = _prepare_orders_period(P.orders_csv, pd.Timestamp(datetime.combine(start_date, datetime.min.time())), pd.Timestamp(datetime.combine(end_date, datetime.max.time())))
-    done_count = int(prev["Status"].astype(str).str.strip().str.lower().eq("done").sum()) if not prev.empty else 0
-    failed_count = int(prev["Status"].astype(str).str.strip().str.lower().eq("failed").sum()) if not prev.empty else 0
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Orders in period", int(len(prev)))
-    c2.metric("Done", done_count)
-    c3.metric("Failed", failed_count)
+            out_pdf = report_center_path(default_name)
+            with st.spinner("Building report..."):
+                try:
+                    _build_custom_pdf(
+                        out_pdf=out_pdf,
+                        title=title.strip() or "Tower Operations Report",
+                        start_dt=start_dt,
+                        end_dt=end_dt,
+                        sections=selected_sections,
+                        orders_csv_path=P.orders_csv,
+                        parts_orders_csv_path=P.parts_orders_csv,
+                        schedule_csv_path=P.schedule_csv,
+                        preforms_csv_path=P.preform_inventory_csv,
+                        maintenance_dir=P.maintenance_dir,
+                    )
+                    st.success(f"Report saved: {out_pdf}")
+                except Exception as e:
+                    st.error(f"Failed to build report: {e}")
 
-    st.markdown("---")
-    st.markdown("**Recent Report Center PDFs**")
-    files = sorted(glob.glob(os.path.join(P.report_center_dir, "*.pdf")), key=os.path.getmtime, reverse=True)
-    if not files:
-        st.info("No reports yet. Generate your first custom PDF.")
+        with st.expander("Quick preview for selected period", expanded=False):
+            st.markdown("Use this as a fast sanity check before you export.")
+            pca, pcb, pcc = st.columns(3)
+            pca.metric("Orders in period", int(len(prev)))
+            pcb.metric("Done", done_count)
+            pcc.metric("Failed", failed_count)
+
+        st.markdown("---")
+        st.markdown("**Recent Operations PDFs**")
+        files = _glob_reports_cached(P.report_center_dir, "*.pdf", _mtime(P.report_center_dir))
+        if not files:
+            st.info("No operations PDFs yet.")
+        else:
+            for p in files[:12]:
+                st.code(p)
+
     else:
-        for p in files[:20]:
-            st.code(p)
+        st.markdown("### 🗃️ Recent Exports")
+        st.caption("Fast access to the latest outputs generated from Report Center.")
+        pdf_files = _glob_reports_cached(P.report_center_dir, "*.pdf", _mtime(P.report_center_dir))
+        md_files = _glob_reports_cached(P.report_center_dir, "*.md", _mtime(P.report_center_dir))
+        c1, c2 = st.columns(2)
+        c1.metric("Operations PDFs", len(pdf_files))
+        c2.metric("Development Markdown", len(md_files))
+
+        l1, l2 = st.columns(2)
+        with l1:
+            st.markdown("**PDF exports**")
+            if not pdf_files:
+                st.info("No PDF exports yet.")
+            else:
+                for p in pdf_files[:15]:
+                    st.code(p)
+        with l2:
+            st.markdown("**Markdown exports**")
+            if not md_files:
+                st.info("No markdown exports yet.")
+            else:
+                for p in md_files[:15]:
+                    st.code(p)

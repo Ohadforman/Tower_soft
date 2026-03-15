@@ -296,7 +296,7 @@ def render_consumables_tab(P):
         if not os.path.exists(path):
             return {}
         try:
-            df = pd.read_csv(path)
+            df = _read_csv_cached(path, True, _file_mtime(path))
             if df.empty:
                 return {}
             return df.iloc[-1].to_dict()
@@ -326,7 +326,14 @@ def render_consumables_tab(P):
     def _mark_containers_dirty():
         st.session_state["cons_containers_dirty"] = True
 
-    def _list_files_recursive(root: str, exts=(".csv",)):
+    def _path_mtime(path: str):
+        try:
+            return os.path.getmtime(path)
+        except Exception:
+            return None
+
+    @st.cache_data(show_spinner=False)
+    def _list_files_recursive_cached(root: str, exts=(".csv",)):
         out = []
         try:
             for base, _, files in os.walk(root):
@@ -338,12 +345,23 @@ def render_consumables_tab(P):
         out.sort(key=lambda p: os.path.getmtime(p), reverse=True)
         return out
 
+    def _list_files_recursive(root: str, exts=(".csv",)):
+        return _list_files_recursive_cached(root, exts)
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_cached(path: str, keep_default_na: bool, file_mtime):
+        return pd.read_csv(path, keep_default_na=keep_default_na)
+
+    @st.cache_data(show_spinner=False)
+    def _load_coating_config_cached(path: str, file_mtime):
+        with open(path, "r") as config_file:
+            return json.load(config_file)
+
     # ==========================================================
     # Load coating types
     # ==========================================================
     try:
-        with open(P.coating_config_json, "r") as config_file:
-            config = json.load(config_file)
+        config = _load_coating_config_cached(P.coating_config_json, _path_mtime(P.coating_config_json))
     except Exception:
         st.error(f"Missing coating config file: {P.coating_config_json}")
         st.stop()
@@ -598,7 +616,7 @@ def render_consumables_tab(P):
             st.error(f"Failed to save containers: {e}")
 
     # ==========================================================
-    # Stock by type (warehouse + containers)
+    # Stock by type
     # ==========================================================
     def _sum_containers_by_type(container_state: dict):
         sums = {t: 0.0 for t in coating_types}
@@ -611,14 +629,15 @@ def render_consumables_tab(P):
 
     container_sums = _sum_containers_by_type(current_container_state)
     total_by_type = {
-        t: _safe_float(warehouse_stock.get(t, 0.0), 0.0) + _safe_float(container_sums.get(t, 0.0), 0.0)
+        # Main stock view should represent bulk stock outside the running containers.
+        t: _safe_float(warehouse_stock.get(t, 0.0), 0.0)
         for t in coating_types
     }
 
     if show_stock:
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown('<div class="cons-section">🏷️ Coating Stock by Type (Auto)</div>', unsafe_allow_html=True)
-        st.caption("Computed from warehouse + container contents. Red when total < 1 kg.")
+        st.caption("Main value shows bulk stock outside containers. Container fill is shown only as reference. Red when warehouse stock < 1 kg.")
 
         if coating_types:
             max_total = max(total_by_type.values()) if total_by_type else 0.0
@@ -643,7 +662,8 @@ def render_consumables_tab(P):
                             </div>
                             <div style="text-align:center; margin-top:6px;">
                               <div class="{ 'low-num' if is_low else '' }"><b>{total_kg:.2f} kg</b></div>
-                              <div class="muted" style="font-size:0.85rem;">Warehouse {ware_kg:.2f} + Containers {cont_kg:.2f}</div>
+                              <div class="muted" style="font-size:0.85rem;">Warehouse {ware_kg:.2f} kg</div>
+                              <div class="muted" style="font-size:0.80rem;">In containers {cont_kg:.2f} kg</div>
                             </div>
                             """,
                             unsafe_allow_html=True
@@ -841,6 +861,12 @@ def render_consumables_tab(P):
     else:
         return
 
+    argon_open = st.toggle("Open Argon analytics", value=False, key="cons_open_argon_analytics")
+    if not argon_open:
+        st.caption("Argon analytics folded.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
     GAS_DIR = P.gas_reports_dir
     LOGS_DIR = P.logs_dir
     ensure_dir(GAS_DIR)
@@ -914,27 +940,38 @@ def render_consumables_tab(P):
         return pd.to_datetime(pd.Series(out), errors="coerce")
 
 
-    def _list_logs():
+    @st.cache_data(show_spinner=False)
+    def _list_logs_cached(root: str):
         out = []
         try:
-                for base, _, files in os.walk(LOGS_DIR):
-                    for fn in files:
-                        if fn.lower().endswith(".csv"):
-                            out.append(os.path.join(base, fn))
+            for base, _, files in os.walk(root):
+                for fn in files:
+                    if fn.lower().endswith(".csv"):
+                        out.append(os.path.join(base, fn))
         except Exception:
             pass
+        out.sort()
         return out
 
 
-    def _logs_snapshot():
+    @st.cache_data(show_spinner=False)
+    def _logs_snapshot_cached(root: str, root_mtime):
         rows = []
-        for p in _list_logs():
+        for p in _list_logs_cached(root):
             try:
                 rows.append((p, os.path.getmtime(p)))
             except Exception:
                 rows.append((p, 0.0))
         rows.sort(key=lambda t: t[0])
         return tuple(rows)
+
+
+    def _list_logs():
+        return list(_list_logs_cached(LOGS_DIR))
+
+
+    def _logs_snapshot():
+        return _logs_snapshot_cached(LOGS_DIR, _file_mtime(LOGS_DIR))
 
 
     def _safe_float(x, default=0.0):
@@ -988,7 +1025,7 @@ def render_consumables_tab(P):
 
         for lp in logs:
             try:
-                df = pd.read_csv(lp)
+                df = _read_csv_cached(lp, True, _file_mtime(lp))
             except Exception:
                 continue
 
@@ -1085,7 +1122,7 @@ def render_consumables_tab(P):
 
         for lp, _ in logs_snapshot:
             try:
-                df = pd.read_csv(lp)
+                df = _read_csv_cached(lp, True, _file_mtime(lp))
             except Exception:
                 continue
 
@@ -1157,7 +1194,7 @@ def render_consumables_tab(P):
     # View report
     if os.path.exists(REPORT_CSV):
         try:
-            rep = pd.read_csv(REPORT_CSV)
+            rep = _read_csv_cached(REPORT_CSV, True, _file_mtime(REPORT_CSV))
             st.dataframe(rep, use_container_width=True, hide_index=True)
             with open(REPORT_CSV, "r") as f:
                 st.download_button(

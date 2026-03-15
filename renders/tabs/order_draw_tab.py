@@ -151,11 +151,21 @@ def render_order_draw_tab(P):
     def ensure_projects_file():
         if not os.path.exists(PROJECTS_FILE):
             pd.DataFrame(columns=[PROJECTS_COL]).to_csv(PROJECTS_FILE, index=False)
-    
+
+    def _mtime(path: str) -> float:
+        try:
+            return float(os.path.getmtime(path))
+        except Exception:
+            return 0.0
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_cached(path: str, keep_default_na: bool, file_mtime: float):
+        return pd.read_csv(path, keep_default_na=keep_default_na)
+
     def load_projects() -> list:
         ensure_projects_file()
         try:
-            d = pd.read_csv(PROJECTS_FILE, keep_default_na=False)
+            d = _read_csv_cached(PROJECTS_FILE, keep_default_na=False, file_mtime=_mtime(PROJECTS_FILE))
         except Exception:
             return []
         if PROJECTS_COL not in d.columns:
@@ -182,7 +192,7 @@ def render_order_draw_tab(P):
         existing = load_projects()
         if new_name in existing:
             return False, "Project already exists."
-        dfp = pd.read_csv(PROJECTS_FILE, keep_default_na=False) if os.path.exists(PROJECTS_FILE) else pd.DataFrame()
+        dfp = _read_csv_cached(PROJECTS_FILE, keep_default_na=False, file_mtime=_mtime(PROJECTS_FILE)) if os.path.exists(PROJECTS_FILE) else pd.DataFrame()
         if PROJECTS_COL not in dfp.columns:
             dfp[PROJECTS_COL] = ""
         dfp = pd.concat([dfp, pd.DataFrame([{PROJECTS_COL: new_name}])], ignore_index=True)
@@ -253,7 +263,7 @@ def render_order_draw_tab(P):
     def load_templates_df() -> pd.DataFrame:
         ensure_templates_file()
         try:
-            d = pd.read_csv(PROJECT_TEMPLATES_FILE, keep_default_na=False)
+            d = _read_csv_cached(PROJECT_TEMPLATES_FILE, keep_default_na=False, file_mtime=_mtime(PROJECT_TEMPLATES_FILE))
         except Exception:
             d = pd.DataFrame(columns=TEMPLATE_FIELDS)
         for c in TEMPLATE_FIELDS:
@@ -320,7 +330,7 @@ def render_order_draw_tab(P):
         if not os.path.exists(SAP_INVENTORY_FILE):
             return 0.0
         try:
-            inv = pd.read_csv(SAP_INVENTORY_FILE, keep_default_na=False)
+            inv = _read_csv_cached(SAP_INVENTORY_FILE, keep_default_na=False, file_mtime=_mtime(SAP_INVENTORY_FILE))
         except Exception:
             return 0.0
         if inv.empty or "Item" not in inv.columns or "Count" not in inv.columns:
@@ -348,7 +358,7 @@ def render_order_draw_tab(P):
         st.info("No orders submitted yet.")
         df = pd.DataFrame()
     else:
-        df = pd.read_csv(orders_file, keep_default_na=False)
+        df = _read_csv_cached(orders_file, keep_default_na=False, file_mtime=_mtime(orders_file))
     
     if not df.empty:
         if "Timestamp" in df.columns:
