@@ -26,5 +26,29 @@ reports/path_audit/path_permissions_*.csv
 backups/snapshot_*/
 logs/app_events_*.log
 
+# Generated backups / migrations
+backups/
+legacy_converted_out_v2/
+legacy_converted_out_v2.zip
+maintenance/_realistic_baseline_backup_*/
+
+# Runtime maintenance state
+maintenance/maintenance_task_state.csv
+maintenance/maintenance_wait_parts_log.csv
+
+# Generated reports / bundles
+reports/checks/release_bundle_*/
+reports/checks/release_bundle_*.zip
+reports/checks/v2_deploy_protocol_*.json
+reports/checks/v2_deploy_protocol_*.md
+reports/maintenance_todo/*.pdf
+reports/report_center/
+reports/weekly/tower_weekly_report_*.pdf
+reports/weekly/_weekly_reports_state.json
+
+# Runtime activity state
+state/activity_events_log.csv
+state/activity_indicator.json
+
 # OS noise
 .DS_Store
