@@ -244,8 +244,18 @@ def render_development_process_tab(P):
     # =========================
     # Data helpers
     # =========================
+    def _mtime(path: str):
+        try:
+            return os.path.getmtime(path)
+        except Exception:
+            return None
+
+    @st.cache_data(show_spinner=False)
+    def _read_csv_cached(path: str, file_mtime):
+        return pd.read_csv(path)
+
     def load_projects():
-        df = pd.read_csv(PROJECTS_FILE)
+        df = _read_csv_cached(PROJECTS_FILE, _mtime(PROJECTS_FILE))
         df["Archived"] = df.get("Archived", False)
         df["Archived"] = df["Archived"].fillna(False).astype(bool)
         return df
@@ -254,7 +264,7 @@ def render_development_process_tab(P):
         df.to_csv(PROJECTS_FILE, index=False)
 
     def load_experiments():
-        df = pd.read_csv(EXPERIMENTS_FILE)
+        df = _read_csv_cached(EXPERIMENTS_FILE, _mtime(EXPERIMENTS_FILE))
         if "Is Drawing" in df.columns:
             df["Is Drawing"] = df["Is Drawing"].fillna(False).astype(bool)
         df["Attachments"] = df.get("Attachments", "").fillna("")
@@ -266,7 +276,7 @@ def render_development_process_tab(P):
         df.to_csv(EXPERIMENTS_FILE, index=False)
 
     def load_updates():
-        return pd.read_csv(UPDATES_FILE)
+        return _read_csv_cached(UPDATES_FILE, _mtime(UPDATES_FILE))
 
     def save_updates(df):
         df.to_csv(UPDATES_FILE, index=False)

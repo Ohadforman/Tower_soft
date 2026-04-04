@@ -7,9 +7,9 @@ def render_draw_finalize_tab(P):
     from datetime import datetime
     import pandas as pd
     import streamlit as st
-    import duckdb
 
     from helpers.text_utils import safe_str
+    from helpers.duckdb_io import get_duckdb_conn
     from helpers.dataset_io import (
         append_rows_to_dataset_csv,
         resolve_dataset_csv_path,
@@ -112,7 +112,7 @@ def render_draw_finalize_tab(P):
     # DuckDB connection (shared with SQL Lab + Maintenance)
     # ==========================================================
     if "sql_duck_con" not in st.session_state:
-        st.session_state["sql_duck_con"] = duckdb.connect(DB_PATH)
+        st.session_state["sql_duck_con"] = get_duckdb_conn(DB_PATH)
     con = st.session_state["sql_duck_con"]
     try:
         con.execute("PRAGMA threads=4;")

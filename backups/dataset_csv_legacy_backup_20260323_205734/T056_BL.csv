@@ -1,0 +1,105 @@
+Parameter Name,Value,Units
+Draw Name,T056_BL,
+Draw Date,2025-09-18 09:32:17.245323,
+Entry Fiber Diameter,40.0,µm
+First Coating Diameter (Theoretical),93.03861242922716,µm
+Second Coating Diameter (Theoretical),115.71920843501144,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,250.0,µm
+Second Coating Entry Die,200.0,µm
+Primary Coating Temperature,40.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,160,µm
+Secondary Die Diameter,140,µm
+Preform Diameter,17.0,mm
+Tiger Cut,0.0,%
+Selected Iris Diameter,24.5,mm
+P Gain (Diameter Control),0.4,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.129,mm
+Log File Name,T056_BL_18092025_142347.csv,
+Zone 1 Start,2025-09-18 13:17:18.800000,
+Zone 1 End,2025-09-18 13:25:07.800000,
+Zone 1 Fibre Length at Start,0.02,km
+Zone 1 Fibre Length at End,0.72,km
+Zone 1 Pf Process Position at Start,30.11,mm
+Zone 1 Pf Process Position at End,33.97,mm
+Zone 1 Avg (Bare Fibre Diameter),40.01,µm
+Zone 1 Min (Bare Fibre Diameter),39.7,µm
+Zone 1 Max (Bare Fibre Diameter),40.3,µm
+Zone 1 Avg (Coated Inner Diameter),102.19,µm
+Zone 1 Min (Coated Inner Diameter),101.8,µm
+Zone 1 Max (Coated Inner Diameter),102.5,µm
+Zone 1 Avg (Coated Outer Diameter),120.47,µm
+Zone 1 Min (Coated Outer Diameter),119.9,µm
+Zone 1 Max (Coated Outer Diameter),121.0,µm
+Zone 1 Avg (Capstan Speed),91.11,m/min
+Zone 1 Min (Capstan Speed),90.43,m/min
+Zone 1 Max (Capstan Speed),91.58,m/min
+Zone 1 Avg (Tension N),-0.15,g
+Zone 1 Min (Tension N),-0.21,g
+Zone 1 Max (Tension N),-0.11,g
+Zone 1 Avg (Furnace DegC Actual),2220.05,C
+Zone 1 Min (Furnace DegC Actual),2219.42,C
+Zone 1 Max (Furnace DegC Actual),2220.37,C
+Last Fiber Position,3.21,km
+TnM,,km
+Cut,2.49,km
+Keep,0.71,km
+Log File Name,T056_BL_18092025_142347.csv,
+Zone 1 Start,2025-09-18 13:17:18.800000,
+Zone 1 End,2025-09-18 13:25:07.800000,
+Zone 1 Fibre Length at Start,0.02,km
+Zone 1 Fibre Length at End,0.72,km
+Zone 1 Pf Process Position at Start,30.11,mm
+Zone 1 Pf Process Position at End,33.97,mm
+Zone 1 Avg (Bare Fibre Diameter),40.01,µm
+Zone 1 Min (Bare Fibre Diameter),39.7,µm
+Zone 1 Max (Bare Fibre Diameter),40.3,µm
+Zone 1 Avg (Coated Inner Diameter),102.19,µm
+Zone 1 Min (Coated Inner Diameter),101.8,µm
+Zone 1 Max (Coated Inner Diameter),102.5,µm
+Zone 1 Avg (Coated Outer Diameter),120.47,µm
+Zone 1 Min (Coated Outer Diameter),119.9,µm
+Zone 1 Max (Coated Outer Diameter),121.0,µm
+Zone 1 Avg (Capstan Speed),91.11,m/min
+Zone 1 Min (Capstan Speed),90.43,m/min
+Zone 1 Max (Capstan Speed),91.58,m/min
+Zone 1 Avg (Tension N),-0.15,g
+Zone 1 Min (Tension N),-0.21,g
+Zone 1 Max (Tension N),-0.11,g
+Zone 1 Avg (Furnace DegC Actual),2220.05,C
+Zone 1 Min (Furnace DegC Actual),2219.42,C
+Zone 1 Max (Furnace DegC Actual),2220.37,C
+Zone 2 Start,2025-09-18 13:48:17.800000,
+Zone 2 End,2025-09-18 14:12:20.800000,
+Zone 2 Fibre Length at Start,0.08,km
+Zone 2 Fibre Length at End,3.03,km
+Zone 2 Pf Process Position at Start,50.66,mm
+Zone 2 Pf Process Position at End,67.28,mm
+Zone 2 Avg (Bare Fibre Diameter),40.01,µm
+Zone 2 Min (Bare Fibre Diameter),39.6,µm
+Zone 2 Max (Bare Fibre Diameter),40.2,µm
+Zone 2 Avg (Coated Inner Diameter),101.3,µm
+Zone 2 Min (Coated Inner Diameter),100.8,µm
+Zone 2 Max (Coated Inner Diameter),101.7,µm
+Zone 2 Avg (Coated Outer Diameter),117.49,µm
+Zone 2 Min (Coated Outer Diameter),116.8,µm
+Zone 2 Max (Coated Outer Diameter),118.9,µm
+Zone 2 Avg (Capstan Speed),122.85,m/min
+Zone 2 Min (Capstan Speed),122.02,m/min
+Zone 2 Max (Capstan Speed),124.42,m/min
+Zone 2 Avg (Tension N),-0.18,g
+Zone 2 Min (Tension N),-0.24,g
+Zone 2 Max (Tension N),-0.12,g
+Zone 2 Avg (Furnace DegC Actual),2239.97,C
+Zone 2 Min (Furnace DegC Actual),2239.45,C
+Zone 2 Max (Furnace DegC Actual),2241.06,C
+Last Fiber Position,3.21,km
+TnM,,km
+Cut,2.49,km
+Keep,0.71,km
+Cut,0.18,km
+Keep,2.95,km

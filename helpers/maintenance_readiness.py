@@ -48,14 +48,15 @@ def compute_readiness(
     package_row: dict,
     stock_qty_map: Dict[str, float],
 ) -> dict:
-    req_parts = parse_parts_list(task_row.get("Required_Parts", ""))
+    req_parts = parse_parts_list(task_row.get("Mandatory_Parts", "")) or parse_parts_list(task_row.get("Required_Parts", ""))
+    conditional_list = parse_parts_list(task_row.get("Conditional_Parts", ""))
     prep = safe_str(package_row.get("Preparation_Checklist", ""))
     safety = safe_str(package_row.get("Safety_Protocol", ""))
     proc = safe_str(package_row.get("Procedure_Steps", ""))
     stop = safe_str(package_row.get("Draw_Stop_Plan", ""))
     completion = safe_str(package_row.get("Completion_Criteria", ""))
 
-    conditional_parts = is_parts_conditional(
+    conditional_parts = bool(conditional_list) or is_parts_conditional(
         task_text=task_row.get("Task", ""),
         procedure_text=proc,
         prep_text=prep,
@@ -101,8 +102,8 @@ def compute_readiness(
         "score": int(score),
         "conditional_parts": bool(conditional_parts),
         "required_parts": req_parts,
+        "conditional_parts_list": conditional_list,
         "missing_parts": missing_parts,
         "blockers": blockers,
         "warnings": warnings,
     }
-

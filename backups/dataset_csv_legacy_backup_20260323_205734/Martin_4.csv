@@ -1,0 +1,21 @@
+Parameter Name,Value,Units
+Draw Name,Martin_4,
+Draw Date,2025-07-17 07:29:18.480293,
+Entry Fiber Diameter,125.0,µm
+First Coating Diameter (Theoretical),161.95878089687855,µm
+Second Coating Diameter (Theoretical),231.96861252800534,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,350.0,µm
+Second Coating Entry Die,500.0,µm
+Primary Coating Temperature,37.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,202,µm
+Secondary Die Diameter,310,µm
+Preform Diameter,28.0,mm
+Tiger Cut,0.0,%
+Selected Iris Diameter,32.0,mm
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.3,mm

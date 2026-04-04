@@ -50,16 +50,15 @@ def render_tower_parts_tab(P):
             color: rgba(230,246,255,0.98);
           }
           .tp-action-card{
-            border: 1px solid rgba(128,206,255,0.22);
-            border-radius: 12px;
-            background: linear-gradient(180deg, rgba(14,32,56,0.26), rgba(8,16,28,0.20));
-            padding: 10px 12px;
+            border: 0;
+            background: transparent;
+            padding: 0;
             margin-bottom: 12px;
           }
           .tp-action-help{
-            color: rgba(194,228,248,0.90);
-            font-size: 0.84rem;
-            margin-top: 6px;
+            color: rgba(170,204,228,0.78);
+            font-size: 0.80rem;
+            margin-top: 2px;
           }
           .tp-green-text{
             color: rgba(126, 255, 190, 0.98);
@@ -67,6 +66,151 @@ def render_tower_parts_tab(P):
             font-weight: 650;
             margin: 4px 0 8px 0;
             text-shadow: 0 0 8px rgba(46, 208, 132, 0.20);
+          }
+          .tp-soft-note{
+            color: rgba(186,216,232,0.82);
+            font-size: 0.84rem;
+            font-weight: 560;
+            margin: 4px 0 8px 0;
+          }
+          .tp-focus-title{
+            color: rgba(126, 255, 190, 0.98);
+            font-size: 0.90rem;
+            font-weight: 760;
+            margin: 0 0 8px 0;
+            text-shadow: 0 0 10px rgba(46,208,132,0.18);
+          }
+          .tp-step-shell{
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            padding: 4px 0;
+            margin: 8px 0 10px 0;
+          }
+          .tp-step-shell.is-focus{
+            box-shadow: none;
+          }
+          .tp-step-sub{
+            color: rgba(184,220,242,0.84);
+            font-size: 0.83rem;
+            margin: 2px 0 8px 0;
+          }
+          .tp-chip-grid{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+          }
+          .tp-status-overview{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+            gap: 10px;
+            margin: 6px 0 12px 0;
+          }
+          .tp-status-pill{
+            padding: 8px 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(128,206,255,0.16);
+            background: linear-gradient(180deg, rgba(13,26,42,0.32), rgba(8,15,24,0.18));
+          }
+          .tp-status-pill.is-active{
+            border-color: rgba(164,230,255,0.54);
+            box-shadow: 0 0 14px rgba(74,170,255,0.14);
+            background: linear-gradient(180deg, rgba(24,58,96,0.44), rgba(10,28,52,0.34));
+          }
+          .tp-status-pill-label{
+            color: rgba(190,224,244,0.88);
+            font-size: 0.76rem;
+            font-weight: 700;
+            margin-bottom: 2px;
+          }
+          .tp-status-pill-value{
+            color: rgba(237,248,255,0.98);
+            font-size: 1rem;
+            font-weight: 850;
+          }
+          .tp-queue-board{
+            display:grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin: 6px 0 12px 0;
+          }
+          .tp-queue-card{
+            border: 1px solid rgba(128,206,255,0.10);
+            border-radius: 10px;
+            background: rgba(8,16,28,0.08);
+            padding: 10px;
+          }
+          .tp-queue-title{
+            color: rgba(232,246,255,0.98);
+            font-size: 0.88rem;
+            font-weight: 850;
+            margin-bottom: 2px;
+          }
+          .tp-queue-count{
+            color: rgba(126,198,255,0.98);
+            font-size: 1.6rem;
+            line-height: 1.05;
+            font-weight: 900;
+            margin-bottom: 4px;
+            text-shadow: 0 0 12px rgba(86,180,255,0.24);
+          }
+          .tp-queue-sub{
+            color: rgba(190,224,244,0.86);
+            font-size: 0.78rem;
+            min-height: 34px;
+          }
+          .tp-context-card{
+            border: 1px solid rgba(128,206,255,0.14);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(10,20,32,0.18), rgba(8,14,22,0.12));
+            padding: 10px 12px;
+            margin: 8px 0 12px 0;
+          }
+          .tp-context-card.is-quiet{
+            border-color: rgba(128,206,255,0.10);
+            background: linear-gradient(180deg, rgba(8,16,26,0.12), rgba(8,14,22,0.08));
+            opacity: 0.92;
+          }
+          .tp-context-grid{
+            display:grid;
+            grid-template-columns: repeat(5, minmax(0,1fr));
+            gap: 8px 12px;
+          }
+          .tp-context-label{
+            color: rgba(166,194,214,0.68);
+            font-size: 0.70rem;
+            font-weight: 650;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 2px;
+          }
+          .tp-context-value{
+            color: rgba(214,232,246,0.84);
+            font-size: 0.84rem;
+            font-weight: 600;
+          }
+          .tp-current-goal{
+            border-left: 3px solid rgba(164,230,255,0.48);
+            border-radius: 0;
+            background: transparent;
+            padding: 2px 0 2px 10px;
+            margin: 6px 0 8px 0;
+            box-shadow: none;
+          }
+          .tp-current-goal b{
+            color: rgba(244,252,255,0.99);
+          }
+          .tp-current-goal span{
+            color: rgba(208,236,250,0.95);
+          }
+          @media (max-width: 1100px){
+            .tp-queue-board{
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .tp-context-grid{
+              grid-template-columns: repeat(2, minmax(0,1fr));
+            }
           }
           div[data-testid="stButton"] > button{
             border-radius: 12px !important;
@@ -108,13 +252,70 @@ def render_tower_parts_tab(P):
           div[data-baseweb="select"] span[data-baseweb="tag"] *{
             color: rgba(244,252,255,0.99) !important;
           }
+          div[data-testid="stSegmentedControl"]{
+            background: linear-gradient(180deg, rgba(10,20,36,0.32), rgba(8,14,24,0.22));
+            border: 1px solid rgba(128,206,255,0.18);
+            border-radius: 12px;
+            padding: 6px;
+            box-shadow: inset 0 0 0 1px rgba(120,200,255,0.06);
+          }
+          div[data-testid="stSegmentedControl"] button{
+            border-radius: 10px !important;
+            border: 1px solid rgba(138,214,255,0.26) !important;
+            background: linear-gradient(180deg, rgba(24,58,96,0.42), rgba(10,28,52,0.36)) !important;
+            color: rgba(224,242,255,0.96) !important;
+            box-shadow: none !important;
+          }
+          div[data-testid="stSegmentedControl"] button:hover{
+            border-color: rgba(182,234,255,0.60) !important;
+            background: linear-gradient(180deg, rgba(34,80,128,0.58), rgba(14,40,72,0.48)) !important;
+          }
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"]{
+            border-color: rgba(178,236,255,0.90) !important;
+            background: linear-gradient(180deg, rgba(76,168,255,0.96), rgba(30,96,170,0.92)) !important;
+            color: rgba(248,252,255,0.99) !important;
+            box-shadow: 0 0 14px rgba(88,186,255,0.28) !important;
+          }
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"] *,
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"] p,
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"] span{
+            color: rgba(248,252,255,0.99) !important;
+            fill: rgba(248,252,255,0.99) !important;
+          }
+          div[data-testid="stPills"] [role="radiogroup"]{
+            gap: 8px;
+          }
+          div[data-testid="stPills"] [role="radio"]{
+            border-radius: 999px !important;
+            border: 1px solid rgba(138,214,255,0.34) !important;
+            background: linear-gradient(180deg, rgba(20,50,84,0.42), rgba(10,28,52,0.34)) !important;
+            color: rgba(224,242,255,0.96) !important;
+            box-shadow: none !important;
+          }
+          div[data-testid="stPills"] [role="radio"][aria-checked="true"]{
+            border-color: rgba(178,236,255,0.90) !important;
+            background: linear-gradient(180deg, rgba(76,168,255,0.96), rgba(30,96,170,0.92)) !important;
+            color: rgba(248,252,255,0.99) !important;
+            box-shadow: 0 0 12px rgba(88,186,255,0.24) !important;
+          }
+          div[data-testid="stPills"] [role="radio"][aria-checked="true"] *,
+          div[data-testid="stPills"] [role="radio"][aria-checked="true"] p,
+          div[data-testid="stPills"] [role="radio"][aria-checked="true"] span{
+            color: rgba(248,252,255,0.99) !important;
+            fill: rgba(248,252,255,0.99) !important;
+          }
+          div[data-testid="stPills"] [role="radio"]:focus-visible,
+          div[data-testid="stSegmentedControl"] button:focus-visible{
+            outline: 2px solid rgba(178,236,255,0.68) !important;
+            outline-offset: 1px !important;
+          }
         </style>
         """,
         unsafe_allow_html=True,
     )
     st.markdown('<div class="tp-top-spacer"></div>', unsafe_allow_html=True)
     st.markdown('<div class="tp-title">🛠️ Tower Parts Management</div>', unsafe_allow_html=True)
-    st.markdown('<div class="tp-sub">Track parts orders, update statuses, archive installed items, and browse docs.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tp-sub">Track parts orders, move them through approval and ordering, and manage received-item intake.</div>', unsafe_allow_html=True)
     st.markdown('<div class="tp-line"></div>', unsafe_allow_html=True)
     
     ORDER_FILE = P.parts_orders_csv
@@ -150,6 +351,15 @@ def render_tower_parts_tab(P):
     def load_locations(path: str) -> pd.DataFrame:
         return _load_locations_cached(path, _mtime(path))
 
+    def _location_serial_from_name(name: str) -> str:
+        import re
+        base = str(name or "").strip().upper()
+        if not base:
+            return ""
+        base = re.sub(r"[^A-Z0-9]+", "_", base)
+        base = re.sub(r"_+", "_", base).strip("_")
+        return base[:40]
+
     @st.cache_data(show_spinner=False)
     def _manual_pdf_signature_cached(manuals_dir: str, dir_mtime: float) -> tuple:
         sig = []
@@ -159,9 +369,49 @@ def render_tower_parts_tab(P):
                     fp = os.path.join(manuals_dir, fn)
                     sig.append((fn, _mtime(fp)))
         return tuple(sig)
+
+    def _render_choice_buttons(
+        *,
+        label: str,
+        options: list[str],
+        selected: str,
+        key_prefix: str,
+        format_func=None,
+        per_row: int = 4,
+        compact: bool = False,
+        show_label: bool = True,
+    ) -> str:
+        if show_label:
+            st.markdown(f"**{label}**")
+        current = selected if selected in options else ""
+        if compact:
+            st.markdown("<div class='tp-chip-grid'>", unsafe_allow_html=True)
+        for row_start in range(0, len(options), max(1, per_row)):
+            row_opts = options[row_start: row_start + max(1, per_row)]
+            cols = st.columns(len(row_opts))
+            for idx, opt in enumerate(row_opts):
+                with cols[idx]:
+                    if st.button(
+                        (format_func(opt) if format_func else opt),
+                        key=f"{key_prefix}_{opt}",
+                        use_container_width=True,
+                        type="primary" if opt == current else "secondary",
+                    ):
+                        current = opt
+                        st.session_state[key_prefix] = opt
+                        st.rerun()
+        if compact:
+            st.markdown("</div>", unsafe_allow_html=True)
+        return current
+
+    def _status_rank(status: str) -> int:
+        try:
+            return STATUS_ORDER.index(str(status).strip())
+        except Exception:
+            return -1
     
     # ✅ Status rename (Needed -> Opened)
-    STATUS_ORDER = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
+    STATUS_ORDER = ["Opened", "Wait for Approval", "Approved", "Ordered", "Received", "Archived"]
     ITEM_TYPE_OPTIONS = ["Part", "Tool", "Consumable"]
     
     # ✅ Single description field (remove Purpose completely)
@@ -169,8 +419,13 @@ def render_tower_parts_tab(P):
         "Status", "Part Name", "Serial Number",
         "Project Name", "Details",
         "Opened By",
+        "Approval Requested From",
         "Approved", "Approved By", "Approval Date",
-        "Ordered By", "Date Ordered", "Company"
+        "Received Date",
+        "Received State",
+        "Ordered By", "Date Ordered", "Company",
+        "Inventory Synced",
+        "Maintenance Component", "Maintenance Task", "Maintenance Task ID", "Wait ID",
     ]
     
     # ---------------- Load / init ----------------
@@ -178,15 +433,18 @@ def render_tower_parts_tab(P):
         orders_df = _read_csv_cached(ORDER_FILE, False, _mtime(ORDER_FILE))
     else:
         orders_df = pd.DataFrame(columns=BASE_COLUMNS)
-    
+
     orders_df.columns = orders_df.columns.str.strip()
-    
+    _orders_schema_changed = False
+
     # Backward compat: ensure columns exist + map old "Needed" to "Opened"
     for col in BASE_COLUMNS:
         if col not in orders_df.columns:
             orders_df[col] = ""
+            _orders_schema_changed = True
     if "Inventory Synced" not in orders_df.columns:
         orders_df["Inventory Synced"] = ""
+        _orders_schema_changed = True
     
     # Drop old Purpose if exists
     orders_df = orders_df.drop(columns=["Purpose"], errors="ignore")
@@ -205,7 +463,16 @@ def render_tower_parts_tab(P):
     orders_df = orders_df[_row_has_content].copy()
 
     orders_df["Status"] = orders_df["Status"].fillna("").astype(str).str.strip()
-    orders_df["Status"] = orders_df["Status"].replace({"Needed": "Opened", "needed": "Opened"})
+    orders_df["Status"] = orders_df["Status"].replace({
+        "Needed": "Opened",
+        "needed": "Opened",
+        "Shipped": "Ordered",
+        "shipped": "Ordered",
+        "Installed": "Received",
+        "installed": "Received",
+        "Archived": "Archived",
+        "archived": "Archived",
+    })
     
     # Unknown / empty -> Opened
     orders_df["Status"] = orders_df["Status"].apply(lambda s: s if s in STATUS_ORDER else "Opened")
@@ -216,25 +483,38 @@ def render_tower_parts_tab(P):
     if seeded_tools_count > 0:
         st.info(f"Seeded {seeded_tools_count} General Tools template rows in inventory.")
 
-    def _normalize_received_sync_state(df_orders: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
+    def _normalize_received_sync_state(df_orders: pd.DataFrame) -> tuple[pd.DataFrame, int, int, bool]:
         marked_pending = 0
-        moved_installed = 0
+        marked_intake_ready = 0
+        changed = False
         out = df_orders.copy()
         inv_now = load_inventory(inventory_file)
 
-        def _has_inventory_location(part_name: str, serial_number: str) -> bool:
+        def _inventory_received_state(part_name: str, serial_number: str, *, strict: bool = False) -> str:
             pn = str(part_name or "").strip().lower()
             sn = str(serial_number or "").strip().lower()
             if not pn:
-                return False
+                return ""
             m = inv_now[inv_now["Part Name"].astype(str).str.strip().str.lower().eq(pn)].copy()
             if sn:
                 m_sn = m[m["Serial Number"].astype(str).str.strip().str.lower().eq(sn)]
                 if not m_sn.empty:
-                    return m_sn["Location"].astype(str).str.strip().ne("").any()
+                    locs = m_sn["Location"].astype(str).str.strip().str.lower()
+                    if locs.eq("mounted").any():
+                        return "Mounted on machine"
+                    if locs.ne("").any():
+                        return "Located in inventory"
+                    return ""
+            elif strict and len(m) != 1:
+                return ""
             if m.empty:
-                return False
-            return m["Location"].astype(str).str.strip().ne("").any()
+                return ""
+            locs = m["Location"].astype(str).str.strip().str.lower()
+            if locs.eq("mounted").any():
+                return "Mounted on machine"
+            if locs.ne("").any():
+                return "Located in inventory"
+            return ""
 
         for i, r in out.iterrows():
             status = str(r.get("Status", "")).strip().lower()
@@ -242,24 +522,47 @@ def render_tower_parts_tab(P):
             if status == "received":
                 part_name = str(r.get("Part Name", "")).strip()
                 serial_number = str(r.get("Serial Number", "")).strip()
-                if _has_inventory_location(part_name, serial_number):
-                    out.at[i, "Status"] = "Installed"
-                    out.at[i, "Inventory Synced"] = ""
-                    moved_installed += 1
-                elif inv_synced != "pending":
-                    out.at[i, "Inventory Synced"] = "Pending"
-                    marked_pending += 1
+                recv_state = _inventory_received_state(
+                    part_name,
+                    serial_number,
+                    strict=bool(
+                        str(r.get("Maintenance Task ID", "")).strip()
+                        or str(r.get("Wait ID", "")).strip()
+                    ),
+                )
+                if recv_state:
+                    if str(out.at[i, "Received State"]).strip() != recv_state:
+                        out.at[i, "Received State"] = recv_state
+                        changed = True
+                    if inv_synced != "yes":
+                        out.at[i, "Inventory Synced"] = "Yes"
+                        marked_intake_ready += 1
+                        changed = True
+                else:
+                    desired_state = "Waiting for inventory action"
+                    if str(out.at[i, "Received State"]).strip() != desired_state:
+                        out.at[i, "Received State"] = desired_state
+                        changed = True
+                    if inv_synced != "pending":
+                        out.at[i, "Inventory Synced"] = "Pending"
+                        marked_pending += 1
+                        changed = True
             elif status != "received":
-                out.at[i, "Inventory Synced"] = ""
-        return out, marked_pending, moved_installed
+                if str(out.at[i, "Inventory Synced"]).strip() != "":
+                    out.at[i, "Inventory Synced"] = ""
+                    changed = True
+                if str(out.at[i, "Received State"]).strip() != "":
+                    out.at[i, "Received State"] = ""
+                    changed = True
+        return out, marked_pending, marked_intake_ready, changed
 
-    orders_df, pending_new_count, moved_installed_count = _normalize_received_sync_state(orders_df)
-    if pending_new_count > 0 or moved_installed_count > 0:
+    orders_df, pending_new_count, intake_marked_count, normalized_changed = _normalize_received_sync_state(orders_df)
+    if _orders_schema_changed or normalized_changed:
         orders_df.to_csv(ORDER_FILE, index=False)
     if pending_new_count > 0:
-        st.info(f"{pending_new_count} received order(s) are waiting for intake/location.")
-    if moved_installed_count > 0:
-        st.success(f"{moved_installed_count} received order(s) moved to Installed (location found in inventory).")
+        st.info(f"{pending_new_count} received order(s) are waiting for inventory action.")
+    if intake_marked_count > 0:
+        st.success(f"{intake_marked_count} received order(s) already have inventory location and were marked as organized.")
     
     # ---------------- Projects list (match 📦 Order Draw) ----------------
     PROJECTS_FILE = P.projects_fiber_csv
@@ -282,14 +585,126 @@ def render_tower_parts_tab(P):
     except Exception:
         pass
     
+    queue_counts = {
+        "Opened": int(orders_df["Status"].astype(str).str.strip().eq("Opened").sum()) if not orders_df.empty else 0,
+        "Wait for Approval": int(orders_df["Status"].astype(str).str.strip().eq("Wait for Approval").sum()) if not orders_df.empty else 0,
+        "Approved": int(orders_df["Status"].astype(str).str.strip().eq("Approved").sum()) if not orders_df.empty else 0,
+        "Received Pending": int(
+            (
+                orders_df["Status"].astype(str).str.strip().eq("Received")
+                & orders_df["Inventory Synced"].astype(str).str.strip().str.lower().ne("yes")
+            ).sum()
+        ) if not orders_df.empty else 0,
+    }
+    maintenance_urgent_n = int(
+        (
+            orders_df["Status"].astype(str).str.strip().isin(["Opened", "Wait for Approval", "Approved", "Ordered", "Received"])
+            & orders_df.get("Maintenance Task ID", pd.Series("", index=orders_df.index)).astype(str).str.strip().ne("")
+        ).sum()
+    ) if not orders_df.empty else 0
+
+    st.markdown('<div class="tp-section">⚡ Orders Requiring Action</div>', unsafe_allow_html=True)
+    st.caption("Start here: approval queue, ready-to-order items, received items still waiting for inventory, and live maintenance-linked orders.")
+    st.markdown(
+        f"""
+        <div class="tp-queue-board">
+          <div class="tp-queue-card">
+            <div class="tp-queue-title">Wait for Approval</div>
+            <div class="tp-queue-count">{queue_counts["Wait for Approval"]}</div>
+            <div class="tp-queue-sub">Requests opened and now waiting for approval.</div>
+          </div>
+          <div class="tp-queue-card">
+            <div class="tp-queue-title">Ready to Order</div>
+            <div class="tp-queue-count">{queue_counts["Approved"]}</div>
+            <div class="tp-queue-sub">Approved items that should move into a real order.</div>
+          </div>
+          <div class="tp-queue-card">
+            <div class="tp-queue-title">Received Pending Inventory</div>
+            <div class="tp-queue-count">{queue_counts["Received Pending"]}</div>
+            <div class="tp-queue-sub">Already received, but inventory action still not done.</div>
+          </div>
+          <div class="tp-queue-card">
+            <div class="tp-queue-title">Maintenance-Linked Live</div>
+            <div class="tp-queue-count">{maintenance_urgent_n}</div>
+            <div class="tp-queue-sub">Live orders that came from maintenance tasks and waits.</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    qa1, qa2, qa3, qa4, qa5 = st.columns(5)
+    with qa1:
+        if st.button("Open Opened", key="tp_queue_opened", use_container_width=True):
+            st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.session_state["parts_manage_status_filter"] = "Opened"
+            st.rerun()
+    with qa2:
+        if st.button("Open Approval Queue", key="tp_queue_wait_approval", use_container_width=True):
+            st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.session_state["parts_manage_status_filter"] = "Wait for Approval"
+            st.rerun()
+    with qa3:
+        if st.button("Open Ready To Order", key="tp_queue_approved", use_container_width=True):
+            st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.session_state["parts_manage_status_filter"] = "Approved"
+            st.rerun()
+    with qa4:
+        if st.button("Open Received Pending", key="tp_queue_received_pending", use_container_width=True):
+            st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.session_state["parts_manage_status_filter"] = "Received"
+            st.rerun()
+    with qa5:
+        if st.button("Open All Orders", key="tp_queue_all", use_container_width=True):
+            st.session_state["parts_manage_action"] = "Update Existing Order"
+            st.session_state["parts_manage_status_filter"] = "All"
+            st.rerun()
+
     # =========================
     # TABLE (FIRST)
     # =========================
     st.markdown('<div class="tp-section">📋 Orders Table</div>', unsafe_allow_html=True)
+
+    def _order_origin_label(row) -> str:
+        task_id = str(row.get("Maintenance Task ID", "")).strip()
+        wait_id = str(row.get("Wait ID", "")).strip()
+        comp = str(row.get("Maintenance Component", "")).strip()
+        if task_id:
+            base = "Maintenance"
+            if comp:
+                base = f"Maintenance · {comp}"
+            return f"{base} · {task_id}"
+        if wait_id:
+            return f"Maintenance wait · {wait_id}"
+        return "Manual / PM"
+
+    def _order_flow_state_label(row) -> str:
+        status = str(row.get("Status", "")).strip()
+        inv_synced = str(row.get("Inventory Synced", "")).strip().lower()
+        recv_state = str(row.get("Received State", "")).strip()
+        if status == "Opened":
+            return "Request opened, not yet sent for approval"
+        if status == "Wait for Approval":
+            return "Waiting for approval decision"
+        if status == "Approved":
+            return "Approved and ready to order"
+        if status == "Ordered":
+            return "Order placed, waiting to receive"
+        if status == "Received":
+            if inv_synced == "yes":
+                return "Received and inventory-synced"
+            if recv_state == "Waiting for inventory action":
+                return "Received, waiting inventory action"
+            return "Received, inventory follow-up needed"
+        if status == "Archived":
+            return "Closed and archived"
+        return "Review order state"
     
     column_order = [
         "Status",
+        "Flow State",
+        "Origin",
         "Part Name",
+        "Qty",
         "Serial Number",
         "Project Name",
         "Details",
@@ -297,6 +712,8 @@ def render_tower_parts_tab(P):
         "Approved",
         "Approved By",
         "Approval Date",
+        "Received Date",
+        "Received State",
         "Ordered By",
         "Date Ordered",
         "Company",
@@ -305,29 +722,107 @@ def render_tower_parts_tab(P):
         if col not in orders_df.columns:
             orders_df[col] = ""
     
-    # Sort by status
     tmp = orders_df.copy()
+    tmp["Origin"] = tmp.apply(_order_origin_label, axis=1)
+    tmp["Flow State"] = tmp.apply(_order_flow_state_label, axis=1)
+    tmp["Qty"] = 1
     tmp["__status_sort__"] = pd.Categorical(tmp["Status"], categories=STATUS_ORDER, ordered=True)
-    tmp = tmp.sort_values(["__status_sort__", "Part Name"], na_position="last").drop(columns="__status_sort__")
-    
+    if "Date Ordered" in tmp.columns:
+        tmp["__date_sort__"] = pd.to_datetime(tmp["Date Ordered"], errors="coerce")
+        tmp = tmp.sort_values(["__status_sort__", "__date_sort__", "Part Name"], ascending=[True, False, True], na_position="last")
+        tmp = tmp.drop(columns=["__status_sort__", "__date_sort__"])
+    else:
+        tmp = tmp.sort_values(["__status_sort__", "Part Name"], na_position="last").drop(columns="__status_sort__")
+
+    # PM-facing table: collapse maintenance-linked duplicate rows from the same wait/task into one visible line.
+    if not tmp.empty:
+        tmp["_group_key"] = ""
+        maint_group_mask = (
+            tmp["Wait ID"].astype(str).str.strip().ne("")
+            & tmp["Maintenance Task ID"].astype(str).str.strip().ne("")
+            & tmp["Part Name"].astype(str).str.strip().ne("")
+        )
+        tmp.loc[maint_group_mask, "_group_key"] = (
+            tmp.loc[maint_group_mask, "Status"].astype(str).str.strip()
+            + "||" + tmp.loc[maint_group_mask, "Wait ID"].astype(str).str.strip()
+            + "||" + tmp.loc[maint_group_mask, "Maintenance Task ID"].astype(str).str.strip()
+            + "||" + tmp.loc[maint_group_mask, "Part Name"].astype(str).str.strip().str.lower()
+            + "||" + tmp.loc[maint_group_mask, "Received State"].astype(str).str.strip()
+        )
+        grouped_rows = []
+        used_keys = set()
+        for _, row in tmp.iterrows():
+            gk = str(row.get("_group_key", "")).strip()
+            if not gk:
+                grouped_rows.append(row.drop(labels=["_group_key"]).to_dict())
+                continue
+            if gk in used_keys:
+                continue
+            used_keys.add(gk)
+            grp = tmp[tmp["_group_key"].astype(str).eq(gk)].copy()
+            base = grp.iloc[0].drop(labels=["_group_key"]).to_dict()
+            base["Qty"] = int(len(grp))
+            base["Flow State"] = _order_flow_state_label(base)
+            detail_list = []
+            for dv in grp["Details"].astype(str).tolist():
+                dv_s = str(dv).strip()
+                if dv_s and dv_s not in detail_list:
+                    detail_list.append(dv_s)
+            if detail_list:
+                base["Details"] = detail_list[0]
+            grouped_rows.append(base)
+        tmp = pd.DataFrame(grouped_rows)
+        for col in column_order:
+            if col not in tmp.columns:
+                tmp[col] = ""
+
     # Color status cell only (cleaner dark-friendly colors)
     def highlight_status(row):
         color_map = {
             "Opened": "background-color: rgba(255,102,102,0.28); color: #ffd4d4; font-weight: 800;",
+            "Wait for Approval": "background-color: rgba(255,196,87,0.22); color: #ffe0a6; font-weight: 800;",
             "Approved": "background-color: rgba(105,240,174,0.24); color: #c8ffd8; font-weight: 800;",
             "Ordered": "background-color: rgba(255,214,102,0.24); color: #ffe9b8; font-weight: 800;",
-            "Shipped": "background-color: rgba(126,182,255,0.24); color: #d5e8ff; font-weight: 800;",
             "Received": "background-color: rgba(92,214,122,0.30); color: #d7ffe1; font-weight: 800;",
-            "Installed": "background-color: rgba(190,198,210,0.22); color: #ecf0f6; font-weight: 800;",
+            "Archived": "background-color: rgba(160,168,182,0.20); color: #e8edf6; font-weight: 800;",
         }
         s = str(row.get("Status", "")).strip()
         styles = [""] * len(row)
         # Status column index after adding row number
         if "Status" in row.index:
             styles[list(row.index).index("Status")] = color_map.get(s, "")
+        if "Origin" in row.index:
+            origin = str(row.get("Origin", "")).strip()
+            if origin.startswith("Maintenance"):
+                styles[list(row.index).index("Origin")] = "background-color: rgba(82,196,255,0.16); color: #d9f4ff; font-weight: 760;"
+            else:
+                styles[list(row.index).index("Origin")] = "color: rgba(204,224,238,0.84);"
+        if "Received State" in row.index:
+            rstate = str(row.get("Received State", "")).strip()
+            state_style = {
+                "Waiting for inventory action": "background-color: rgba(255,196,87,0.18); color: #ffe2aa; font-weight: 740;",
+                "Located in inventory": "background-color: rgba(92,214,122,0.18); color: #d8ffe2; font-weight: 740;",
+                "Mounted on machine": "background-color: rgba(92,196,255,0.18); color: #d7f3ff; font-weight: 740;",
+            }.get(rstate, "")
+            if state_style:
+                styles[list(row.index).index("Received State")] = state_style
+        if "Flow State" in row.index:
+            flow_state = str(row.get("Flow State", "")).strip().lower()
+            flow_style = ""
+            if "waiting for approval" in flow_state or "waiting inventory action" in flow_state or "follow-up needed" in flow_state:
+                flow_style = "background-color: rgba(255,184,77,0.18); color: #ffe0a9; font-weight: 760;"
+            elif "ready to order" in flow_state or "inventory-synced" in flow_state:
+                flow_style = "background-color: rgba(92,214,122,0.18); color: #d8ffe2; font-weight: 760;"
+            elif "not yet sent" in flow_state or "waiting to receive" in flow_state:
+                flow_style = "background-color: rgba(92,196,255,0.18); color: #d7f3ff; font-weight: 740;"
+            elif "archived" in flow_state:
+                flow_style = "background-color: rgba(160,168,182,0.16); color: #e8edf6; font-weight: 740;"
+            if flow_style:
+                styles[list(row.index).index("Flow State")] = flow_style
         return styles
     
     if not tmp.empty:
+        st.caption("Showing all orders. Use the update workspace below to focus on a specific order if needed.")
         tmp_display = tmp[column_order].fillna("").copy()
         tmp_display.insert(0, "#", range(1, len(tmp_display) + 1))
         styled = (
@@ -342,7 +837,7 @@ def render_tower_parts_tab(P):
             use_container_width=True,
         )
     else:
-        st.info("No orders have been placed yet.")
+        st.info("No orders yet.")
     
     st.divider()
     
@@ -352,41 +847,44 @@ def render_tower_parts_tab(P):
     st.markdown('<div class="tp-section">✍️ Manage Orders</div>', unsafe_allow_html=True)
 
     if "parts_manage_action" not in st.session_state:
-        st.session_state["parts_manage_action"] = ""
+        st.session_state["parts_manage_action"] = None
+    if "parts_manage_status_filter" not in st.session_state:
+        st.session_state["parts_manage_status_filter"] = "All"
+    if st.session_state["parts_manage_action"] not in ["Add New Order", "Update Existing Order", None]:
+        st.session_state["parts_manage_action"] = None
+    if st.session_state["parts_manage_status_filter"] not in ["All"] + STATUS_ORDER:
+        st.session_state["parts_manage_status_filter"] = "All"
+
+    status_counts = (
+        orders_df["Status"].astype(str).str.strip().value_counts().to_dict()
+        if not orders_df.empty else {}
+    )
 
     st.markdown('<div class="tp-action-card">', unsafe_allow_html=True)
-    a1, a2 = st.columns(2, gap="small")
-    with a1:
+    action = str(st.session_state.get("parts_manage_action") or "")
+    action_c1, action_c2 = st.columns(2)
+    with action_c1:
         if st.button(
-            "➕ Open New Order",
+            "➕ New Order",
+            key="parts_manage_action_new",
             use_container_width=True,
-            type="primary" if st.session_state["parts_manage_action"] == "Add New Order" else "secondary",
-            key="parts_open_add_btn",
+            type="primary" if action == "Add New Order" else "secondary",
         ):
-            if st.session_state["parts_manage_action"] == "Add New Order":
-                st.session_state["parts_manage_action"] = ""
-            else:
-                st.session_state["parts_manage_action"] = "Add New Order"
-    with a2:
+            st.session_state["parts_manage_action"] = None if action == "Add New Order" else "Add New Order"
+            st.rerun()
+    with action_c2:
         if st.button(
-            "🛠️ Open Edit Order",
+            "🛠️ Update Order",
+            key="parts_manage_action_update",
             use_container_width=True,
-            type="primary" if st.session_state["parts_manage_action"] == "Update Existing Order" else "secondary",
-            key="parts_open_edit_btn",
+            type="primary" if action == "Update Existing Order" else "secondary",
         ):
-            if st.session_state["parts_manage_action"] == "Update Existing Order":
-                st.session_state["parts_manage_action"] = ""
-            else:
-                st.session_state["parts_manage_action"] = "Update Existing Order"
-    st.markdown(
-        f"<div class='tp-action-help'>Active panel: <b>{st.session_state['parts_manage_action'] or 'None'}</b></div>",
-        unsafe_allow_html=True,
-    )
+            st.session_state["parts_manage_action"] = None if action == "Update Existing Order" else "Update Existing Order"
+            st.rerun()
+    action = str(st.session_state.get("parts_manage_action") or "")
+    if not action:
+        st.markdown("<div class='tp-action-help'>Choose a workspace to continue.</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
-    action = st.session_state["parts_manage_action"]
-    
-    if action == "":
-        st.info("Choose `Open New Order` or `Open Edit Order` to expand a panel.")
 
     # ---------- Add New ----------
     if action == "Add New Order":
@@ -398,18 +896,13 @@ def render_tower_parts_tab(P):
                 with c1:
                     part_name = st.text_input("Part Name")
                     serial_number = st.text_input("Serial Number")
-                    status = st.selectbox("Status", STATUS_ORDER, index=0)
-    
                 with c2:
                     opened_by = st.text_input("Opened By")
                     selected_project = st.selectbox("Fiber Project", project_options)
                     company = st.text_input("Company (optional)")
-    
                 with c3:
-                    approved = st.selectbox("Approved", ["No", "Yes"], index=0)
-                    approved_by = st.text_input("Approved By (optional)")
-                    approval_date = st.date_input("Approval Date", value=pd.Timestamp.today())
-    
+                    st.markdown('<div class="tp-green-text">New orders start as Opened. Move them to Wait for Approval in the next step.</div>', unsafe_allow_html=True)
+
                 details = st.text_area("Details", height=120)
     
                 save = st.form_submit_button("💾 Save Order", use_container_width=True)
@@ -419,18 +912,22 @@ def render_tower_parts_tab(P):
                         st.error("Part Name is required.")
                     else:
                         new_row = {
-                            "Status": status,
+                            "Status": "Opened",
                             "Part Name": part_name.strip(),
                             "Serial Number": serial_number.strip(),
                             "Project Name": "" if selected_project == "None" else str(selected_project),
                             "Details": details.strip(),
                             "Opened By": opened_by.strip(),
+                            "Approval Requested From": "",
                             "Company": company.strip(),
-                            "Approved": approved,
-                            "Approved By": approved_by.strip(),
-                            "Approval Date": approval_date.strftime("%Y-%m-%d") if approved == "Yes" else "",
+                            "Approved": "No",
+                            "Approved By": "",
+                            "Approval Date": "",
+                            "Received Date": "",
+                            "Received State": "",
                             "Ordered By": "",
                             "Date Ordered": "",
+                            "Inventory Synced": "",
                         }
                         orders_df = pd.concat([orders_df, pd.DataFrame([new_row])], ignore_index=True)
                         orders_df.to_csv(ORDER_FILE, index=False)
@@ -443,79 +940,439 @@ def render_tower_parts_tab(P):
             if orders_df.empty:
                 st.warning("No orders to update.")
             else:
-                labels = (orders_df["Part Name"].astype(str).fillna("") + "  |  " +
-                          orders_df["Serial Number"].astype(str).fillna(""))
-                label_to_idx = {labels.iloc[i]: i for i in range(len(labels))}
-                selected_label = st.selectbox("Select an order", list(label_to_idx.keys()), key="order_update_select")
+                st.markdown("<div class='tp-step-shell'>", unsafe_allow_html=True)
+                st.markdown("<div class='tp-focus-title'>Find the order</div>", unsafe_allow_html=True)
+                st.markdown("<div class='tp-step-sub'>Filter lightly, then pick one order to update.</div>", unsafe_allow_html=True)
+                status_filter_options = STATUS_ORDER + ["All"]
+                status_labels = {
+                    "Opened": "Opened",
+                    "Wait for Approval": "Wait Approval",
+                    "Approved": "Approved",
+                    "Ordered": "Ordered",
+                    "Received": "Received",
+                    "Archived": "Archived",
+                    "All": "All",
+                }
+                status_focus = _render_choice_buttons(
+                    label="Status filter",
+                    options=status_filter_options,
+                    selected=str(st.session_state.get("parts_manage_status_filter", "All")),
+                    key_prefix="parts_manage_status_filter",
+                    format_func=lambda s: f"{status_labels.get(s, s)} ({len(orders_df) if s == 'All' else int(status_counts.get(s, 0))})",
+                    per_row=4,
+                    compact=True,
+                )
+                filter_c2, filter_c3 = st.columns([1.2, 2.0])
+                with filter_c2:
+                    order_search = st.text_input(
+                        "Search",
+                        value="",
+                        key="parts_manage_order_search",
+                        placeholder="part / serial / project...",
+                    ).strip().lower()
+
+                filtered_orders = orders_df.copy()
+                if status_focus != "All":
+                    filtered_orders = filtered_orders[
+                        filtered_orders["Status"].astype(str).str.strip().eq(status_focus)
+                    ].copy()
+                if order_search:
+                    search_blob = (
+                        filtered_orders["Part Name"].astype(str).str.lower()
+                        + " "
+                        + filtered_orders["Serial Number"].astype(str).str.lower()
+                        + " "
+                        + filtered_orders["Project Name"].astype(str).str.lower()
+                        + " "
+                        + filtered_orders["Details"].astype(str).str.lower()
+                        + " "
+                        + filtered_orders.get("Maintenance Component", pd.Series("", index=filtered_orders.index)).astype(str).str.lower()
+                        + " "
+                        + filtered_orders.get("Maintenance Task", pd.Series("", index=filtered_orders.index)).astype(str).str.lower()
+                        + " "
+                        + filtered_orders.get("Maintenance Task ID", pd.Series("", index=filtered_orders.index)).astype(str).str.lower()
+                        + " "
+                        + filtered_orders.get("Wait ID", pd.Series("", index=filtered_orders.index)).astype(str).str.lower()
+                    )
+                    filtered_orders = filtered_orders[search_blob.str.contains(order_search, na=False)].copy()
+                if filtered_orders.empty:
+                    msg = "No orders match the current filter."
+                    if status_focus != "All":
+                        msg = f"No orders currently in `{status_focus}`."
+                    st.info(msg)
+                    st.session_state["parts_order_filter_sig"] = f"{status_focus}::{order_search}"
+                    return
+                labels = (
+                    filtered_orders["Part Name"].astype(str).fillna("").str.strip()
+                    + "  |  "
+                    + filtered_orders["Serial Number"].astype(str).fillna("").str.strip()
+                    + "  |  "
+                    + filtered_orders["Status"].astype(str).fillna("").str.strip()
+                )
+                label_to_idx = {labels.iloc[i]: filtered_orders.index[i] for i in range(len(labels))}
+                order_options = list(label_to_idx.keys())
+                filter_sig = f"{status_focus}::{order_search}"
+                prev_filter_sig = str(st.session_state.get("parts_order_filter_sig", ""))
+                st.session_state["parts_order_filter_sig"] = filter_sig
+                select_widget_key = f"order_update_select_widget::{filter_sig}"
+                if prev_filter_sig != filter_sig and select_widget_key in st.session_state:
+                    del st.session_state[select_widget_key]
+                current_pick = str(st.session_state.get(select_widget_key, "") or "")
+                if current_pick not in order_options and order_options:
+                    st.session_state[select_widget_key] = order_options[0]
+                with filter_c3:
+                    selected_label = st.selectbox(
+                        "Select an order",
+                        order_options,
+                        key=select_widget_key,
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
                 order_index = label_to_idx[selected_label]
                 cur = orders_df.loc[order_index].to_dict()
-    
+                cur_status = str(cur.get("Status", "Opened")).strip()
+                if cur_status not in STATUS_ORDER:
+                    cur_status = "Opened"
+                if cur_status in STATUS_ORDER:
+                    cur_idx = STATUS_ORDER.index(cur_status)
+                    allowed_targets = STATUS_ORDER[cur_idx + 1:]
+                else:
+                    allowed_targets = []
+                if not allowed_targets:
+                    allowed_targets = [cur_status]
+                target_state_key = f"parts_order_target_status::{order_index}"
+                target_status = str(st.session_state.get(target_state_key, cur_status)).strip()
+                if target_status not in allowed_targets:
+                    target_status = allowed_targets[0] if allowed_targets else cur_status
+                    st.session_state[target_state_key] = target_status
+
+                st.markdown("<div class='tp-step-shell is-focus'>", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="tp-green-text">Current workflow step: <b>{cur_status}</b></div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown("<div class='tp-step-sub'>Choose the destination step for this update.</div>", unsafe_allow_html=True)
+                target_status = _render_choice_buttons(
+                    label="Destination step",
+                    options=allowed_targets,
+                    selected=str(st.session_state.get(target_state_key, cur_status)),
+                    key_prefix=target_state_key,
+                    format_func=lambda s: s,
+                    per_row=len(allowed_targets) if allowed_targets else 1,
+                )
+                target_status = str(target_status or cur_status).strip()
+                st.caption(f"Transition: {cur_status} -> {target_status}")
+                step_goal_map = {
+                    "Wait for Approval": "Ask for approval and record who needs to approve this order.",
+                    "Approved": "Confirm approval so the order becomes ready for purchasing.",
+                    "Ordered": "Record supplier and ordering details so the PM queue moves into real purchasing.",
+                    "Received": "Capture the receive date first, then finish inventory action once the item is physically handled.",
+                    "Archived": "Close the order after the received item has been handled and no more PM action is needed.",
+                }
+                step_goal = step_goal_map.get(target_status, "Move this order to the next workflow step.")
+                st.markdown(
+                    f"<div class='tp-current-goal'><b>Current step goal</b><span>{step_goal}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                current_inv_df = load_inventory(inventory_file)
+                current_locations_df = load_locations(locations_file)
+                current_locations_df = current_locations_df[
+                    current_locations_df["Active"].astype(str).str.strip().str.lower().ne("no")
+                ].copy()
+                current_location_options = sorted(
+                    [str(x).strip() for x in current_locations_df["Location Name"].tolist() if str(x).strip()]
+                )
+                current_loc_serial_map = {
+                    str(r.get("Location Name", "")).strip(): str(r.get("Location Serial", "")).strip()
+                    for _, r in current_locations_df.iterrows()
+                    if str(r.get("Location Name", "")).strip()
+                }
+                current_component_options = sorted(
+                    list({*[str(x).strip() for x in current_inv_df.get("Component", pd.Series([], dtype=str)).tolist() if str(x).strip()], "Tower Parts", "Consumables", "General Tools"})
+                )
+                received_action_key = f"parts_received_action::{order_index}"
+                matched_inv = pd.DataFrame()
+                show_received_action_panel = cur_status in ["Received", "Archived"]
+                if show_received_action_panel:
+                    sel_part = str(cur.get("Part Name", "")).strip()
+                    sel_sn = str(cur.get("Serial Number", "")).strip()
+                    if not current_inv_df.empty and sel_part:
+                        matched_inv = current_inv_df[
+                            current_inv_df["Part Name"].astype(str).str.strip().str.lower().eq(sel_part.lower())
+                        ].copy()
+                        if sel_sn:
+                            matched_sn = matched_inv[
+                                matched_inv["Serial Number"].astype(str).str.strip().str.lower().eq(sel_sn.lower())
+                            ].copy()
+                            if not matched_sn.empty:
+                                matched_inv = matched_sn
+
+                    default_received_action = "No inventory action"
+                    cur_received_state = str(cur.get("Received State", "")).strip()
+                    if cur_received_state == "Located in inventory":
+                        default_received_action = "Locate in inventory"
+                    elif cur_received_state == "Mounted on machine":
+                        default_received_action = "Mount on machine"
+                    current_received_action = str(
+                        st.session_state.get(received_action_key, default_received_action)
+                    ).strip()
+                    if current_received_action not in ["No inventory action", "Locate in inventory", "Mount on machine"]:
+                        current_received_action = default_received_action
+                        st.session_state[received_action_key] = current_received_action
+
+                    if not matched_inv.empty:
+                        st.markdown(
+                            f'<div class="tp-soft-note">Inventory match found: {len(matched_inv)} row(s), qty {float(pd.to_numeric(matched_inv["Quantity"], errors="coerce").fillna(0).sum()):g}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            '<div class="tp-soft-note">No matching inventory row found yet. The selected action can create a new inventory item.</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                    st.markdown('<div class="tp-focus-title">Inventory action</div>', unsafe_allow_html=True)
+                    current_received_action = _render_choice_buttons(
+                        label="Inventory action",
+                        options=["No inventory action", "Locate in inventory", "Mount on machine"],
+                        selected=str(st.session_state.get(received_action_key, default_received_action)),
+                        key_prefix=received_action_key,
+                        per_row=3,
+                    )
+                    current_received_action = str(current_received_action or default_received_action).strip()
+                else:
+                    current_received_action = "No inventory action"
+
+                context_pairs = [
+                    ("Part", str(cur.get("Part Name", "")).strip() or "—"),
+                    ("Serial", str(cur.get("Serial Number", "")).strip() or "—"),
+                    ("Origin", _order_origin_label(cur)),
+                    ("Opened By", str(cur.get("Opened By", "")).strip() or "—"),
+                    ("Ordered From", str(cur.get("Company", "")).strip() or "—"),
+                    ("Approval Requested", str(cur.get("Approval Requested From", "")).strip() or "—"),
+                    ("Approved By", str(cur.get("Approved By", "")).strip() or "—"),
+                    ("Received Date", str(cur.get("Received Date", "")).strip() or "—"),
+                    ("Received State", str(cur.get("Received State", "")).strip() or "—"),
+                    ("Target Step", target_status or "—"),
+                ]
+                context_pairs = [pair for pair in context_pairs if str(pair[1]).strip() and str(pair[1]).strip() != "—"]
+                context_html = "".join(
+                    f"<div><div class='tp-context-label'>{label}</div><div class='tp-context-value'>{value}</div></div>"
+                    for label, value in context_pairs
+                )
+                st.markdown(
+                    f"<div class='tp-context-card is-quiet'><div class='tp-context-grid'>{context_html}</div></div>",
+                    unsafe_allow_html=True,
+                )
+                maint_task_id_ctx = str(cur.get("Maintenance Task ID", "")).strip()
+                if maint_task_id_ctx:
+                    jc1, jc2 = st.columns([1.2, 2.0])
+                    with jc1:
+                        if st.button("🧰 Open linked maintenance task", key=f"parts_jump_maint_{order_index}", use_container_width=True):
+                            st.session_state["selected_tab"] = "🧰 Maintenance"
+                            st.session_state["maint_main_group"] = "maintenance"
+                            st.session_state["maint_flow_step"] = "2) Execute + Resolve Blocks"
+                            st.session_state["maint_open_task_id"] = maint_task_id_ctx
+                            st.rerun()
+                    with jc2:
+                        st.markdown(
+                            f"<div class='tp-soft-note'>Linked maintenance task: <b>{maint_task_id_ctx}</b></div>",
+                            unsafe_allow_html=True,
+                        )
+
                 with st.form("update_order_form", enter_to_submit=False):
-                    c1, c2, c3 = st.columns([1.2, 1.2, 1.2])
-    
-                    with c1:
-                        updated_part_name = st.text_input("Part Name", value=str(cur.get("Part Name", "")))
-                        updated_serial_number = st.text_input("Serial Number", value=str(cur.get("Serial Number", "")))
-                        cur_status = str(cur.get("Status", "Opened")).strip()
-                        new_status = st.selectbox(
-                            "Status",
-                            STATUS_ORDER,
-                            index=STATUS_ORDER.index(cur_status) if cur_status in STATUS_ORDER else 0,
-                        )
-    
-                    with c2:
-                        cur_proj = str(cur.get("Project Name", ""))
-                        updated_project = st.selectbox(
-                            "Fiber Project",
-                            project_options,
-                            index=project_options.index(cur_proj) if cur_proj in project_options else 0,
-                        )
-                        updated_opened_by = st.text_input("Opened By", value=str(cur.get("Opened By", "")))
-                        company = st.text_input("Company", value=str(cur.get("Company", "")))
-    
-                    with c3:
-                        approved_value = str(cur.get("Approved", "No"))
-                        approved = st.selectbox("Approved", ["No", "Yes"], index=0 if approved_value != "Yes" else 1)
-                        approved_by = st.text_input("Approved By", value=str(cur.get("Approved By", "")))
-    
-                        date_ordered_raw = str(cur.get("Date Ordered", ""))
-                        date_ordered_dt = pd.to_datetime(date_ordered_raw, errors="coerce")
-                        if pd.isna(date_ordered_dt):
-                            date_ordered_dt = pd.Timestamp.today()
-                        date_ordered = st.date_input("Date Ordered", value=date_ordered_dt)
-    
+                    updated_part_name = str(cur.get("Part Name", ""))
+                    updated_serial_number = str(cur.get("Serial Number", ""))
+                    cur_proj = str(cur.get("Project Name", ""))
+                    updated_project = cur_proj if cur_proj in project_options else "None"
+                    updated_opened_by = str(cur.get("Opened By", ""))
+                    company = str(cur.get("Company", ""))
+
+                    with st.expander("Optional: edit base order info", expanded=False):
+                        c_base1, c_base2 = st.columns(2)
+                        with c_base1:
+                            updated_part_name = st.text_input("Part Name", value=str(cur.get("Part Name", "")))
+                            updated_serial_number = st.text_input("Serial Number", value=str(cur.get("Serial Number", "")))
+                        with c_base2:
+                            updated_project = st.selectbox(
+                                "Fiber Project",
+                                project_options,
+                                index=project_options.index(cur_proj) if cur_proj in project_options else 0,
+                            )
+                            updated_opened_by = st.text_input("Opened By", value=str(cur.get("Opened By", "")))
+
+                    st.markdown("<div class='tp-step-shell is-focus'>", unsafe_allow_html=True)
+                    st.markdown('<div class="tp-focus-title">Current step input</div>', unsafe_allow_html=True)
+                    st.markdown("<div class='tp-step-sub'>Only fields needed for the selected step are shown here.</div>", unsafe_allow_html=True)
+                    c_step1, c_step2 = st.columns([1.1, 1.1])
+
+                    with c_step1:
+                        pass
+
+                    with c_step2:
                         approval_raw = str(cur.get("Approval Date", ""))
                         approval_dt = pd.to_datetime(approval_raw, errors="coerce")
                         if pd.isna(approval_dt):
                             approval_dt = pd.Timestamp.today()
-                        approval_date = st.date_input("Approval Date", value=approval_dt)
-    
+                        date_ordered_raw = str(cur.get("Date Ordered", ""))
+                        date_ordered_dt = pd.to_datetime(date_ordered_raw, errors="coerce")
+                        if pd.isna(date_ordered_dt):
+                            date_ordered_dt = pd.Timestamp.today()
+                        received_raw = str(cur.get("Received Date", ""))
+                        received_dt = pd.to_datetime(received_raw, errors="coerce")
+                        if pd.isna(received_dt):
+                            received_dt = pd.Timestamp.today()
+
+                        cur_rank = _status_rank(cur_status)
+                        target_rank = _status_rank(target_status)
+                        approved_by = str(cur.get("Approved By", "")).strip()
+                        approval_date = approval_dt
+                        ordered_by = str(cur.get("Ordered By", "")).strip()
+                        date_ordered = date_ordered_dt
+                        received_date = received_dt
+                        approval_requested_from = str(cur.get("Approval Requested From", "")).strip()
+                        received_state = str(cur.get("Received State", "")).strip() or "Waiting for inventory action"
+                        inventory_action = "No inventory action"
+                        inventory_location = ""
+                        inventory_qty = 1.0
+                        inventory_serial = str(cur.get("Serial Number", "")).strip()
+                        inventory_component = "Tower Parts"
+
+                        needs_approval_request = target_rank >= _status_rank("Wait for Approval") and (not approval_requested_from or cur_rank < _status_rank("Wait for Approval"))
+                        needs_approval_confirmation = target_rank >= _status_rank("Approved") and ((not approved_by) or pd.isna(approval_dt) or cur_rank < _status_rank("Approved"))
+                        needs_order_data = target_rank >= _status_rank("Ordered") and ((not company.strip()) or (not ordered_by) or pd.isna(date_ordered_dt) or cur_rank < _status_rank("Ordered"))
+                        needs_received_date = target_rank >= _status_rank("Received") and (pd.isna(received_dt) or cur_rank < _status_rank("Received"))
+
+                        if needs_approval_request:
+                            approval_requested_from = st.text_input(
+                                "Approval Requested From",
+                                value=approval_requested_from,
+                            )
+
+                        if needs_approval_confirmation:
+                            approved_by = st.text_input("Approved By", value=approved_by)
+                            approval_date = st.date_input("Approval Date", value=approval_dt)
+
+                        if needs_order_data:
+                            existing_company = str(cur.get("Company", "")).strip()
+                            if existing_company and not needs_order_data:
+                                company = existing_company
+                            elif existing_company and target_status == "Ordered":
+                                st.markdown(
+                                    f"<div class='tp-soft-note'>Ordered from: <b>{existing_company}</b></div>",
+                                    unsafe_allow_html=True,
+                                )
+                            company = st.text_input(
+                                "Company / Ordered From",
+                                value=company.strip() or existing_company,
+                                key=f"parts_company_input_{order_index}",
+                            )
+                            ordered_by = st.text_input("Ordered By", value=ordered_by)
+                            date_ordered = st.date_input("Date Ordered", value=date_ordered_dt)
+
+                        if target_status in ["Received", "Archived"] and needs_received_date:
+                            received_date = st.date_input("Received Date", value=received_dt)
+                        elif target_status == "Archived":
+                            st.markdown('<div class="tp-action-help">Received date is already captured from the previous step.</div>', unsafe_allow_html=True)
+
+                        if show_received_action_panel:
+                            sel_sn = str(cur.get("Serial Number", "")).strip()
+                            if not matched_inv.empty:
+                                existing_components = matched_inv["Component"].astype(str).str.strip().replace("", pd.NA).dropna()
+                                if existing_components.shape[0]:
+                                    inventory_component = str(existing_components.iloc[0])
+
+                            if current_received_action == "No inventory action":
+                                st.markdown('<div class="tp-action-help">Keep the order in this step until you are ready to place it in inventory or mount it.</div>', unsafe_allow_html=True)
+                            else:
+                                with st.container(border=True):
+                                    st.markdown('<div class="tp-focus-title">Current inventory action</div>', unsafe_allow_html=True)
+                                    if current_received_action == "Locate in inventory":
+                                        inventory_location = st.selectbox(
+                                            "Inventory location",
+                                            options=[""] + current_location_options,
+                                            key=f"parts_received_loc_{order_index}",
+                                        )
+                                    elif current_received_action == "Mount on machine":
+                                        inventory_location = "Mounted"
+                                        st.markdown('<div class="tp-action-help">This will register the part directly under Mounted.</div>', unsafe_allow_html=True)
+                                    inventory_qty = st.number_input(
+                                        "Inventory qty",
+                                        min_value=0.01,
+                                        max_value=10000.0,
+                                        value=1.0,
+                                        step=0.1,
+                                        key=f"parts_received_qty_{order_index}",
+                                    )
+                                    inventory_serial = st.text_input(
+                                        "Inventory serial",
+                                        value=sel_sn,
+                                        key=f"parts_received_serial_{order_index}",
+                                    )
+                                    inventory_component = st.selectbox(
+                                        "Inventory component",
+                                        options=current_component_options or ["Tower Parts"],
+                                        index=(current_component_options.index(inventory_component) if inventory_component in current_component_options else 0),
+                                        key=f"parts_received_component_{order_index}",
+                                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+
                     details = st.text_area("Details", value=str(cur.get("Details", "")), height=120)
-                    ordered_by = st.text_input("Ordered By", value=str(cur.get("Ordered By", "")))
-    
+
                     do_update = st.form_submit_button("✅ Update Order", use_container_width=True)
-    
+
                     if do_update:
                         orders_df.at[order_index, "Part Name"] = updated_part_name.strip()
                         orders_df.at[order_index, "Serial Number"] = updated_serial_number.strip()
-                        orders_df.at[order_index, "Status"] = new_status
+                        orders_df.at[order_index, "Status"] = target_status
     
                         orders_df.at[order_index, "Project Name"] = "" if updated_project == "None" else str(updated_project)
                         orders_df.at[order_index, "Opened By"] = updated_opened_by.strip()
     
                         orders_df.at[order_index, "Details"] = details.strip()
-                        orders_df.at[order_index, "Company"] = company.strip()
-                        orders_df.at[order_index, "Ordered By"] = ordered_by.strip()
-    
-                        orders_df.at[order_index, "Approved"] = approved
-                        orders_df.at[order_index, "Approved By"] = approved_by.strip()
-                        orders_df.at[order_index, "Approval Date"] = approval_date.strftime("%Y-%m-%d") if approved == "Yes" else ""
-    
-                        orders_df.at[order_index, "Date Ordered"] = date_ordered.strftime("%Y-%m-%d")
+                        orders_df.at[order_index, "Company"] = company.strip() if target_status in ["Ordered", "Received", "Archived"] else str(cur.get("Company", "")).strip()
+                        orders_df.at[order_index, "Approval Requested From"] = approval_requested_from.strip() if target_status in ["Wait for Approval", "Approved", "Ordered", "Received", "Archived"] else ""
 
-                        if new_status.lower() == "received":
-                            orders_df.at[order_index, "Inventory Synced"] = "Pending"
-                        elif new_status.lower() != "received":
+                        is_approved_step = target_status in ["Approved", "Ordered", "Received", "Archived"]
+                        is_ordered_step = target_status in ["Ordered", "Received", "Archived"]
+
+                        orders_df.at[order_index, "Approved"] = "Yes" if is_approved_step else "No"
+                        orders_df.at[order_index, "Approved By"] = approved_by.strip() if is_approved_step else ""
+                        orders_df.at[order_index, "Approval Date"] = approval_date.strftime("%Y-%m-%d") if is_approved_step else ""
+
+                        orders_df.at[order_index, "Ordered By"] = ordered_by.strip() if is_ordered_step else ""
+                        orders_df.at[order_index, "Date Ordered"] = date_ordered.strftime("%Y-%m-%d") if is_ordered_step else ""
+                        orders_df.at[order_index, "Received Date"] = received_date.strftime("%Y-%m-%d") if target_status in ["Received", "Archived"] else ""
+
+                        if target_status in ["Received", "Archived"]:
+                            if current_received_action == "Locate in inventory":
+                                received_state = "Located in inventory"
+                            elif current_received_action == "Mount on machine":
+                                received_state = "Mounted on machine"
+                            elif show_received_action_panel:
+                                received_state = "Waiting for inventory action"
+                        orders_df.at[order_index, "Received State"] = received_state if target_status in ["Received", "Archived"] else ""
+
+                        if target_status.lower() in ["received", "archived"]:
+                            if show_received_action_panel and current_received_action in ["Locate in inventory", "Mount on machine"]:
+                                if current_received_action == "Locate in inventory" and not str(inventory_location).strip():
+                                    st.error("Choose an inventory location for the received item.")
+                                    st.stop()
+                                increment_part(
+                                    inventory_file,
+                                    updated_part_name.strip(),
+                                    qty=float(inventory_qty),
+                                    component=inventory_component,
+                                    serial_number=inventory_serial.strip(),
+                                    location=inventory_location if current_received_action == "Locate in inventory" else "Mounted",
+                                    location_serial=current_loc_serial_map.get(inventory_location, "MOUNTED" if current_received_action == "Mount on machine" else ""),
+                                    notes="Inventory action from received order",
+                                )
+                                orders_df.at[order_index, "Inventory Synced"] = "Yes"
+                            elif show_received_action_panel:
+                                orders_df.at[order_index, "Inventory Synced"] = "Pending"
+                        elif target_status.lower() not in ["received", "archived"]:
                             orders_df.at[order_index, "Inventory Synced"] = ""
 
                         orders_df.to_csv(ORDER_FILE, index=False)
@@ -539,7 +1396,7 @@ def render_tower_parts_tab(P):
         key="parts_inventory_open_toggle",
     )
     if show_inventory_center:
-        st.caption("Manage part stock and location intake for received orders. Intake with location auto-moves order to Installed.")
+        st.caption("Manage part stock and inventory actions for received orders.")
 
         def _safe_mtime(p: str) -> float:
             try:
@@ -652,11 +1509,12 @@ def render_tower_parts_tab(P):
             if ln:
                 loc_serial_map[ln] = ls
 
-        def _upsert_storage_location(loc_name: str, loc_serial: str = "") -> None:
+        def _upsert_storage_location(loc_name: str, loc_serial: str = "", description: str = "") -> None:
             ln = str(loc_name).strip()
             if not ln:
                 return
-            ls = str(loc_serial).strip()
+            ls = str(loc_serial).strip() or _location_serial_from_name(ln)
+            desc = str(description).strip()
             ldf = load_locations(locations_file)
             now_ts = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
             if ldf.empty:
@@ -666,6 +1524,8 @@ def render_tower_parts_tab(P):
                 idx = ldf[mask].index[0]
                 if ls:
                     ldf.at[idx, "Location Serial"] = ls
+                if desc:
+                    ldf.at[idx, "Description"] = desc
                 if not str(ldf.at[idx, "Active"]).strip():
                     ldf.at[idx, "Active"] = "Yes"
                 ldf.at[idx, "Last Updated"] = now_ts
@@ -678,7 +1538,7 @@ def render_tower_parts_tab(P):
                                 {
                                     "Location Name": ln,
                                     "Location Serial": ls,
-                                    "Description": "Auto-added from Manual Inventory Update",
+                                    "Description": desc or "Auto-added from inventory flow",
                                     "Active": "Yes",
                                     "Last Updated": now_ts,
                                 }
@@ -780,61 +1640,9 @@ def render_tower_parts_tab(P):
         inv_components = sorted(list({str(x).strip() for x in inv_df.get("Component", pd.Series([], dtype=str)).tolist() if str(x).strip()}))
         component_options = sorted(list({*sheet_components, *inv_components, "Tower Parts", "Consumables", "General Tools"}))
 
-        # Intake queue from received orders not yet organized in inventory.
-        received_pending = orders_df[
-            orders_df["Status"].astype(str).str.strip().str.lower().eq("received")
-            & orders_df["Inventory Synced"].astype(str).str.strip().str.lower().ne("yes")
-        ].copy()
-        if not received_pending.empty:
-            st.warning("Received orders waiting for intake. Assign location and confirm stock add.")
-            show_cols = [c for c in ["Part Name", "Serial Number", "Project Name", "Company", "Details"] if c in received_pending.columns]
-            st.dataframe(received_pending[show_cols], use_container_width=True, height=180)
-
-            rp_labels = []
-            rp_map = {}
-            for idx, rr in received_pending.iterrows():
-                label = f"{str(rr.get('Part Name','')).strip()} | SN:{str(rr.get('Serial Number','')).strip() or '-'} | row:{idx}"
-                rp_labels.append(label)
-                rp_map[label] = int(idx)
-
-            i1, i2, i3, i4, i5 = st.columns([1.2, 1.0, 0.8, 1.0, 1.1])
-            with i1:
-                intake_pick = st.selectbox("Received order", options=[""] + rp_labels, key="parts_intake_pick")
-            with i2:
-                intake_loc = st.selectbox("Store in location", options=[""] + location_options, key="parts_intake_loc")
-            with i3:
-                intake_qty = st.number_input("Qty", min_value=0.01, max_value=10000.0, value=1.0, step=0.1, key="parts_intake_qty")
-            with i4:
-                intake_override_sn = st.text_input("Serial override", key="parts_intake_sn")
-            with i5:
-                intake_component = st.selectbox("Component", options=component_options or ["Tower Parts"], key="parts_intake_component")
-
-            if st.button("✅ Intake + Locate Received Order", use_container_width=True, key="parts_intake_apply_btn", type="primary"):
-                if not intake_pick or not intake_loc:
-                    st.error("Select received order and storage location.")
-                else:
-                    ridx = rp_map[intake_pick]
-                    row = orders_df.loc[ridx]
-                    part_name = str(row.get("Part Name", "")).strip()
-                    serial_num = intake_override_sn.strip() or str(row.get("Serial Number", "")).strip()
-                    increment_part(
-                        inventory_file,
-                        part_name,
-                        qty=float(intake_qty),
-                        component=intake_component,
-                        serial_number=serial_num,
-                        location=intake_loc,
-                        location_serial=loc_serial_map.get(intake_loc, ""),
-                        notes="Intake from received order",
-                    )
-                    orders_df.at[ridx, "Status"] = "Installed"
-                    orders_df.at[ridx, "Inventory Synced"] = "Yes"
-                    orders_df.to_csv(ORDER_FILE, index=False)
-                    st.success("Received order organized, added to inventory, and moved to Installed.")
-
         inv_df = load_inventory(inventory_file)
         if inv_df.empty:
-            st.info("Inventory is empty. Add rows below or intake received orders.")
+            st.info("Inventory is empty. Add rows below to start organizing tower parts.")
 
         with st.expander("🔎 Inventory Finder", expanded=False):
             st.caption("Unified view: each part shows stock and mounted quantities.")
@@ -863,6 +1671,9 @@ def render_tower_parts_tab(P):
         finder_src["Location Serial"] = finder_src["Location Serial"].astype(str).fillna("").str.strip()
         finder_src["Quantity"] = pd.to_numeric(finder_src["Quantity"], errors="coerce").fillna(0.0)
         finder_src["Min Level"] = pd.to_numeric(finder_src["Min Level"], errors="coerce").fillna(0.0)
+        if "Lead Time Days" not in finder_src.columns:
+            finder_src["Lead Time Days"] = 0.0
+        finder_src["Lead Time Days"] = pd.to_numeric(finder_src["Lead Time Days"], errors="coerce").fillna(0.0)
         finder_src["Notes"] = finder_src["Notes"].astype(str).fillna("").str.strip()
         finder_src["_is_mounted"] = (
             finder_src["Location"].str.lower().eq("mounted")
@@ -910,6 +1721,7 @@ def render_tower_parts_tab(P):
                     "Qty Mounted": qty_mounted,
                     "Quantity": qty_total,
                     "Min Level": float(g["Min Level"].max()) if not g.empty else 0.0,
+                    "Lead Time Days": float(g["Lead Time Days"].max()) if ("Lead Time Days" in g.columns and not g.empty) else 0.0,
                     "Notes": (" | ".join(sorted(set(notes))))[:160],
                 }
             )
@@ -941,6 +1753,7 @@ def render_tower_parts_tab(P):
                         "Qty Mounted",
                         "Quantity",
                         "Min Level",
+                        "Lead Time Days",
                         "Notes",
                     ]
                     if c in finder_df.columns
@@ -1000,6 +1813,9 @@ def render_tower_parts_tab(P):
         inv_status = inv_df.copy()
         inv_status["Quantity"] = pd.to_numeric(inv_status["Quantity"], errors="coerce").fillna(0.0)
         inv_status["Min Level"] = pd.to_numeric(inv_status["Min Level"], errors="coerce").fillna(0.0)
+        if "Lead Time Days" not in inv_status.columns:
+            inv_status["Lead Time Days"] = 0.0
+        inv_status["Lead Time Days"] = pd.to_numeric(inv_status["Lead Time Days"], errors="coerce").fillna(0.0)
         inv_status["Item Type"] = inv_status.get("Item Type", "").astype(str).str.strip()
         is_coating = inv_status["Part Name"].astype(str).str.startswith("Coating::")
         is_tool = inv_status["Item Type"].str.lower().eq("tool")
@@ -1016,7 +1832,7 @@ def render_tower_parts_tab(P):
         )
         low_count = int(inv_status["_low"].sum())
         low_total_unique = int(inv_status.loc[inv_status["_low"], "Part Name"].astype(str).str.strip().nunique())
-        active_status = {"opened", "approved", "ordered", "shipped"}
+        active_status = {"opened", "wait for approval", "approved", "ordered"}
         low_parts_global = sorted(list({str(x).strip() for x in inv_status.loc[inv_status["_low"], "Part Name"].tolist() if str(x).strip()}))
         low_need_order_unique = 0
         if low_parts_global:
@@ -1040,7 +1856,7 @@ def render_tower_parts_tab(P):
             view_cols = [
                 c for c in [
                     "Part Name", "Item Type", "Serial Number", "Location", "Location Serial",
-                    "Quantity", "Min Level", "Effective Min", "Notes"
+                    "Quantity", "Min Level", "Lead Time Days", "Effective Min", "Notes"
                 ] if c in inv_status.columns
             ]
             view_df = inv_status[inv_status["_low"]][view_cols + ["_low"]].copy()
@@ -1067,7 +1883,7 @@ def render_tower_parts_tab(P):
                 styled = (
                     view_df.style
                     .apply(_low_style, axis=1)
-                    .format({"Quantity": "{:.2f}", "Min Level": "{:.2f}", "Effective Min": "{:.2f}"})
+                    .format({"Quantity": "{:.2f}", "Min Level": "{:.2f}", "Lead Time Days": "{:.0f}", "Effective Min": "{:.2f}"})
                 )
                 st.dataframe(styled, use_container_width=True, height=220)
 
@@ -1103,9 +1919,12 @@ def render_tower_parts_tab(P):
                             "Project Name": "Maintenance",
                             "Details": "Auto-created from low stock alert",
                             "Opened By": str(st.session_state.get("maint_actor", "operator")),
+                            "Approval Requested From": "",
                             "Approved": "No",
                             "Approved By": "",
                             "Approval Date": "",
+                            "Received Date": "",
+                            "Received State": "",
                             "Ordered By": "",
                             "Date Ordered": "",
                             "Company": "",
@@ -1186,11 +2005,16 @@ def render_tower_parts_tab(P):
                 quick_loc_custom = st.text_input("Custom Location", key="parts_quick_loc_custom", placeholder="e.g. Rack C-12")
             quick_loc = quick_loc_custom.strip() if quick_loc_pick == "Other (custom)" else quick_loc_pick
             with q5:
-                quick_loc_serial = st.text_input("Loc Serial", key="parts_quick_loc_serial")
-            with q6:
                 quick_serial = st.text_input("Serial", key="parts_quick_serial")
+            with q6:
+                quick_loc_desc = st.text_input("Location note", key="parts_quick_loc_desc", placeholder="optional")
             with q7:
                 quick_min = st.number_input("Min Level", min_value=0.0, max_value=10000.0, value=0.0, step=0.1, key="parts_quick_min")
+            q8c1, q8c2 = st.columns([1.0, 2.0])
+            with q8c1:
+                quick_lead_days = st.number_input("Lead Time Days", min_value=0.0, max_value=3650.0, value=0.0, step=1.0, key="parts_quick_lead_days")
+            with q8c2:
+                st.caption("How many days it usually takes to bring this part after ordering.")
 
             quick_target = quick_new_part.strip() or quick_part.strip()
 
@@ -1200,7 +2024,8 @@ def render_tower_parts_tab(P):
                     if quick_target:
                         # If custom/new location was entered, register it in Storage Locations list.
                         if str(quick_loc).strip():
-                            _upsert_storage_location(str(quick_loc).strip(), quick_loc_serial.strip())
+                            _upsert_storage_location(str(quick_loc).strip(), description=quick_loc_desc.strip())
+                        quick_loc_serial = _location_serial_from_name(str(quick_loc).strip())
                         increment_part(
                             inventory_file,
                             quick_target,
@@ -1208,7 +2033,7 @@ def render_tower_parts_tab(P):
                             component=quick_component,
                             serial_number=quick_serial.strip(),
                             location=str(quick_loc).strip(),
-                            location_serial=quick_loc_serial.strip(),
+                            location_serial=quick_loc_serial,
                             notes="Quick +",
                             item_type=quick_item_type,
                         )
@@ -1220,6 +2045,7 @@ def render_tower_parts_tab(P):
                             )
                             if m.any():
                                 cur.loc[m, "Min Level"] = float(quick_min)
+                                cur.loc[m, "Lead Time Days"] = float(quick_lead_days)
                                 save_inventory(inventory_file, cur)
                         st.success("Stock increased.")
                     else:
@@ -1317,28 +2143,45 @@ def render_tower_parts_tab(P):
                             st.warning("Could not unmount this part.")
 
         with st.expander("🗂️ Storage Locations", expanded=False):
-            st.caption("Create/edit storage places with location serials (used by intake).")
+            st.caption("Create/edit storage places by name and description. Internal serials are generated automatically.")
             loc_df = load_locations(locations_file)
+            loc_edit_src = loc_df[["Location Name", "Description"]].copy() if not loc_df.empty else pd.DataFrame(columns=["Location Name", "Description"])
             loc_edit = st.data_editor(
-                loc_df,
+                loc_edit_src,
                 use_container_width=True,
                 height=220,
                 num_rows="dynamic",
                 column_config={
                     "Location Name": st.column_config.TextColumn("Location Name", required=True),
-                    "Location Serial": st.column_config.TextColumn("Location Serial"),
                     "Description": st.column_config.TextColumn("Description"),
-                    "Active": st.column_config.SelectboxColumn("Active", options=["Yes", "No"]),
-                    "Last Updated": st.column_config.TextColumn("Last Updated"),
                 },
                 key="parts_locations_editor",
             )
             if st.button("💾 Save Locations", use_container_width=True, key="parts_locations_save_btn", type="primary"):
                 now_ts = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                existing = load_locations(locations_file)
                 loc_save = loc_edit.copy()
-                if "Last Updated" in loc_save.columns:
-                    touch = loc_save["Location Name"].astype(str).str.strip().ne("")
-                    loc_save.loc[touch, "Last Updated"] = now_ts
+                loc_save["Location Name"] = loc_save["Location Name"].astype(str).fillna("").str.strip()
+                loc_save["Description"] = loc_save["Description"].astype(str).fillna("").str.strip()
+                loc_save = loc_save[loc_save["Location Name"].ne("")].copy()
+                rows = []
+                for _, rr in loc_save.iterrows():
+                    ln = str(rr.get("Location Name", "")).strip()
+                    desc = str(rr.get("Description", "")).strip()
+                    existing_match = existing[
+                        existing["Location Name"].astype(str).str.strip().str.lower().eq(ln.lower())
+                    ] if not existing.empty else pd.DataFrame()
+                    old = existing_match.iloc[0] if not existing_match.empty else {}
+                    rows.append(
+                        {
+                            "Location Name": ln,
+                            "Location Serial": str(getattr(old, "get", lambda *_: "")("Location Serial", "") or _location_serial_from_name(ln)).strip(),
+                            "Description": desc,
+                            "Active": str(getattr(old, "get", lambda *_: "Yes")("Active", "Yes")).strip() or "Yes",
+                            "Last Updated": now_ts,
+                        }
+                    )
+                loc_save = pd.DataFrame(rows, columns=["Location Name", "Location Serial", "Description", "Active", "Last Updated"])
                 save_locations(locations_file, loc_save)
                 st.success("Storage locations saved.")
 
@@ -1537,7 +2380,7 @@ def render_tower_parts_tab(P):
             if not pn:
                 return "missing", ""
             pno = str(part_no or "").strip()
-            active_status = {"opened", "approved", "ordered", "shipped", "received"}
+            active_status = {"opened", "wait for approval", "approved", "ordered", "received"}
             mask = (
                 orders_df["Part Name"].astype(str).str.strip().str.lower().eq(pn.lower())
                 & orders_df["Status"].astype(str).str.strip().str.lower().isin(active_status)
@@ -1552,9 +2395,12 @@ def render_tower_parts_tab(P):
                 "Project Name": "Maintenance",
                 "Details": str(details or "").strip()[:300],
                 "Opened By": str(st.session_state.get("maint_actor", "operator")),
+                "Approval Requested From": "",
                 "Approved": "No",
                 "Approved By": "",
                 "Approval Date": "",
+                "Received Date": "",
+                "Received State": "",
                 "Ordered By": "",
                 "Date Ordered": "",
                 "Company": "SG",

@@ -1,0 +1,5 @@
+Task_ID,Component,Task,Task_Group,Required_Parts,Preparation_Checklist,Safety_Protocol,Safety_Fall_Risk,Safety_TnM_Presence,Procedure_Steps,Procedure_Photos,Draw_Stop_Plan,Est_Stop_Min,Completion_Criteria,Last_Updated,Updated_By
+FUR-MNT-007,63mm Furnace System,Every 3 months OR 1500 operating hours: check pyrometer alignment & window cleanliness,3-Month,Pyrometer window / cleaning kit; IPA wipes / cleaning cloth,Confirm required parts availability (stock not mounted).,"1) PPE minimum: safety glasses, work gloves, and closed shoes.
+2) Confirm area is clear, stable, and communication with operator is active.
+3) Heat hazard: verify cool-down or use heat-rated gloves/tools before touch.
+4) Restart control: one assigned person approves restart after verification.",No,Standard access,Inspect pyrometer alignment and check window cleanliness; clean window if required.,,"Pause draw, isolate subsystem, perform checks, resume after verification.",60.0,"Task completed, system verified, safe restart confirmed.",2026-03-10 16:02:24,

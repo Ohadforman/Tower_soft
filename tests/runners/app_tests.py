@@ -43,6 +43,9 @@ TEST_DESCRIPTIONS = {
     "Path script single source guardrail": "Scans code for suspicious hardcoded file path usage.",
     "Navigation/router consistency": "Ensures removed tabs and active tabs are aligned between navigation and router.",
     "Base blue theme hook": "Ensures the shared blue style baseline is applied from app entry.",
+    "Report center markdown images": "Checks development markdown export embeds local images inline with safe local-file markdown paths.",
+    "Consumables snapshot totals": "Verifies report-center consumables snapshot exposes warehouse, containers, and total per coating type.",
+    "Deployment workflow docs": "Confirms final handoff docs exist for offline transfer, deployment, and codebase maintenance.",
 }
 
 
@@ -372,6 +375,74 @@ def test_base_blue_theme_hook() -> None:
     _assert("apply_blue_clean_base_theme()" in src, "base theme application missing")
 
 
+def test_report_center_markdown_images() -> None:
+    from renders.tabs.report_center_tab import _build_development_project_markdown, _prepare_development_project_bundle
+
+    projects_fp = os.path.join(P.data_dir, "development_projects.csv")
+    projects = pd.read_csv(projects_fp, keep_default_na=False) if os.path.exists(projects_fp) else pd.DataFrame()
+    candidates = []
+    if not projects.empty and "Project Name" in projects.columns:
+        candidates = [str(x).strip() for x in projects["Project Name"].tolist() if str(x).strip()]
+
+    chosen = ""
+    for project_name in candidates:
+        bundle = _prepare_development_project_bundle(P.data_dir, project_name)
+        if bundle.get("images"):
+            chosen = project_name
+            break
+    _assert(bool(chosen), "no development project with images found for markdown export test")
+
+    with tempfile.TemporaryDirectory(prefix="tower_dev_md_") as td:
+        out_md = os.path.join(td, "dev_report.md")
+        _build_development_project_markdown(out_md, chosen, P.data_dir)
+        with open(out_md, "r", encoding="utf-8") as f:
+            content = f.read()
+    _assert("### Images" in content, "markdown export missing Images section")
+    _assert("![" in content, "markdown export missing inline image syntax")
+    _assert("](<" in content, "markdown export missing safe wrapped local path syntax")
+
+
+def test_consumables_snapshot_totals() -> None:
+    from renders.tabs.report_center_tab import _latest_consumables_totals_snapshot
+
+    snap = _latest_consumables_totals_snapshot()
+    expected_cols = {"coating_type", "warehouse_kg", "containers_kg", "total_kg"}
+    _assert(expected_cols.issubset(set(snap.columns)), f"missing cols: {sorted(expected_cols - set(snap.columns))}")
+    if snap.empty:
+        return
+    diff = (pd.to_numeric(snap["warehouse_kg"], errors="coerce").fillna(0.0) +
+            pd.to_numeric(snap["containers_kg"], errors="coerce").fillna(0.0) -
+            pd.to_numeric(snap["total_kg"], errors="coerce").fillna(0.0)).abs().max()
+    _assert(float(diff) < 1e-9, f"total_kg mismatch max diff={diff}")
+
+
+def test_deployment_workflow_docs() -> None:
+    required_docs = {
+        "docs/V2_DEPLOY_PROTOCOL.md": ["deploy", "protocol"],
+        "docs/V2_FINAL_SCAN.md": ["final", "scan"],
+        "docs/OPERATIONS.md": ["release", "bundle"],
+        "docs/ARCHITECTURE.md": ["duckdb", "local"],
+        "docs/DEVELOPMENT.md": ["app tests", "preflight"],
+        "docs/ENV_PRETEST.md": ["new computer", "pretest"],
+        "docs/APP_ROLE_GUIDE_EN.md": ["operator", "project manager", "researcher"],
+        "docs/CODEBASE_MAINTENANCE_GUIDE.md": ["paths", "tests", "deployment"],
+        "docs/OFFLINE_TRANSFER_WORKFLOW.md": ["hard disk", "middle computer", "github"],
+    }
+    missing = []
+    bad = []
+    for rel, markers in required_docs.items():
+        abs_path = os.path.join(P.root_dir, rel)
+        if not os.path.exists(abs_path):
+            missing.append(rel)
+            continue
+        with open(abs_path, "r", encoding="utf-8") as f:
+            txt = f.read().lower()
+        for marker in markers:
+            if marker.lower() not in txt:
+                bad.append(f"{rel} missing '{marker}'")
+    _assert(not missing and not bad, ("missing docs: " + ", ".join(missing) + " | " if missing else "") + "; ".join(bad))
+
+
 def test_no_root_duplicate_files_warning() -> None:
     root_names = [
         "draw_orders.csv",
@@ -481,6 +552,9 @@ def main() -> int:
         ("AT-19", "Path script single source guardrail", test_path_script_single_source, False),
         ("AT-20", "Navigation/router consistency", test_navigation_router_consistency, False),
         ("AT-21", "Base blue theme hook", test_base_blue_theme_hook, False),
+        ("AT-22", "Report center markdown images", test_report_center_markdown_images, False),
+        ("AT-23", "Consumables snapshot totals", test_consumables_snapshot_totals, False),
+        ("AT-24", "Deployment workflow docs", test_deployment_workflow_docs, False),
     ]
     for code, name, fn, warning in checks:
         r.check(code, name, fn, warning=warning)

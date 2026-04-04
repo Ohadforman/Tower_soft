@@ -3,10 +3,10 @@ def render_sql_lab_tab(P):
     import pandas as pd
     import numpy as np
     import streamlit as st
-    import duckdb
     import plotly.graph_objects as go
     from plotly.colors import qualitative
     from plotly.subplots import make_subplots
+    from helpers.duckdb_io import get_duckdb_conn
     
     # NOTE:
     # Best practice is to call st.set_page_config(layout="wide") ONCE at the top of the app.
@@ -179,6 +179,43 @@ def render_sql_lab_tab(P):
             box-shadow: 0 14px 28px rgba(0,0,0,0.28), 0 0 18px rgba(84, 182, 255, 0.24) !important;
             background: linear-gradient(165deg, rgba(10, 20, 34, 0.72), rgba(8, 14, 24, 0.52)) !important;
         }
+        .sql-match-panel{
+            border: 1px solid rgba(88, 214, 146, 0.28);
+            border-radius: 12px;
+            padding: 10px 12px 8px 12px;
+            background: linear-gradient(180deg, rgba(10, 28, 20, 0.52), rgba(8, 18, 16, 0.34));
+            box-shadow: inset 0 0 0 1px rgba(88,214,146,0.06);
+            min-height: 118px;
+        }
+        .sql-match-head{
+            font-size: 0.86rem;
+            font-weight: 780;
+            color: rgba(169, 245, 198, 0.96);
+            margin-bottom: 8px;
+        }
+        .sql-match-scroll{
+            max-height: 140px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .sql-match-chip{
+            display: inline-block;
+            margin: 0 8px 8px 0;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(122, 232, 172, 0.34);
+            background: linear-gradient(180deg, rgba(30, 88, 58, 0.88), rgba(20, 58, 38, 0.82));
+            color: rgba(238, 255, 244, 0.98);
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.2;
+            white-space: nowrap;
+            box-shadow: 0 5px 14px rgba(4, 24, 13, 0.20);
+        }
+        .sql-match-empty{
+            font-size: 0.82rem;
+            color: rgba(180, 216, 194, 0.88);
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -213,25 +250,17 @@ def render_sql_lab_tab(P):
         st.rerun()
 
     def _open_step(step_num: int) -> None:
-        # Keep-only behavior:
-        # - if all are collapsed, keep collapsed
-        # - never jump between steps from widget callbacks
+        # Keep the active step stable across widget reruns.
         current = _current_open_step()
         if current == 0:
+            st.session_state[f"sql_ui_step_open_{step_num}"] = True
+            st.session_state["sql_ui_step"] = step_num
             return
         if step_num != current:
             return
         for s in (1, 2, 3):
             st.session_state[f"sql_ui_step_open_{s}"] = (s == step_num)
         st.session_state["sql_ui_step"] = step_num
-
-    def _on_pick_mode_change() -> None:
-        mode = st.session_state.get("sql_pick_mode_builder", "Group from search results")
-        if mode == "Group from search results":
-            # Group flow default: ANY (OR)
-            st.session_state["sql_group_logic"] = "ANY (OR)"
-            st.session_state["sql_group_mode_just_selected"] = True
-        _open_step(1)
 
     s1, s2, s3 = st.columns(3)
     with s1:
@@ -249,12 +278,28 @@ def render_sql_lab_tab(P):
     
     DATASET_DIR = P.dataset_dir
     DB_PATH = P.duckdb_path
+
+    @st.cache_data(show_spinner=False)
+    def _dataset_files_cached(dataset_dir: str):
+        files = glob.glob(os.path.join(dataset_dir, "**", "*.csv"), recursive=True)
+        files = [f for f in files if os.path.isfile(f)]
+        files = sorted(f.replace("\\", "/") for f in files)
+        return files
+
+    @st.cache_data(show_spinner=False)
+    def _dataset_signature_cached(files_with_stats):
+        h = hashlib.sha1()
+        for f, mtime_ns, size in files_with_stats:
+            h.update(str(f).encode("utf-8", errors="ignore"))
+            h.update(str(mtime_ns).encode("ascii"))
+            h.update(str(size).encode("ascii"))
+        return h.hexdigest()
     
     # =========================================================
     # Persistent DuckDB connection
     # =========================================================
     if "sql_duck_con" not in st.session_state:
-        st.session_state["sql_duck_con"] = duckdb.connect(DB_PATH)
+        st.session_state["sql_duck_con"] = get_duckdb_conn(DB_PATH)
     con = st.session_state["sql_duck_con"]
     
     try:
@@ -377,6 +422,25 @@ def render_sql_lab_tab(P):
             return int(m.group(1))
         except Exception:
             return None
+
+    def _group_base_label(params):
+        """Build a readable base label by removing zone-specific tokens."""
+        if not params:
+            return "Group"
+        cleaned = []
+        for p in params:
+            s = str(p or "")
+            s = re.sub(r"(?i)\bmarked\s*zone\s*\d+\b", "", s)
+            s = re.sub(r"(?i)\bzone\s*\d+\b", "", s)
+            s = s.replace("|", " ").replace("-", " ")
+            s = re.sub(r"\s+", " ", s).strip()
+            if s:
+                cleaned.append(s)
+        if not cleaned:
+            return "Group"
+        uniq = _dedupe_keep_order(cleaned)
+        uniq_sorted = sorted(uniq, key=len)
+        return uniq_sorted[0]
     
     def _filters_summary_for_draws(used_params_list, human_lines_list) -> str:
         used_params_list = _dedupe_keep_order(used_params_list or [])
@@ -393,8 +457,7 @@ def render_sql_lab_tab(P):
     # Build DuckDB view for dataset CSVs (KV)
     # =========================================================
     def build_datasets_kv_view_from_disk() -> int:
-        files = glob.glob(os.path.join(DATASET_DIR, "**", "*.csv"), recursive=True)
-        files = [f for f in files if os.path.isfile(f)]
+        files = _dataset_files_cached(DATASET_DIR)
         if not files:
             con.execute("""
                 CREATE OR REPLACE VIEW datasets_kv AS
@@ -411,8 +474,7 @@ def render_sql_lab_tab(P):
                 WHERE FALSE;
             """)
             return 0
-    
-        files = [f.replace("\\", "/") for f in files]
+
         files_sql = "[" + ",".join(_lit(f) for f in files) + "]"
     
         con.execute(f"""
@@ -457,22 +519,17 @@ def render_sql_lab_tab(P):
             LEFT JOIN ts USING (_draw);
         """)
         return len(files)
-    
+
     def _dataset_signature() -> str:
-        files = glob.glob(os.path.join(DATASET_DIR, "**", "*.csv"), recursive=True)
-        files = [f for f in files if os.path.isfile(f)]
-        files = sorted([f.replace("\\", "/") for f in files])
-        h = hashlib.sha1()
+        files = _dataset_files_cached(DATASET_DIR)
+        files_with_stats = []
         for f in files:
             try:
                 stt = os.stat(f)
-                h.update(f.encode("utf-8", errors="ignore"))
-                h.update(str(stt.st_mtime_ns).encode("ascii"))
-                h.update(str(stt.st_size).encode("ascii"))
+                files_with_stats.append((f, stt.st_mtime_ns, stt.st_size))
             except Exception:
-                # Ignore broken entries and keep going.
                 continue
-        return h.hexdigest()
+        return _dataset_signature_cached(tuple(files_with_stats))
 
     def _clear_sql_results_cache():
         for k in [
@@ -531,6 +588,11 @@ def render_sql_lab_tab(P):
     # Group is the primary workflow for zone-based data.
     st.session_state.setdefault("sql_pick_mode_builder", "Group from search results")
     st.session_state.setdefault("sql_group_logic", "ANY (OR)")
+    st.session_state["sql_pick_mode_builder"] = "Group from search results"
+    st.session_state.setdefault("sql_param_family_filter", "All")
+    if _current_open_step() == 0:
+        st.session_state["sql_ui_step_open_1"] = True
+        st.session_state["sql_ui_step"] = 1
     
     # =========================================================
     # Available params list
@@ -562,143 +624,172 @@ def render_sql_lab_tab(P):
         tokens = _tokenize_search(search_q)
         matches_all = _match_params_by_tokens(all_params, tokens)
         matches = matches_all[:500]
-    
-        cA, cB, cC = st.columns([1.15, 1.15, 0.7])
+
+        def _param_family(name: str) -> str:
+            s = str(name or "").lower()
+            if s.startswith("order__"):
+                return "Order"
+            if s.startswith("process__"):
+                return "Process"
+            if "zone " in s or s.startswith("zone ") or s.startswith("marked zone"):
+                return "Zones"
+            if "t&m" in s or "good zone" in s or "cut/save" in s or "fiber length" in s or "drum |" in s:
+                return "Winder + T&M"
+            return "General"
+
+        cA, cB = st.columns([1.3, 0.7])
         with cA:
-            select_mode = st.radio(
-                "Pick mode",
-                ["Group from search results", "Single parameter"],
-                horizontal=True,
-                key="sql_pick_mode_builder",
-                on_change=_on_pick_mode_change,
-            )
-        with cB:
-            group_mode = st.radio(
-                "Group logic",
-                ["ALL (AND)", "ANY (OR)"],
-                horizontal=True,
-                key="sql_group_logic",
-                help="ALL = every selected parameter must match. ANY = at least one matches.",
+            family_filter = st.selectbox(
+                "Parameter family",
+                ["All", "Zones", "Order", "Process", "Winder + T&M", "General"],
+                key="sql_param_family_filter",
                 on_change=lambda: _open_step(1),
+                help="Use this to shrink the list before selecting parameters.",
             )
-        with cC:
+            st.session_state["sql_group_logic"] = "ANY (OR)"
+            st.caption("Group logic: ANY (OR)")
+        with cB:
             st.metric("Matches", f"{len(matches_all):,}")
             if len(matches_all) > 500:
                 st.caption("showing first 500")
 
         param_search = (search_q or "").strip().lower()
         shown_params = [pp for pp in all_params if param_search in pp.lower()] if param_search else all_params
+        if family_filter != "All":
+            shown_params = [pp for pp in shown_params if _param_family(pp) == family_filter]
+        shown_params = shown_params[:500]
         p = st.session_state.get("sql_param_name", shown_params[0] if shown_params else (all_params[0] if all_params else ""))
 
         st.markdown("<div class='sql-subhead'>✅ Group Selection</div>", unsafe_allow_html=True)
-        if select_mode != "Group from search results":
-            st.info("Group selection is hidden in Single parameter mode.")
+        st.markdown(
+            """
+            <div class="sql-help">
+              <b>Recommended flow:</b> search or browse → select one or more parameters → use the selection as your group.<br>
+              A single parameter is simply a group with one item, so you do not need a separate mode.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if not shown_params:
+            st.warning("No parameters match the current search/family filter.")
             selected_group = []
         else:
-            if st.session_state.pop("sql_group_mode_just_selected", False):
-                st.caption("Group mode active.")
-            if not matches:
-                st.warning("No matches. Type a search above (e.g. `zone avg diameter`).")
-                selected_group = []
+            zone_filtered_matches = list(shown_params)
+
+            cc1, cc2, cc3 = st.columns([1, 1, 1])
+            with cc1:
+                quick_avg = st.checkbox("Only Avg", value=False, key="sql_quick_avg", on_change=lambda: _open_step(1))
+            with cc2:
+                quick_min = st.checkbox("Only Min", value=False, key="sql_quick_min", on_change=lambda: _open_step(1))
+            with cc3:
+                quick_max = st.checkbox("Only Max", value=False, key="sql_quick_max", on_change=lambda: _open_step(1))
+
+            def _metric_filter_list(lst):
+                out = list(lst)
+                metric_flags = []
+                if quick_avg:
+                    metric_flags.append("avg")
+                if quick_min:
+                    metric_flags.append("min")
+                if quick_max:
+                    metric_flags.append("max")
+                if metric_flags:
+                    out = [nm for nm in out if any(f in nm.lower() for f in metric_flags)]
+                return out
+
+            zone_filtered_matches = _metric_filter_list(zone_filtered_matches)
+
+            preview_params = list(zone_filtered_matches)
+            if preview_params:
+                chips_html = "".join(
+                    f"<span class='sql-match-chip'>{str(pp)}</span>"
+                    for pp in preview_params
+                )
+                more_note = ""
+                if len(preview_params) > 120:
+                    more_note = f"<div class='sql-match-empty'>{len(preview_params)} filtered parameters loaded. Scroll to browse all, or refine search to narrow the set.</div>"
+                st.markdown(
+                    f"""
+                    <div class="sql-match-panel">
+                      <div class="sql-match-head">🟢 Available matched parameters</div>
+                      <div class="sql-match-scroll">{chips_html}</div>
+                      {more_note}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
             else:
-                zone_filtered_matches = list(matches)
+                st.markdown(
+                    """
+                    <div class="sql-match-panel">
+                      <div class="sql-match-head">🟢 Available matched parameters</div>
+                      <div class="sql-match-empty">No parameters remain after the current Avg/Min/Max filter.</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                cc1, cc2, cc3 = st.columns([1, 1, 1])
-                with cc1:
-                    quick_avg = st.checkbox("Only Avg", value=False, key="sql_quick_avg", on_change=lambda: _open_step(1))
-                with cc2:
-                    quick_min = st.checkbox("Only Min", value=False, key="sql_quick_min", on_change=lambda: _open_step(1))
-                with cc3:
-                    quick_max = st.checkbox("Only Max", value=False, key="sql_quick_max", on_change=lambda: _open_step(1))
+            csel1, csel2 = st.columns([1, 1])
+            with csel1:
+                if st.button("✅ Use all filtered parameters", use_container_width=True, key="sql_sel_all_shown"):
+                    st.session_state["sql_group_selected_params_store"] = list(zone_filtered_matches)
+                    st.session_state["sql_group_selected_params_widget"] = list(zone_filtered_matches)
+                    st.rerun()
+            with csel2:
+                if st.button("🧼 Clear selection", use_container_width=True, key="sql_clear_group_sel"):
+                    st.session_state["sql_group_selected_params_store"] = []
+                    st.session_state["sql_group_selected_params_widget"] = []
+                    st.rerun()
+            st.caption("Tip: build one selection set here, then apply the condition to that group in Step 3.")
 
-                def _metric_filter_list(lst):
-                    out = list(lst)
-                    metric_flags = []
-                    if quick_avg: metric_flags.append("avg")
-                    if quick_min: metric_flags.append("min")
-                    if quick_max: metric_flags.append("max")
-                    if metric_flags:
-                        out = [nm for nm in out if any(f in nm.lower() for f in metric_flags)]
-                    return out
-    
-                zone_filtered_matches = _metric_filter_list(zone_filtered_matches)
-    
-                csel1, csel2 = st.columns([1, 1])
-                with csel1:
-                    if st.button("✅ Select all (shown)", use_container_width=True, key="sql_sel_all_shown"):
-                        st.session_state["sql_group_selected_params_store"] = list(zone_filtered_matches)
-                        st.session_state["sql_group_selected_params_widget"] = list(zone_filtered_matches)
-                        st.rerun()
-                with csel2:
-                    if st.button("🧼 Clear selection", use_container_width=True, key="sql_clear_group_sel"):
-                        st.session_state["sql_group_selected_params_store"] = []
-                        st.session_state["sql_group_selected_params_widget"] = []
-                        st.rerun()
-                st.caption("Tip: search → select all shown → use 'Add group' in Step 3.")
+            def _sync_group_store_from_widget():
+                st.session_state["sql_group_selected_params_store"] = _dedupe_keep_order(
+                    st.session_state.get("sql_group_selected_params_widget", []) or []
+                )
+                _open_step(1)
 
-                def _sync_group_store_from_widget():
-                    st.session_state["sql_group_selected_params_store"] = _dedupe_keep_order(
-                        st.session_state.get("sql_group_selected_params_widget", []) or []
-                    )
-                    _open_step(1)
+            persisted_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+            widget_default = [x for x in persisted_group if x in zone_filtered_matches]
+            st.session_state.setdefault("sql_group_selected_params_widget", widget_default)
+            st.session_state["sql_group_selected_params_widget"] = [
+                x for x in (st.session_state.get("sql_group_selected_params_widget", []) or []) if x in zone_filtered_matches
+            ]
 
-                persisted_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
-                widget_default = [x for x in persisted_group if x in zone_filtered_matches]
-                st.session_state.setdefault("sql_group_selected_params_widget", widget_default)
-                # When option pool changes, keep only valid items in widget, but do not wipe persisted store.
-                st.session_state["sql_group_selected_params_widget"] = [
-                    x for x in (st.session_state.get("sql_group_selected_params_widget", []) or []) if x in zone_filtered_matches
-                ]
-
+            chooser_c1, chooser_c2 = st.columns([1.25, 0.9])
+            with chooser_c1:
                 selected_group = st.multiselect(
-                    "Selected group parameters",
+                    "Pick parameters for the group",
                     options=zone_filtered_matches,
                     default=st.session_state.get("sql_group_selected_params_widget", []),
                     key="sql_group_selected_params_widget",
-                    help="Tip: search → Select all → add one condition for all zones.",
+                    help="Choose one or more parameters. One parameter is valid too.",
                     on_change=_sync_group_store_from_widget,
                 )
                 if selected_group:
                     st.session_state["sql_group_selected_params_store"] = _dedupe_keep_order(selected_group)
-                st.caption(f"Selected: {len(st.session_state.get('sql_group_selected_params_store', []) or [])}")
+            with chooser_c2:
+                selected_now = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+                st.markdown("**Selection summary**")
+                st.metric("Group size", len(selected_now))
+                st.caption(f"Family: {family_filter}")
+                if selected_now:
+                    st.caption("Current base:")
+                    st.code(_group_base_label(selected_now), language=None)
 
-                # Always show what is matched vs what is selected, so group content is clear.
-                prev_c1, prev_c2 = st.columns(2)
-                with prev_c1:
-                    st.markdown("**Search matches (current)**")
-                    st.dataframe(
-                        pd.DataFrame({"parameter": zone_filtered_matches}),
-                        use_container_width=True,
-                        height=180,
-                    )
-                with prev_c2:
-                    st.markdown("**Selected group (will be added)**")
-                    selected_now = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
-                    st.dataframe(
-                        pd.DataFrame({"parameter": selected_now}),
-                        use_container_width=True,
-                        height=180,
-                    )
+            selected_now = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+            if selected_now:
+                preview = ", ".join(selected_now[:5])
+                if len(selected_now) > 5:
+                    preview += " ..."
+                st.caption(f"Current group: {preview}")
 
-        st.markdown("<div class='sql-subhead'>🎯 Single Parameter (optional)</div>", unsafe_allow_html=True)
-        if select_mode == "Single parameter":
-            p = st.selectbox(
-                "Parameter Name (single)",
-                shown_params,
-                key="sql_param_name",
-                on_change=lambda: _open_step(1),
-            )
-        else:
-            st.caption("Switch Pick mode to Single parameter to use this option.")
-    
     # ---- detect numeric vs categorical based on param_for_type ----
     is_param_numeric = False
     param_values = []
     param_for_type = p
-    if select_mode == "Group from search results":
-        gg = st.session_state.get("sql_group_selected_params_store", []) or []
-        if gg:
-            param_for_type = gg[0]
+    gg = st.session_state.get("sql_group_selected_params_store", []) or []
+    if gg:
+        param_for_type = gg[0]
     
     try:
         df_param_sample = con.execute(f"""
@@ -1084,26 +1175,6 @@ def render_sql_lab_tab(P):
     
         return f"{group_logic}: {len(params)} params [{preview}] → {cond}"
 
-    def _group_base_label(params):
-        """Build a readable base label by removing zone-specific tokens."""
-        if not params:
-            return "Group"
-        cleaned = []
-        for p in params:
-            s = str(p or "")
-            s = re.sub(r"(?i)\\bmarked\\s*zone\\s*\\d+\\b", "", s)
-            s = re.sub(r"(?i)\\bzone\\s*\\d+\\b", "", s)
-            s = s.replace("|", " ").replace("-", " ")
-            s = re.sub(r"\\s+", " ", s).strip()
-            if s:
-                cleaned.append(s)
-        if not cleaned:
-            return "Group"
-        # Pick the shortest common-ish representative string.
-        uniq = _dedupe_keep_order(cleaned)
-        uniq_sorted = sorted(uniq, key=len)
-        return uniq_sorted[0]
-    
     def _kv_predicate_sql(op, v1, v2):
         v1 = (v1 or "").strip()
         v2 = (v2 or "").strip()
@@ -1144,9 +1215,54 @@ def render_sql_lab_tab(P):
             unsafe_allow_html=True,
         )
         st.caption(f"Group selected: {len(st.session_state.get('sql_group_selected_params_store', []) or [])} parameter(s)")
-        b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
+        b1, b2, b3, b4 = st.columns([1.2, 1.2, 0.8, 0.8])
 
-        if b1.button("➕ Add single condition", use_container_width=True, key="sql_add_cond"):
+        if b1.button("➕ Add selected parameters as condition", use_container_width=True, key="sql_add_group", type="primary"):
+            # Use persisted group selection directly from session state so Step 3 works
+            # even when Step 1 is collapsed.
+            params_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
+            sql_raw = build_group_cond_sql(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
+            human_raw = build_group_cond_human(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
+            sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
+
+            if not sql_cond or not human_cond:
+                missing = []
+                if not params_group:
+                    missing.append("select at least one parameter in Step 1")
+                need_v1 = op not in ("any",)
+                need_v2 = (op == "between")
+                if need_v1 and not str(v1 or "").strip():
+                    missing.append("set Value in Step 2")
+                if need_v2 and not str(v2 or "").strip():
+                    missing.append("set Second value (between) in Step 2")
+                if missing:
+                    st.warning("Condition not complete: " + " | ".join(missing))
+                else:
+                    st.warning("Condition not complete. Check selected operator/value combination.")
+            else:
+                if st.session_state.ds_conditions:
+                    st.session_state.ds_conditions.append(f"{joiner} {sql_cond}")
+                else:
+                    st.session_state.ds_conditions.append(sql_cond)
+
+                if st.session_state.ds_conditions_human:
+                    st.session_state.ds_conditions_human.append(f"{joiner} {human_cond}")
+                else:
+                    st.session_state.ds_conditions_human.append(human_cond)
+
+                for pp in (_dedupe_keep_order(params_group) or []):
+                    st.session_state.sql_filter_params_seq.append(pp)
+
+                st.session_state.ds_conditions_struct.append({
+                    "params": _dedupe_keep_order(params_group),
+                    "op": op,
+                    "v1": v1,
+                    "v2": v2,
+                    "negate": bool(negate),
+                    "group_logic": st.session_state.get("sql_group_logic", "ALL (AND)"),
+                })
+
+        if b2.button("➕ Advanced: first parameter only", use_container_width=True, key="sql_add_cond"):
             sql_raw = build_cond_sql(p, op, v1, v2)
             human_raw = build_cond_human(p, op, v1, v2)
             sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
@@ -1172,51 +1288,6 @@ def render_sql_lab_tab(P):
                     "v1": v1,
                     "v2": v2,
                     "negate": bool(negate),
-                })
-    
-        if b2.button("🧩 Add group condition", use_container_width=True, key="sql_add_group", type="primary"):
-            # Use persisted group selection directly from session state so Step 3 works
-            # even when Step 1 is collapsed.
-            params_group = _dedupe_keep_order(st.session_state.get("sql_group_selected_params_store", []) or [])
-            sql_raw = build_group_cond_sql(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
-            human_raw = build_group_cond_human(params_group, op, v1, v2, st.session_state.get("sql_group_logic", "ALL (AND)"))
-            sql_cond, human_cond = wrap_not(sql_raw, human_raw, negate)
-
-            if not sql_cond or not human_cond:
-                missing = []
-                if not params_group:
-                    missing.append("select at least one group parameter in Step 1")
-                need_v1 = op not in ("any",)
-                need_v2 = (op == "between")
-                if need_v1 and not str(v1 or "").strip():
-                    missing.append("set Value in Step 2")
-                if need_v2 and not str(v2 or "").strip():
-                    missing.append("set Second value (between) in Step 2")
-                if missing:
-                    st.warning("Group condition not complete: " + " | ".join(missing))
-                else:
-                    st.warning("Group condition not complete. Check selected operator/value combination.")
-            else:
-                if st.session_state.ds_conditions:
-                    st.session_state.ds_conditions.append(f"{joiner} {sql_cond}")
-                else:
-                    st.session_state.ds_conditions.append(sql_cond)
-    
-                if st.session_state.ds_conditions_human:
-                    st.session_state.ds_conditions_human.append(f"{joiner} {human_cond}")
-                else:
-                    st.session_state.ds_conditions_human.append(human_cond)
-    
-                for pp in (_dedupe_keep_order(params_group) or []):
-                    st.session_state.sql_filter_params_seq.append(pp)
-    
-                st.session_state.ds_conditions_struct.append({
-                    "params": _dedupe_keep_order(params_group),
-                    "op": op,
-                    "v1": v1,
-                    "v2": v2,
-                    "negate": bool(negate),
-                    "group_logic": st.session_state.get("sql_group_logic", "ALL (AND)"),
                 })
     
         if b3.button("↩ Remove last", use_container_width=True, key="sql_pop_cond"):
@@ -1768,40 +1839,65 @@ def render_sql_lab_tab(P):
         group_labels = [g.get("label") for g in group_defs if str(g.get("label", "")).strip()]
         pool = list(group_labels) + [pp for pp in base_pool if pp not in group_labels]
     
-        prev = [x for x in (st.session_state.get("sql_plot_params") or []) if x in pool]
-        if prev != (st.session_state.get("sql_plot_params") or []):
-            st.session_state["sql_plot_params"] = prev
-    
         cbtn1, cbtn2 = st.columns([1, 1])
         with cbtn1:
             if st.button("🎯 Set plot = all matched params", use_container_width=True, key="sql_apply_plot_matched"):
-                st.session_state["sql_plot_params"] = [pp for pp in matched_params_only if pp in pool]
+                st.session_state["sql_plot_numeric_params"] = [pp for pp in matched_params_only if pp in numeric_all or pp in group_labels]
+                st.session_state["sql_plot_text_params"] = [pp for pp in matched_params_only if pp in pool and pp not in numeric_all and pp not in group_labels]
                 st.rerun()
         with cbtn2:
             if st.button("🧹 Clear plot selection", use_container_width=True, key="sql_clear_plot_sel"):
                 st.session_state["sql_plot_params"] = []
+                st.session_state["sql_plot_numeric_params"] = []
+                st.session_state["sql_plot_text_params"] = []
                 st.rerun()
-    
-        chosen_all = st.multiselect(
-            "Draw parameters to plot",
-            pool,
-            key="sql_plot_params",
-        )
-    
+
+        numeric_pool = list(group_labels) + [pp for pp in base_pool if pp in numeric_all and pp not in group_labels]
+        text_pool = [pp for pp in base_pool if pp not in numeric_all and pp not in group_labels]
+
+        prev_numeric = [x for x in (st.session_state.get("sql_plot_numeric_params") or []) if x in numeric_pool]
+        prev_text = [x for x in (st.session_state.get("sql_plot_text_params") or []) if x in text_pool]
+        if prev_numeric != (st.session_state.get("sql_plot_numeric_params") or []):
+            st.session_state["sql_plot_numeric_params"] = prev_numeric
+        if prev_text != (st.session_state.get("sql_plot_text_params") or []):
+            st.session_state["sql_plot_text_params"] = prev_text
+
+        st.markdown("<div class='sql-subhead'>📈 Plot selection</div>", unsafe_allow_html=True)
+        pick_c1, pick_c2 = st.columns(2)
+        with pick_c1:
+            chosen_numeric = st.multiselect(
+                "Numeric + group traces",
+                numeric_pool,
+                key="sql_plot_numeric_params",
+                help="These appear as line/marker traces on the main plot.",
+            )
+        with pick_c2:
+            chosen_text = st.multiselect(
+                "Text + categorical lanes",
+                text_pool,
+                key="sql_plot_text_params",
+                help="These appear as labeled text lanes on the same timeline plot.",
+            )
+
+        chosen_all = list(chosen_numeric or []) + list(chosen_text or [])
+        st.session_state["sql_plot_params"] = chosen_all
+
         group_label_set = set(group_labels)
-        group_chosen = [x for x in (chosen_all or []) if x in group_label_set]
-        normal_chosen = [x for x in (chosen_all or []) if x not in group_label_set]
-    
-        for c in (normal_chosen or []):
-            if c in ("event_ts", "event_key"):
-                continue
-            s_num = pd.to_numeric(wide[c], errors="coerce")
-            if s_num.notna().sum() > 0:
-                numeric_chosen.append(c)
-            else:
-                # Treat as text/categorical if it has any non-empty string values
-                if wide[c].astype(str).replace("nan", "").str.strip().ne("").any():
-                    cat_chosen.append(c)
+        group_chosen = [x for x in (chosen_numeric or []) if x in group_label_set]
+        numeric_chosen = [x for x in (chosen_numeric or []) if x not in group_label_set]
+        cat_chosen = list(chosen_text or [])
+
+        info_parts = []
+        if numeric_chosen:
+            info_parts.append(f"{len(numeric_chosen)} numeric")
+        if group_chosen:
+            info_parts.append(f"{len(group_chosen)} group")
+        if cat_chosen:
+            info_parts.append(f"{len(cat_chosen)} text")
+        if info_parts:
+            st.caption("Current plot mix: " + " | ".join(info_parts))
+        elif pool:
+            st.caption("Choose numeric/group traces and optionally add text lanes for categorical output.")
     else:
         st.info("No draw timestamps available. Maintenance/Faults can still show.")
 
@@ -1845,17 +1941,26 @@ def render_sql_lab_tab(P):
                 math_pool_all = list(group_labels_all) + [pp for pp in numeric_all if pp not in group_labels_all]
 
             c_m1, c_m2, c_m3, c_m4 = st.columns([1, 1, 1, 2.4])
+            max_vars = max(1, min(3, len(math_pool_all)))
             with c_m1:
-                var_count = st.radio("Vars", [1, 2, 3], horizontal=True, key="math_var_count_inline")
+                var_count = st.radio("Vars", list(range(1, max_vars + 1)), horizontal=True, key="math_var_count_inline")
             with c_m2:
                 A_name = st.selectbox("A", math_pool_all, key="math_A_name_inline")
             B_name = None
             C_name = None
             with c_m3:
+                b_options = [pp for pp in math_pool_all if pp != A_name]
                 if var_count >= 2:
-                    B_name = st.selectbox("B", [pp for pp in math_pool_all if pp != A_name], key="math_B_name_inline")
+                    if not b_options:
+                        st.warning("Need at least 2 different numeric selections for A/B math.")
+                    else:
+                        B_name = st.selectbox("B", b_options, key="math_B_name_inline")
                 if var_count >= 3:
-                    C_name = st.selectbox("C", [pp for pp in math_pool_all if pp not in (A_name, B_name)], key="math_C_name_inline")
+                    c_options = [pp for pp in math_pool_all if pp not in (A_name, B_name)]
+                    if not c_options:
+                        st.warning("Need at least 3 different numeric selections for A/B/C math.")
+                    else:
+                        C_name = st.selectbox("C", c_options, key="math_C_name_inline")
             with c_m4:
                 st.session_state.setdefault("math_expr_inline", "A")
                 expr = st.text_input(
@@ -1866,7 +1971,9 @@ def render_sql_lab_tab(P):
                 ).strip()
                 st.session_state["math_expr_inline"] = expr
 
-            if re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr or ""):
+            if (var_count >= 2 and not B_name) or (var_count >= 3 and not C_name):
+                st.info("Choose enough different numeric parameters to build the math expression.")
+            elif re.fullmatch(r"[0-9A-Za-z_\.\+\-\*\/\(\)\s,]+", expr or ""):
                 def _series(name):
                     if not name:
                         return pd.Series([np.nan] * len(wide), index=wide.index)
@@ -2281,6 +2388,7 @@ def render_sql_lab_tab(P):
     fig.update_xaxes(title_text="Time", row=1, col=1, showticklabels=True)
     fig.update_xaxes(title_text="Time", row=2, col=1, showticklabels=True)
     
+    st.caption("Click any draw point or event marker to inspect the exact row/details below.")
     sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="sql_vis_plot")
     
     selected_key = None
@@ -2296,8 +2404,15 @@ def render_sql_lab_tab(P):
         st.session_state["sql_selected_event_key"] = selected_key
     
     if st.session_state.get("sql_selected_event_key"):
-        with st.expander("📌 Clicked event details", expanded=False):
-            render_event_details(st.session_state["sql_selected_event_key"])
+        detail_c1, detail_c2 = st.columns([0.82, 0.18])
+        with detail_c1:
+            st.markdown("#### 📌 Clicked event details")
+            st.caption(f"Selected key: `{st.session_state['sql_selected_event_key']}`")
+        with detail_c2:
+            if st.button("Clear selection", key="sql_clear_selected_event", use_container_width=True):
+                st.session_state.pop("sql_selected_event_key", None)
+                st.rerun()
+        render_event_details(st.session_state["sql_selected_event_key"])
     if math_enable:
         with st.expander("🧮 Calculated metric table", expanded=False):
             if math_table is None or math_table.empty:

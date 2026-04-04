@@ -1,0 +1,21 @@
+Parameter Name,Value,Units
+Draw Name,Pre1550_14,
+Draw Date,2025-08-04 08:45:28.595093,
+Entry Fiber Diameter,125.0,µm
+First Coating Diameter (Theoretical),161.98588507679705,µm
+Second Coating Diameter (Theoretical),231.98393531140832,µm
+Primary Coating,Coating_OF_136,
+Secondary Coating,DS-2015,
+First Coating Entry Die,300.0,µm
+Second Coating Entry Die,500.0,µm
+Primary Coating Temperature,36.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,202,µm
+Secondary Die Diameter,310,µm
+Preform Diameter,16.5,mm
+Tiger Cut,0.0,%
+Selected Iris Diameter,23.0,mm
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.3,mm

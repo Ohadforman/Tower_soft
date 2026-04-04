@@ -8,7 +8,24 @@ import pandas as pd
 
 REQUIRED_CSV_COLUMNS: Dict[str, List[str]] = {
     "orders": ["Status", "Preform Number", "Fiber Project", "Timestamp"],
-    "parts_orders": ["Status", "Part Name", "Details"],
+    "parts_orders": [
+        "Status",
+        "Part Name",
+        "Serial Number",
+        "Project Name",
+        "Details",
+        "Opened By",
+        "Approval Requested From",
+        "Approved",
+        "Approved By",
+        "Approval Date",
+        "Received Date",
+        "Received State",
+        "Ordered By",
+        "Date Ordered",
+        "Company",
+        "Inventory Synced",
+    ],
     "schedule": ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"],
     "tower_temps": [
         "die_holder_primary_c",

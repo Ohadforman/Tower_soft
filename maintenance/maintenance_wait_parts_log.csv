@@ -1,0 +1,1 @@
+wait_id,wait_ts,maintenance_component,maintenance_task,maintenance_task_id,maintenance_source_file,requested_part_name,requested_part_plan_json,requested_project_name,requested_company,wait_reason,actor,resolved_ts,resolution_note

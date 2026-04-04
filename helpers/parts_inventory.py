@@ -13,6 +13,7 @@ INVENTORY_COLUMNS = [
     "Location Serial",
     "Quantity",
     "Min Level",
+    "Lead Time Days",
     "Notes",
     "Last Updated",
 ]
@@ -104,6 +105,7 @@ def load_inventory(path: str) -> pd.DataFrame:
         df[c] = df[c].fillna("").astype(str)
     df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0.0).astype(float)
     df["Min Level"] = pd.to_numeric(df["Min Level"], errors="coerce").fillna(0.0).astype(float)
+    df["Lead Time Days"] = pd.to_numeric(df["Lead Time Days"], errors="coerce").fillna(0.0).astype(float)
     return df[INVENTORY_COLUMNS].copy()
 
 
@@ -121,6 +123,7 @@ def save_inventory(path: str, df: pd.DataFrame) -> None:
     )
     out["Quantity"] = pd.to_numeric(out["Quantity"], errors="coerce").fillna(0.0).astype(float)
     out["Min Level"] = pd.to_numeric(out["Min Level"], errors="coerce").fillna(0.0).astype(float)
+    out["Lead Time Days"] = pd.to_numeric(out["Lead Time Days"], errors="coerce").fillna(0.0).astype(float)
     out.to_csv(path, index=False)
 
 
@@ -151,6 +154,7 @@ def ensure_general_tools_seed(path: str) -> int:
                 "Location Serial": "",
                 "Quantity": 0.0,
                 "Min Level": 0.0,
+                "Lead Time Days": 0.0,
                 "Notes": "Seeded tool template: set qty/location as available.",
                 "Last Updated": now,
             }
@@ -215,6 +219,7 @@ def increment_part(
             "Location Serial": str(location_serial or "").strip(),
             "Quantity": float(qty),
             "Min Level": 0.0,
+            "Lead Time Days": 0.0,
             "Notes": str(notes or "").strip(),
             "Last Updated": now,
         }
@@ -308,6 +313,7 @@ def set_part_quantity(
             "Location Serial": str(location_serial or "").strip(),
             "Quantity": qty_i,
             "Min Level": 0.0,
+            "Lead Time Days": 0.0,
             "Notes": str(notes or "").strip(),
             "Last Updated": now,
         }

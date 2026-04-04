@@ -1,10 +1,10 @@
 {
-  "current_date": "2026-03-06",
-  "furnace_hours": 1008.0,
-  "uv1_hours": 201.0,
-  "uv2_hours": 202.0,
-  "warn_days": 7,
-  "warn_hours": 20.0,
-  "last_draw_count": 44,
-  "status_weekly_updated_at": "2026-03-06 11:01:35"
+  "current_date": "2026-04-04",
+  "furnace_hours": 1010.0,
+  "uv1_hours": 250.0,
+  "uv2_hours": 250.0,
+  "warn_days": 14,
+  "warn_hours": 50.0,
+  "last_draw_count": 94,
+  "status_weekly_updated_at": "2026-04-04 19:09:20"
 }

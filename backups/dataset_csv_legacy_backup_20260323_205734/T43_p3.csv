@@ -1,0 +1,220 @@
+Parameter Name,Value,Units
+Draw Name,T43_p3,
+Draw Date,2025-08-27 10:08:53.168131,
+Entry Fiber Diameter,40.0,µm
+First Coating Diameter (Theoretical),88.91659110140624,µm
+Second Coating Diameter (Theoretical),113.49131143617224,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,200.0,µm
+Second Coating Entry Die,200.0,µm
+Primary Coating Temperature,36.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,150,µm
+Secondary Die Diameter,140,µm
+Preform Diameter,16.0,mm
+Tiger Cut,25.0,%
+Selected Iris Diameter,24.0,mm
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),0.4,
+TF Mode,Winder,
+Increment TF Value,0.13,mm
+Entry Fiber Diameter,16.5,µm
+First Coating Diameter (Theoretical),70.95863489123576,µm
+Second Coating Diameter (Theoretical),103.52117658184827,µm
+Primary Coating,DP-1032,
+Secondary Coating,DS-2015,
+First Coating Entry Die,200.0,µm
+Second Coating Entry Die,200.0,µm
+Primary Coating Temperature,36.0,°C
+Secondary Coating Temperature,24.0,°C
+Primary Die Diameter,150,µm
+Secondary Die Diameter,140,µm
+Preform Diameter,16.5,mm
+Tiger Cut,27.0,%
+Selected Iris Diameter,25.0,mm
+Log File Name,T43_p3_27082025_150242.csv,
+Zone 1 Start,2025-08-27 13:58:47.255000,
+Zone 1 End,2025-08-27 14:07:13.255000,
+Zone 1 Fibre Length at Start,0.5,km
+Zone 1 Fibre Length at End,0.97,km
+Zone 1 Pf Process Position at Start,2.55,mm
+Zone 1 Pf Process Position at End,9.5,mm
+Zone 1 Avg (Bare Fibre Diameter),40.37,µm
+Zone 1 Min (Bare Fibre Diameter),34.2,µm
+Zone 1 Max (Bare Fibre Diameter),46.3,µm
+Zone 1 Avg (Coated Inner Diameter),93.4,µm
+Zone 1 Min (Coated Inner Diameter),91.7,µm
+Zone 1 Max (Coated Inner Diameter),96.3,µm
+Zone 1 Avg (Coated Outer Diameter),119.77,µm
+Zone 1 Min (Coated Outer Diameter),118.6,µm
+Zone 1 Max (Coated Outer Diameter),121.2,µm
+Zone 1 Avg (Capstan Speed),56.38,m/min
+Zone 1 Min (Capstan Speed),34.46,m/min
+Zone 1 Max (Capstan Speed),75.94,m/min
+Zone 1 Avg (Tension N),0.03,g
+Zone 1 Min (Tension N),-0.01,g
+Zone 1 Max (Tension N),0.09,g
+Zone 1 Avg (Furnace DegC Actual),2309.99,C
+Zone 1 Min (Furnace DegC Actual),2309.19,C
+Zone 1 Max (Furnace DegC Actual),2310.67,C
+Zone 2 Start,2025-08-27 14:09:20.255000,
+Zone 2 End,2025-08-27 14:32:43.255000,
+Zone 2 Fibre Length at Start,1.14,km
+Zone 2 Fibre Length at End,1.36,km
+Zone 2 Pf Process Position at Start,11.35,mm
+Zone 2 Pf Process Position at End,31.24,mm
+Zone 2 Avg (Bare Fibre Diameter),40.04,µm
+Zone 2 Min (Bare Fibre Diameter),38.1,µm
+Zone 2 Max (Bare Fibre Diameter),41.5,µm
+Zone 2 Avg (Coated Inner Diameter),93.62,µm
+Zone 2 Min (Coated Inner Diameter),92.0,µm
+Zone 2 Max (Coated Inner Diameter),94.7,µm
+Zone 2 Avg (Coated Outer Diameter),119.63,µm
+Zone 2 Min (Coated Outer Diameter),118.4,µm
+Zone 2 Max (Coated Outer Diameter),121.0,µm
+Zone 2 Avg (Capstan Speed),103.4,m/min
+Zone 2 Min (Capstan Speed),80.54,m/min
+Zone 2 Max (Capstan Speed),112.03,m/min
+Zone 2 Avg (Tension N),-0.03,g
+Zone 2 Min (Tension N),-0.1,g
+Zone 2 Max (Tension N),0.04,g
+Zone 2 Avg (Furnace DegC Actual),2320.01,C
+Zone 2 Min (Furnace DegC Actual),2319.27,C
+Zone 2 Max (Furnace DegC Actual),2320.74,C
+Zone 3 Start,2025-08-27 14:34:15.255000,
+Zone 3 End,2025-08-27 14:38:05.255000,
+Zone 3 Fibre Length at Start,1.53,km
+Zone 3 Fibre Length at End,1.94,km
+Zone 3 Pf Process Position at Start,32.59,mm
+Zone 3 Pf Process Position at End,35.78,mm
+Zone 3 Avg (Bare Fibre Diameter),40.11,µm
+Zone 3 Min (Bare Fibre Diameter),38.8,µm
+Zone 3 Max (Bare Fibre Diameter),41.5,µm
+Zone 3 Avg (Coated Inner Diameter),93.95,µm
+Zone 3 Min (Coated Inner Diameter),93.3,µm
+Zone 3 Max (Coated Inner Diameter),94.4,µm
+Zone 3 Avg (Coated Outer Diameter),119.72,µm
+Zone 3 Min (Coated Outer Diameter),118.9,µm
+Zone 3 Max (Coated Outer Diameter),120.6,µm
+Zone 3 Avg (Capstan Speed),109.32,m/min
+Zone 3 Min (Capstan Speed),104.74,m/min
+Zone 3 Max (Capstan Speed),119.14,m/min
+Zone 3 Avg (Tension N),-0.1,g
+Zone 3 Min (Tension N),-0.15,g
+Zone 3 Max (Tension N),-0.04,g
+Zone 3 Avg (Furnace DegC Actual),2330.03,C
+Zone 3 Min (Furnace DegC Actual),2329.21,C
+Zone 3 Max (Furnace DegC Actual),2330.82,C
+Zone 4 Start,2025-08-27 14:39:14.255000,
+Zone 4 End,2025-08-27 14:45:23.255000,
+Zone 4 Fibre Length at Start,2.1,km
+Zone 4 Fibre Length at End,2.82,km
+Zone 4 Pf Process Position at Start,36.85,mm
+Zone 4 Pf Process Position at End,42.03,mm
+Zone 4 Avg (Bare Fibre Diameter),39.96,µm
+Zone 4 Min (Bare Fibre Diameter),39.4,µm
+Zone 4 Max (Bare Fibre Diameter),40.5,µm
+Zone 4 Avg (Coated Inner Diameter),92.79,µm
+Zone 4 Min (Coated Inner Diameter),92.2,µm
+Zone 4 Max (Coated Inner Diameter),93.4,µm
+Zone 4 Avg (Coated Outer Diameter),119.55,µm
+Zone 4 Min (Coated Outer Diameter),118.6,µm
+Zone 4 Max (Coated Outer Diameter),120.2,µm
+Zone 4 Avg (Capstan Speed),118.34,m/min
+Zone 4 Min (Capstan Speed),114.14,m/min
+Zone 4 Max (Capstan Speed),125.86,m/min
+Zone 4 Avg (Tension N),-0.12,g
+Zone 4 Min (Tension N),-0.16,g
+Zone 4 Max (Tension N),-0.06,g
+Zone 4 Avg (Furnace DegC Actual),2309.95,C
+Zone 4 Min (Furnace DegC Actual),2309.32,C
+Zone 4 Max (Furnace DegC Actual),2310.8,C
+Zone 5 Start,2025-08-27 14:46:20.255000,
+Zone 5 End,2025-08-27 14:53:14.255000,
+Zone 5 Fibre Length at Start,2.93,km
+Zone 5 Fibre Length at End,3.72,km
+Zone 5 Pf Process Position at Start,42.89,mm
+Zone 5 Pf Process Position at End,48.71,mm
+Zone 5 Avg (Bare Fibre Diameter),39.98,µm
+Zone 5 Min (Bare Fibre Diameter),38.4,µm
+Zone 5 Max (Bare Fibre Diameter),40.6,µm
+Zone 5 Avg (Coated Inner Diameter),92.67,µm
+Zone 5 Min (Coated Inner Diameter),91.8,µm
+Zone 5 Max (Coated Inner Diameter),93.7,µm
+Zone 5 Avg (Coated Outer Diameter),119.28,µm
+Zone 5 Min (Coated Outer Diameter),117.3,µm
+Zone 5 Max (Coated Outer Diameter),120.4,µm
+Zone 5 Avg (Capstan Speed),114.89,m/min
+Zone 5 Min (Capstan Speed),112.03,m/min
+Zone 5 Max (Capstan Speed),121.25,m/min
+Zone 5 Avg (Tension N),-0.13,g
+Zone 5 Min (Tension N),-0.16,g
+Zone 5 Max (Tension N),-0.08,g
+Zone 5 Avg (Furnace DegC Actual),2289.89,C
+Zone 5 Min (Furnace DegC Actual),2288.9,C
+Zone 5 Max (Furnace DegC Actual),2290.38,C
+Zone 6 Start,2025-08-27 14:54:23.255000,
+Zone 6 End,2025-08-27 15:00:55.255000,
+Zone 6 Fibre Length at Start,3.86,km
+Zone 6 Fibre Length at End,4.61,km
+Zone 6 Pf Process Position at Start,49.78,mm
+Zone 6 Pf Process Position at End,55.24,mm
+Zone 6 Avg (Bare Fibre Diameter),40.01,µm
+Zone 6 Min (Bare Fibre Diameter),39.8,µm
+Zone 6 Max (Bare Fibre Diameter),40.3,µm
+Zone 6 Avg (Coated Inner Diameter),92.26,µm
+Zone 6 Min (Coated Inner Diameter),92.0,µm
+Zone 6 Max (Coated Inner Diameter),93.0,µm
+Zone 6 Avg (Coated Outer Diameter),119.51,µm
+Zone 6 Min (Coated Outer Diameter),119.0,µm
+Zone 6 Max (Coated Outer Diameter),120.1,µm
+Zone 6 Avg (Capstan Speed),117.54,m/min
+Zone 6 Min (Capstan Speed),116.35,m/min
+Zone 6 Max (Capstan Speed),119.33,m/min
+Zone 6 Avg (Tension N),-0.14,g
+Zone 6 Min (Tension N),-0.18,g
+Zone 6 Max (Tension N),-0.09,g
+Zone 6 Avg (Furnace DegC Actual),2280.02,C
+Zone 6 Min (Furnace DegC Actual),2278.95,C
+Zone 6 Max (Furnace DegC Actual),2281.1,C
+Zone 7 Start,2025-08-27 14:54:23.255000,
+Zone 7 End,2025-08-27 15:00:55.255000,
+Zone 7 Fibre Length at Start,3.86,km
+Zone 7 Fibre Length at End,4.61,km
+Zone 7 Pf Process Position at Start,49.78,mm
+Zone 7 Pf Process Position at End,55.24,mm
+Zone 7 Avg (Bare Fibre Diameter),40.01,µm
+Zone 7 Min (Bare Fibre Diameter),39.8,µm
+Zone 7 Max (Bare Fibre Diameter),40.3,µm
+Zone 7 Avg (Coated Inner Diameter),92.26,µm
+Zone 7 Min (Coated Inner Diameter),92.0,µm
+Zone 7 Max (Coated Inner Diameter),93.0,µm
+Zone 7 Avg (Coated Outer Diameter),119.51,µm
+Zone 7 Min (Coated Outer Diameter),119.0,µm
+Zone 7 Max (Coated Outer Diameter),120.1,µm
+Zone 7 Avg (Capstan Speed),117.54,m/min
+Zone 7 Min (Capstan Speed),116.35,m/min
+Zone 7 Max (Capstan Speed),119.33,m/min
+Zone 7 Avg (Tension N),-0.14,g
+Zone 7 Min (Tension N),-0.18,g
+Zone 7 Max (Tension N),-0.09,g
+Zone 7 Avg (Furnace DegC Actual),2280.02,C
+Zone 7 Min (Furnace DegC Actual),2278.95,C
+Zone 7 Max (Furnace DegC Actual),2281.1,C
+Last Fiber Position,4.76,km
+TnM,,km
+Cut,3.79,km
+Keep,0.48,km
+Cut,3.4,km
+Keep,0.22,km
+Cut,2.82,km
+Keep,0.41,km
+Cut,1.95,km
+Keep,0.72,km
+Cut,1.05,km
+Keep,0.79,km
+Cut,0.15,km
+Keep,0.75,km
+Cut,0.15,km
+Keep,0.75,km

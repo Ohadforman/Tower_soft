@@ -16,9 +16,18 @@ def render_home_tab(
     import pandas as pd
     import streamlit as st
     import streamlit.components.v1 as components
+    from helpers.maintenance_status import (
+        compute_maintenance_status_df,
+        load_maintenance_folder_df,
+    )
+
+    # Shift the first Streamlit rerun cost to Home load instead of the first hover.
+    if not st.session_state.get("_home_boot_rerun_done", False):
+        st.session_state["_home_boot_rerun_done"] = True
+        st.rerun()
 
     st.markdown('<div style="height: 42px;"></div>', unsafe_allow_html=True)
-    st.title("️ Tower Management Software")
+    st.title("Tower Management Software")
 
     # =========================================================
     # 🎨 CSS (yours + small dialog polish)
@@ -562,6 +571,7 @@ def render_home_tab(
     st.markdown(
         """
         <style>
+        .home-nav-wrap div[role="radiogroup"],
         .home-manifest-nav {
             display: flex;
             flex-direction: column;
@@ -574,6 +584,7 @@ def render_home_tab(
             box-shadow: none;
             position: relative;
         }
+        .home-nav-wrap div[role="radiogroup"]::after,
         .home-manifest-nav::after {
             content: "";
             position: absolute;
@@ -586,6 +597,7 @@ def render_home_tab(
             border-radius: 999px 0 0 999px;
             pointer-events: none;
         }
+        .home-nav-wrap div[role="radiogroup"] > label,
         .home-manifest-nav > label {
             transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease, background 220ms ease, filter 220ms ease;
             border-radius: 999px;
@@ -601,11 +613,33 @@ def render_home_tab(
             max-width: 262px;
             margin-right: 10px;
         }
+        .home-nav-wrap div[role="radiogroup"] > label:focus,
+        .home-nav-wrap div[role="radiogroup"] > label:focus-visible,
+        .home-nav-wrap div[role="radiogroup"] > label:focus-within,
+        .home-manifest-nav > label:focus,
+        .home-manifest-nav > label:focus-visible,
+        .home-manifest-nav > label:focus-within {
+            outline: none !important;
+        }
+        .home-nav-wrap div[role="radiogroup"] > label *,
+        .home-manifest-nav > label * {
+            outline: none !important;
+        }
+        .home-nav-wrap div[role="radiogroup"] > label *:focus,
+        .home-nav-wrap div[role="radiogroup"] > label *:focus-visible,
+        .home-manifest-nav > label *:focus,
+        .home-manifest-nav > label *:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+        }
         /* Internal hidden option (last item = __none__). */
+        .home-nav-wrap div[role="radiogroup"] > label:last-of-type,
         .home-manifest-nav > label:last-of-type {
             display: none !important;
         }
         /* Hide Streamlit's native radio/check UI inside chips. */
+        .home-nav-wrap div[role="radiogroup"] > label [role="radio"],
+        .home-nav-wrap div[role="radiogroup"] > label input[type="radio"],
         .home-manifest-nav > label [role="radio"],
         .home-manifest-nav > label input[type="radio"] {
             display: none !important;
@@ -615,6 +649,7 @@ def render_home_tab(
             margin: 0 !important;
             padding: 0 !important;
         }
+        .home-nav-wrap div[role="radiogroup"] > label::before,
         .home-manifest-nav > label::before {
             content: "";
             position: absolute;
@@ -629,10 +664,15 @@ def render_home_tab(
             box-shadow: 0 0 11px rgba(92,176,255,0.42);
             transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease;
         }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(1),
         .home-manifest-nav > label:nth-of-type(1) { margin-left: 74px; }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(2),
         .home-manifest-nav > label:nth-of-type(2) { margin-left: 48px; }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(3),
         .home-manifest-nav > label:nth-of-type(3) { margin-left: 14px; }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(4),
         .home-manifest-nav > label:nth-of-type(4) { margin-left: 14px; }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(5),
         .home-manifest-nav > label:nth-of-type(5) { margin-left: 14px; }
         .home-nav-wrap {
             min-height: auto;
@@ -654,6 +694,7 @@ def render_home_tab(
             display: block;
             padding-top: clamp(96px, 14vh, 170px);
         }
+        .home-nav-wrap div[role="radiogroup"] > label:hover,
         .home-manifest-nav > label:hover {
             filter: saturate(1.12);
             box-shadow: 0 16px 32px rgba(0,0,0,0.36), 0 0 22px rgba(132,214,255,0.20);
@@ -661,22 +702,30 @@ def render_home_tab(
             background: linear-gradient(145deg, rgba(16, 30, 52, 0.78), rgba(22, 40, 66, 0.58));
             z-index: 4;
         }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(1):hover,
         .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.10) rotate(-0.6deg); }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(2):hover,
         .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.10) rotate(-0.9deg); }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(3):hover,
         .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.10) rotate(0.8deg); }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(4):hover,
         .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.10) rotate(-0.7deg); }
+        .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(5):hover,
         .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.10) rotate(0.7deg); }
+        .home-nav-wrap div[role="radiogroup"] > label:hover::before,
         .home-manifest-nav > label:hover::before {
             transform: translateY(-50%) scale(1.15);
             box-shadow: 0 0 18px rgba(110,200,255,0.42);
             background: radial-gradient(circle at 30% 30%, rgba(220, 249, 255, 0.98), rgba(102, 182, 255, 0.66));
         }
+        .home-nav-wrap div[role="radiogroup"] > label.home-chip-active,
         .home-manifest-nav > label.home-chip-active {
             border-color: rgba(160, 231, 255, 0.88);
             background: linear-gradient(145deg, rgba(30, 66, 98, 0.82), rgba(28, 48, 78, 0.70));
             box-shadow: 0 16px 30px rgba(35, 138, 198, 0.34), inset 0 1px 0 rgba(255,255,255,0.24);
             filter: saturate(1.18);
         }
+        .home-nav-wrap div[role="radiogroup"] > label.home-chip-active::before,
         .home-manifest-nav > label.home-chip-active::before {
             background: radial-gradient(circle at 30% 30%, rgba(232, 252, 255, 1), rgba(124, 201, 255, 0.76));
             border-color: rgba(194,246,255,0.72);
@@ -705,6 +754,13 @@ def render_home_tab(
         .home-panel-shell > * {
             position: relative;
             z-index: 1;
+        }
+        .home-panel-placeholder {
+            min-height: 420px;
+        }
+        .home-panel-shell.is-empty {
+            visibility: hidden;
+            pointer-events: none;
         }
         .home-panel-shell [data-testid="stMarkdownContainer"] h2,
         .home-panel-shell [data-testid="stMarkdownContainer"] h3,
@@ -817,21 +873,37 @@ def render_home_tab(
         }
         /* When viewport is tighter (e.g. sidebar open), keep nav chips further left. */
         @media (max-width: 1500px) {
+            .home-nav-wrap div[role="radiogroup"] > label,
             .home-manifest-nav > label {
                 max-width: 236px;
             }
+            .home-nav-wrap div[role="radiogroup"] > label,
+            .home-manifest-nav > label {
+                max-width: 236px;
+            }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(1),
             .home-manifest-nav > label:nth-of-type(1) { margin-left: 32px; }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(2),
             .home-manifest-nav > label:nth-of-type(2) { margin-left: 10px; }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(3),
             .home-manifest-nav > label:nth-of-type(3) { margin-left: 0; }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(4),
             .home-manifest-nav > label:nth-of-type(4) { margin-left: 0; }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(5),
             .home-manifest-nav > label:nth-of-type(5) { margin-left: 0; }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(1):hover,
             .home-manifest-nav > label:nth-of-type(1):hover { transform: translateY(-4px) scale(1.06) rotate(-0.5deg); }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(2):hover,
             .home-manifest-nav > label:nth-of-type(2):hover { transform: translateY(-4px) scale(1.06) rotate(-0.7deg); }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(3):hover,
             .home-manifest-nav > label:nth-of-type(3):hover { transform: translateY(-4px) scale(1.06) rotate(0.6deg); }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(4):hover,
             .home-manifest-nav > label:nth-of-type(4):hover { transform: translateY(-4px) scale(1.06) rotate(-0.6deg); }
+            .home-nav-wrap div[role="radiogroup"] > label:nth-of-type(5):hover,
             .home-manifest-nav > label:nth-of-type(5):hover { transform: translateY(-4px) scale(1.06) rotate(0.6deg); }
         }
         @media (max-width: 900px) {
+            .home-nav-wrap div[role="radiogroup"],
             .home-manifest-nav {
                 width: 100%;
                 display: flex;
@@ -843,9 +915,11 @@ def render_home_tab(
                 background: transparent;
                 box-shadow: none;
             }
+            .home-nav-wrap div[role="radiogroup"]::after,
             .home-manifest-nav::after {
                 display: none;
             }
+            .home-nav-wrap div[role="radiogroup"] > label,
             .home-manifest-nav > label {
                 position: relative;
                 left: unset !important;
@@ -855,6 +929,7 @@ def render_home_tab(
                 width: auto;
                 max-width: 100%;
             }
+            .home-nav-wrap div[role="radiogroup"] > label:hover,
             .home-manifest-nav > label:hover {
                 transform: translateY(-2px) scale(1.05) !important;
             }
@@ -880,6 +955,130 @@ def render_home_tab(
         st.session_state["home_focus_panel"] = "__none__"
     with nav_col:
         st.markdown('<div class="home-nav-wrap">', unsafe_allow_html=True)
+        components.html(
+            """
+            <script>
+            (function() {
+                const expected = [
+                  "🚀 Draws Monitor",
+                  "✅ Done + ❌ Failed",
+                  "📅 Schedule",
+                  "🧰 Maintenance + 🚨 Faults",
+                  "🧩 Parts Orders"
+                ];
+                if (window.__homeHoverBootRaf) {
+                  cancelAnimationFrame(window.__homeHoverBootRaf);
+                }
+                if (window.__homeHoverObserver) {
+                  try { window.__homeHoverObserver.disconnect(); } catch (e) {}
+                }
+                function bindHoverSwitch() {
+                  const root = window.parent?.document || document;
+                  const groups = root.querySelectorAll('div[role="radiogroup"]');
+                  const clearFocus = () => {
+                    try {
+                      const active = root.activeElement || document.activeElement;
+                      if (active && typeof active.blur === "function") active.blur();
+                    } catch (e) {}
+                  };
+                  const selectLabel = (label) => {
+                    if (!label) return;
+                    try {
+                      const input = label.querySelector('input[type="radio"]');
+                      if (input && !input.checked) {
+                        input.click();
+                      } else if (!input) {
+                        label.click();
+                      }
+                    } catch (e) {
+                      try { label.click(); } catch (e2) {}
+                    }
+                    clearFocus();
+                    setTimeout(clearFocus, 0);
+                  };
+                  const hoveredLabel = (group) =>
+                    Array.from(group.querySelectorAll("label")).find((l) => {
+                      return !l.classList.contains("home-hidden-option") && l.matches(":hover");
+                    }) || null;
+                  const syncHoverIndicator = (group) => {
+                    const labels = Array.from(group.querySelectorAll("label"));
+                    const hovered = hoveredLabel(group);
+                    labels.forEach((l) => {
+                      if (l.classList.contains("home-hidden-option")) return;
+                      if (hovered && l === hovered) l.classList.add("home-chip-active");
+                      else l.classList.remove("home-chip-active");
+                    });
+                    return hovered;
+                  };
+                  for (const group of groups) {
+                    const labels = Array.from(group.querySelectorAll("label"));
+                    if (!labels.length) continue;
+                    const labelTexts = labels.map(l => (l.textContent || "").trim());
+                    const matches = expected.filter(e => labelTexts.includes(e)).length;
+                    if (matches < 4) continue;
+                    group.classList.add("home-manifest-nav");
+                    const noneLabel = labels[labels.length - 1];
+                    if (noneLabel) noneLabel.classList.add("home-hidden-option");
+                    if (group.dataset.homeHoverBound === "1") {
+                      syncHoverIndicator(group);
+                      return true;
+                    }
+                    group.addEventListener("mouseleave", () => {
+                      const hovered = syncHoverIndicator(group);
+                      if (!hovered && noneLabel) {
+                        const noneInput = noneLabel.querySelector('input[type="radio"]');
+                        if (!noneInput || !noneInput.checked) {
+                          selectLabel(noneLabel);
+                        }
+                      }
+                    });
+                    labels.forEach((label) => {
+                      if (label.classList.contains("home-hidden-option")) return;
+                      label.addEventListener("mouseenter", () => {
+                        syncHoverIndicator(group);
+                        selectLabel(label);
+                      });
+                      label.addEventListener("mouseleave", () => {
+                        const hovered = syncHoverIndicator(group);
+                        if (!hovered && noneLabel) {
+                          const noneInput = noneLabel.querySelector('input[type="radio"]');
+                          if (!noneInput || !noneInput.checked) {
+                            selectLabel(noneLabel);
+                          }
+                        }
+                      });
+                    });
+                    group.dataset.homeHoverBound = "1";
+                    syncHoverIndicator(group);
+                    return true;
+                  }
+                  return false;
+                }
+                function boot() {
+                  const done = bindHoverSwitch();
+                  if (!done) {
+                    window.__homeHoverBootRaf = requestAnimationFrame(boot);
+                  } else {
+                    window.__homeHoverBootRaf = null;
+                  }
+                }
+                const root = window.parent?.document || document;
+                window.__homeHoverObserver = new MutationObserver(() => {
+                  if (bindHoverSwitch() && window.__homeHoverObserver) {
+                    try { window.__homeHoverObserver.disconnect(); } catch (e) {}
+                    window.__homeHoverObserver = null;
+                  }
+                });
+                try {
+                  window.__homeHoverObserver.observe(root.body || root.documentElement, { childList: true, subtree: true });
+                } catch (e) {}
+                boot();
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
         selected_panel = st.radio(
             "Home Sections",
             [
@@ -895,104 +1094,6 @@ def render_home_tab(
             label_visibility="collapsed",
         )
         st.markdown('</div>', unsafe_allow_html=True)
-    components.html(
-        """
-        <script>
-        (function() {
-            if (window.__homeHoverBootTimer) {
-              clearInterval(window.__homeHoverBootTimer);
-              window.__homeHoverBootTimer = null;
-            }
-            const expected = [
-            "🚀 Draws Monitor",
-            "✅ Done + ❌ Failed",
-            "📅 Schedule",
-            "🧰 Maintenance + 🚨 Faults",
-            "🧩 Parts Orders"
-          ];
-
-          function bindHoverSwitch() {
-            const root = window.parent?.document || document;
-            const groups = root.querySelectorAll('div[role="radiogroup"]');
-            const hoveredLabel = (group) =>
-              Array.from(group.querySelectorAll("label")).find((l) => {
-                return !l.classList.contains("home-hidden-option") && l.matches(":hover");
-              }) || null;
-            const syncHoverIndicator = (group) => {
-              const labels = Array.from(group.querySelectorAll("label"));
-              const hovered = hoveredLabel(group);
-              labels.forEach((l) => {
-                if (l.classList.contains("home-hidden-option")) return;
-                if (hovered && l === hovered) l.classList.add("home-chip-active");
-                else l.classList.remove("home-chip-active");
-              });
-              return hovered;
-            };
-            for (const group of groups) {
-              const labels = Array.from(group.querySelectorAll("label"));
-              if (!labels.length) continue;
-              const labelTexts = labels.map(l => (l.textContent || "").trim());
-              const matches = expected.filter(e => labelTexts.includes(e)).length;
-              if (matches < 4) continue;
-              const noneLabel = labels[labels.length - 1];
-              if (noneLabel) noneLabel.classList.add("home-hidden-option");
-              if (group.dataset.homeHoverBound === "1") {
-                syncHoverIndicator(group);
-                return true;
-              }
-              group.classList.add("home-manifest-nav");
-              group.addEventListener("mouseleave", () => {
-                const hovered = syncHoverIndicator(group);
-                if (!hovered && noneLabel) {
-                  const noneInput = noneLabel.querySelector('input[type="radio"]');
-                  if (!noneInput || !noneInput.checked) {
-                    try { noneLabel.click(); } catch (e) {}
-                  }
-                }
-              });
-
-              labels.forEach((label) => {
-                if (label.classList.contains("home-hidden-option")) return;
-                label.addEventListener("mouseenter", () => {
-                  syncHoverIndicator(group);
-                  try { label.click(); } catch (e) {}
-                });
-                label.addEventListener("mouseleave", () => {
-                  const hovered = syncHoverIndicator(group);
-                  if (!hovered && noneLabel) {
-                    const noneInput = noneLabel.querySelector('input[type="radio"]');
-                    if (!noneInput || !noneInput.checked) {
-                      try { noneLabel.click(); } catch (e) {}
-                    }
-                  }
-                });
-              });
-              group.dataset.homeHoverBound = "1";
-              syncHoverIndicator(group);
-              return true;
-            }
-            return false;
-          }
-          let attempts = 0;
-          const MAX_ATTEMPTS = 40; // ~8s total
-          function boot() {
-            attempts += 1;
-            const done = bindHoverSwitch();
-            if (done || attempts >= MAX_ATTEMPTS) {
-              if (window.__homeHoverBootTimer) {
-                clearInterval(window.__homeHoverBootTimer);
-                window.__homeHoverBootTimer = null;
-              }
-            }
-          }
-          window.__homeHoverBootTimer = setInterval(boot, 200);
-          boot();
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
     _section_gap()
 
     # =========================================================
@@ -1005,51 +1106,13 @@ def render_home_tab(
             base_dir: str = None,
     ):
         # (your existing function unchanged)
-        import os
         import json
-        import datetime as dt
-        import pandas as pd
-        import numpy as np
         from helpers.orders_io import count_dataset_draws
 
         base_dir = base_dir or P.root_dir
 
         def get_draw_orders_count() -> int:
             return int(count_dataset_draws(P.dataset_dir))
-
-        def parse_date(x):
-            if pd.isna(x) or x == "":
-                return None
-            d = pd.to_datetime(x, errors="coerce")
-            if pd.isna(d):
-                return None
-            return d.date()
-
-        def parse_float(x):
-            if pd.isna(x) or x == "":
-                return None
-            try:
-                return float(x)
-            except Exception:
-                return None
-
-        def parse_int(x):
-            if pd.isna(x) or x == "":
-                return None
-            try:
-                return int(float(x))
-            except Exception:
-                return None
-
-        def norm_source(s) -> str:
-            s = "" if s is None or pd.isna(s) else str(s)
-            return s.strip().lower()
-
-        def mode_norm(x: str) -> str:
-            s = "" if x is None or pd.isna(x) else str(x).strip().lower()
-            if s in ("draw", "draws", "draws_count", "draw_count"):
-                return "draws"
-            return s
 
         def load_state(path: str) -> dict:
             try:
@@ -1063,7 +1126,6 @@ def render_home_tab(
         state_path = os.path.join(maint_folder, "_app_state.json")
         state = load_state(state_path)
 
-        current_date = dt.date.today()
         furnace_hours = float(state.get("furnace_hours", 0.0) or 0.0)
         uv1_hours = float(state.get("uv1_hours", 0.0) or 0.0)
         uv2_hours = float(state.get("uv2_hours", 0.0) or 0.0)
@@ -1071,287 +1133,108 @@ def render_home_tab(
         warn_hours = float(state.get("warn_hours", 50.0) or 50.0)
 
         current_draw_count = get_draw_orders_count()
-
-        if not os.path.isdir(maint_folder):
+        dfm = load_maintenance_folder_df(maint_folder)
+        if dfm.empty:
             return 0, 0
-
-        files = [f for f in os.listdir(maint_folder) if f.lower().endswith((".xlsx", ".xls", ".csv"))]
-        if not files:
-            return 0, 0
-
-        normalize_map = {
-            "equipment": "Component",
-            "task name": "Task",
-            "task id": "Task_ID",
-            "interval type": "Interval_Type",
-            "interval value": "Interval_Value",
-            "interval unit": "Interval_Unit",
-            "tracking mode": "Tracking_Mode",
-            "hours source": "Hours_Source",
-            "calendar rule": "Calendar_Rule",
-            "due threshold (days)": "Due_Threshold_Days",
-            "document name": "Manual_Name",
-            "document file/link": "Document",
-            "manual page": "Page",
-            "procedure summary": "Procedure_Summary",
-            "safety/notes": "Notes",
-            "owner": "Owner",
-            "last done date": "Last_Done_Date",
-            "last done hours": "Last_Done_Hours",
-            "last done draw": "Last_Done_Draw",
-        }
-
-        REQUIRED = ["Component", "Task", "Tracking_Mode"]
-        OPTIONAL = [
-            "Task_ID",
-            "Interval_Type", "Interval_Value", "Interval_Unit",
-            "Due_Threshold_Days",
-            "Last_Done_Date", "Last_Done_Hours", "Last_Done_Draw",
-            "Manual_Name", "Page", "Document",
-            "Procedure_Summary", "Notes", "Owner",
-            "Hours_Source", "Calendar_Rule",
-        ]
-
-        def read_file(path: str) -> pd.DataFrame:
-            if path.lower().endswith(".csv"):
-                return pd.read_csv(path)
-            return pd.read_excel(path)
-
-        def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-            df = df.copy()
-            df.rename(columns={c: normalize_map.get(str(c).strip().lower(), c) for c in df.columns}, inplace=True)
-            for r in REQUIRED:
-                if r not in df.columns:
-                    df[r] = np.nan
-            for c in OPTIONAL:
-                if c not in df.columns:
-                    df[c] = np.nan
-            return df
-
-        frames = []
-        for fname in sorted(files):
-            fpath = os.path.join(maint_folder, fname)
-            try:
-                raw = read_file(fpath)
-                if raw is None or raw.empty:
-                    continue
-                dfm = normalize_df(raw)
-                dfm["Source_File"] = fname
-                frames.append(dfm)
-            except Exception:
-                continue
-
-        if not frames:
-            return 0, 0
-
-        dfm = pd.concat(frames, ignore_index=True)
-
-        def pick_current_hours(hours_source: str) -> float:
-            hs = norm_source(hours_source)
-            if hs in ("uv2", "uv 2", "uv_system_2", "uv system 2", "uv-system-2", "system2", "system 2"):
-                return float(uv2_hours)
-            if hs in ("uv1", "uv 1", "uv_system_1", "uv system 1", "uv-system-1", "system1", "system 1"):
-                return float(uv1_hours)
-            return float(furnace_hours)
-
-        dfm["Last_Done_Date_parsed"] = dfm["Last_Done_Date"].apply(parse_date)
-        dfm["Last_Done_Hours_parsed"] = dfm["Last_Done_Hours"].apply(parse_float)
-        dfm["Last_Done_Draw_parsed"] = dfm["Last_Done_Draw"].apply(parse_int)
-        dfm["Current_Hours_For_Task"] = dfm["Hours_Source"].apply(pick_current_hours)
-        dfm["Tracking_Mode_norm"] = dfm["Tracking_Mode"].apply(mode_norm)
-
-        def next_due_date(row):
-            if row.get("Tracking_Mode_norm") != "calendar":
-                return None
-            last = row.get("Last_Done_Date_parsed", None)
-            if last is None:
-                return None
-            try:
-                v = int(float(row.get("Interval_Value", np.nan)))
-            except Exception:
-                return None
-            unit = str(row.get("Interval_Unit", "")).strip().lower()
-            base = pd.Timestamp(last)
-            if pd.isna(base) or base is pd.NaT:
-                return None
-            if "day" in unit:
-                out = base + pd.DateOffset(days=v)
-            elif "week" in unit:
-                out = base + pd.DateOffset(weeks=v)
-            elif "month" in unit:
-                out = base + pd.DateOffset(months=v)
-            elif "year" in unit:
-                out = base + pd.DateOffset(years=v)
-            else:
-                out = base + pd.DateOffset(days=v)
-            if pd.isna(out) or out is pd.NaT:
-                return None
-            return out.date()
-
-        def next_due_hours(row):
-            if row.get("Tracking_Mode_norm") != "hours":
-                return None
-            last_h = row.get("Last_Done_Hours_parsed", None)
-            if last_h is None:
-                return None
-            try:
-                v = float(row.get("Interval_Value", np.nan))
-            except Exception:
-                return None
-            if pd.isna(v):
-                return None
-            return float(last_h) + float(v)
-
-        def next_due_draw(row):
-            if row.get("Tracking_Mode_norm") != "draws":
-                return None
-            last_d = row.get("Last_Done_Draw_parsed", None)
-            if last_d is None:
-                return None
-            try:
-                v = int(float(row.get("Interval_Value", np.nan)))
-            except Exception:
-                return None
-            return int(last_d) + int(v)
-
-        dfm["Next_Due_Date"] = dfm.apply(next_due_date, axis=1)
-        dfm["Next_Due_Hours"] = dfm.apply(next_due_hours, axis=1)
-        dfm["Next_Due_Draw"] = dfm.apply(next_due_draw, axis=1)
-
-        def status_row(row):
-            mode = row.get("Tracking_Mode_norm", "")
-            if mode == "event":
-                return "ROUTINE"
-
-            overdue = False
-            due_soon = False
-
-            nd = row.get("Next_Due_Date", None)
-            nh = row.get("Next_Due_Hours", None)
-            ndr = row.get("Next_Due_Draw", None)
-
-            if nd is not None and not pd.isna(nd):
-                if nd < current_date:
-                    overdue = True
-                else:
-                    thresh = row.get("Due_Threshold_Days", np.nan)
-                    try:
-                        thresh = int(float(thresh)) if not pd.isna(thresh) else int(warn_days)
-                    except Exception:
-                        thresh = int(warn_days)
-                    if (nd - current_date).days <= thresh:
-                        due_soon = True
-
-            if nh is not None and not pd.isna(nh):
-                nh = float(nh)
-                cur_h = float(row.get("Current_Hours_For_Task", 0.0))
-                if nh < cur_h:
-                    overdue = True
-                elif (nh - cur_h) <= float(warn_hours):
-                    due_soon = True
-
-            if ndr is not None and not pd.isna(ndr):
-                ndr = int(ndr)
-                if ndr < int(current_draw_count):
-                    overdue = True
-                elif (ndr - int(current_draw_count)) <= 5:
-                    due_soon = True
-
-            if overdue:
-                return "OVERDUE"
-            if due_soon:
-                return "DUE SOON"
-            return "OK"
-
-        dfm["Status"] = dfm.apply(status_row, axis=1)
+        dfm = compute_maintenance_status_df(
+            dfm,
+            current_draw_count=current_draw_count,
+            furnace_hours=furnace_hours,
+            uv1_hours=uv1_hours,
+            uv2_hours=uv2_hours,
+            warn_days=warn_days,
+            warn_hours=warn_hours,
+        )
 
         overdue = int((dfm["Status"] == "OVERDUE").sum())
         due_soon = int((dfm["Status"] == "DUE SOON").sum())
         return overdue, due_soon
 
     with panel_col:
-        if selected_panel != "__none__":
-            st.markdown('<div class="home-panel-wrap">', unsafe_allow_html=True)
+        st.markdown('<div class="home-panel-wrap">', unsafe_allow_html=True)
+        shell_class = "home-panel-shell is-empty" if selected_panel == "__none__" else "home-panel-shell"
+        st.markdown(
+            f'<div class="{shell_class}"><div class="home-panel-fade">',
+            unsafe_allow_html=True,
+        )
+        if selected_panel == "__none__":
+            st.markdown('<div class="home-panel-placeholder"></div>', unsafe_allow_html=True)
+        elif selected_panel == "🚀 Draws Monitor":
+            render_home_draw_orders_overview()
+        elif selected_panel == "✅ Done + ❌ Failed":
+            _render_done_failed_compact(days_visible=4)
+        elif selected_panel == "📅 Schedule":
+            render_schedule_home_minimal()
+        elif selected_panel == "🧰 Maintenance + 🚨 Faults":
+            st.markdown('<div class="home-maint-shell">', unsafe_allow_html=True)
+            MAINT_FOLDER = P.maintenance_dir
+            DATASET_DIR = P.dataset_dir
+
+            overdue, due_soon = compute_maintenance_counts_for_home(
+                maint_folder=MAINT_FOLDER,
+                dataset_dir=DATASET_DIR,
+            )
+            maint_in_progress = compute_maintenance_in_progress()
+
+            st.session_state["maint_overdue"] = overdue
+            st.session_state["maint_due_soon"] = due_soon
+
             st.markdown(
-                '<div class="home-panel-shell"><div class="home-panel-fade">',
+                f"""
+                <div class="home-faults-block">
+                  <div class="home-faults-title">🧰 Maintenance Overview</div>
+                  <div class="home-faults-grid">
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">Overdue</div>
+                      <div class="home-faults-v">{overdue}</div>
+                    </div>
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">Due soon</div>
+                      <div class="home-faults-v">{due_soon}</div>
+                    </div>
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">In progress</div>
+                      <div class="home-faults-v">{maint_in_progress}</div>
+                    </div>
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">Focus</div>
+                      <div class="home-faults-tip">Open Maintenance tab to review overdue tasks and schedule actions.</div>
+                    </div>
+                  </div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            if selected_panel == "🚀 Draws Monitor":
-                render_home_draw_orders_overview()
-            elif selected_panel == "✅ Done + ❌ Failed":
-                _render_done_failed_compact(days_visible=4)
-            elif selected_panel == "📅 Schedule":
-                render_schedule_home_minimal()
-            elif selected_panel == "🧰 Maintenance + 🚨 Faults":
-                st.markdown('<div class="home-maint-shell">', unsafe_allow_html=True)
-                MAINT_FOLDER = P.maintenance_dir
-                DATASET_DIR = P.dataset_dir
 
-                overdue, due_soon = compute_maintenance_counts_for_home(
-                    maint_folder=MAINT_FOLDER,
-                    dataset_dir=DATASET_DIR,
-                )
-                maint_in_progress = compute_maintenance_in_progress()
+            open_critical = compute_open_critical_faults(FAULTS_CSV)
+            faults_state = "No critical faults ✅" if open_critical == 0 else "Check Maintenance → Faults"
+            faults_state_cls = "home-faults-state-ok" if open_critical == 0 else "home-faults-state-warn"
+            faults_tip = "Tip: open 🧰 Maintenance → Faults / Incidents to review." if open_critical > 0 else "System status is clear."
 
-                st.session_state["maint_overdue"] = overdue
-                st.session_state["maint_due_soon"] = due_soon
-
-                st.markdown(
-                    f"""
-                    <div class="home-faults-block">
-                      <div class="home-faults-title">🧰 Maintenance Overview</div>
-                      <div class="home-faults-grid">
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">Overdue</div>
-                          <div class="home-faults-v">{overdue}</div>
-                        </div>
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">Due soon</div>
-                          <div class="home-faults-v">{due_soon}</div>
-                        </div>
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">In progress</div>
-                          <div class="home-faults-v">{maint_in_progress}</div>
-                        </div>
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">Focus</div>
-                          <div class="home-faults-tip">Open Maintenance tab to review overdue tasks and schedule actions.</div>
-                        </div>
-                      </div>
+            st.markdown(
+                f"""
+                <div class="home-faults-block">
+                  <div class="home-faults-title">🚨 Faults Overview</div>
+                  <div class="home-faults-grid">
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">Critical open faults</div>
+                      <div class="home-faults-v">{open_critical}</div>
                     </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                open_critical = compute_open_critical_faults(FAULTS_CSV)
-                faults_state = "No critical faults ✅" if open_critical == 0 else "Check Maintenance → Faults"
-                faults_state_cls = "home-faults-state-ok" if open_critical == 0 else "home-faults-state-warn"
-                faults_tip = "Tip: open 🧰 Maintenance → Faults / Incidents to review." if open_critical > 0 else "System status is clear."
-
-                st.markdown(
-                    f"""
-                    <div class="home-faults-block">
-                      <div class="home-faults-title">🚨 Faults Overview</div>
-                      <div class="home-faults-grid">
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">Critical open faults</div>
-                          <div class="home-faults-v">{open_critical}</div>
-                        </div>
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">State</div>
-                          <div class="{faults_state_cls}">{faults_state}</div>
-                        </div>
-                        <div class="home-faults-card">
-                          <div class="home-faults-k">Guide</div>
-                          <div class="home-faults-tip">{faults_tip}</div>
-                        </div>
-                      </div>
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">State</div>
+                      <div class="{faults_state_cls}">{faults_state}</div>
                     </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-            elif selected_panel == "🧩 Parts Orders":
-                render_parts_orders_home_all()
-            st.markdown("</div></div>", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+                    <div class="home-faults-card">
+                      <div class="home-faults-k">Guide</div>
+                      <div class="home-faults-tip">{faults_tip}</div>
+                    </div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+        elif selected_panel == "🧩 Parts Orders":
+            render_parts_orders_home_all()
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)

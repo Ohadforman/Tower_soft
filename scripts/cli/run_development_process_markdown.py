@@ -47,6 +47,10 @@ def _is_image(path: str) -> bool:
     return ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 
 
+def _md_path(path: str) -> str:
+    return f"<{path}>"
+
+
 def _clean_text(value: object) -> str:
     if pd.isna(value):
         return "-"
@@ -109,10 +113,10 @@ def _attachment_blocks(row: pd.Series) -> tuple[list[str], list[str]]:
         if _is_image(abs_path) and os.path.exists(abs_path):
             image_lines.append(f"#### {label}")
             image_lines.append("")
-            image_lines.append(f"![{label}]({abs_path})")
+            image_lines.append(f"![{label}]({_md_path(abs_path)})")
             image_lines.append("")
         else:
-            file_lines.append(f"- [{label}]({abs_path})")
+            file_lines.append(f"- [{label}]({_md_path(abs_path)})")
     return image_lines, file_lines
 
 

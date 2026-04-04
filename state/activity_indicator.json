@@ -1,0 +1,17 @@
+{
+  "active": true,
+  "event": "start",
+  "event_ts": "2026-03-11 09:36:27",
+  "activity_type": "maintenance",
+  "title": "Maintenance Start | 63mm Furnace System — Monthly: inspect bottom doors for distortion/damage; replace if needed",
+  "actor": "operator",
+  "source": "maintenance_execute_workspace",
+  "meta": {
+    "task_id": "FUR-MNT-006",
+    "component": "63mm Furnace System",
+    "task": "Monthly: inspect bottom doors for distortion/damage; replace if needed",
+    "parts_status": "Missing: Furnace bottom door set",
+    "safety_access": "",
+    "safety_no_entry": false
+  }
+}

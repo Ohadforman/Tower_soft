@@ -1,0 +1,57 @@
+Parameter Name,Value,Units
+Draw Name,P0TESTCSVF_1,
+Draw Date,2026-02-24 07:51:29,
+Order Index,20,
+Preform Number,P0TESTCSV,
+Fiber Project,LARA - ELOP,
+Priority,Normal,
+Order Opener,OHAD,
+Fiber Geometry Type,Octagonal,
+Tiger Cut (%),0.0,%
+Octagonal F2F (mm),28.0,mm
+Required Length (m) (for T&M+costumer),0.1099999999999999,m
+Good Zones Count (required length zones),1,count
+Fiber Diameter (µm),400.0,µm
+Main Coating Diameter (µm),560.0,µm
+Secondary Coating Diameter (µm),650.0,µm
+Tension (g),60.0,g
+Draw Speed (m/min),40.0,m/min
+Main Coating,Coating_OF_136,
+Secondary Coating,DP-1032,
+Main Coating Temperature (°C),28.0,°C
+Secondary Coating Temperature (°C),28.0,°C
+Order Notes,,
+Process Setup Timestamp,2026-02-24 07:53:47,
+Preform Diameter,28.0,mm
+Preform Shape,Circular,
+Octagonal Preform,0,bool
+Octagonal F2F,,mm
+Tiger Preform,0,bool
+Tiger Cut,0.0,%
+PM Iris System,0,bool
+Iris Mode,Manual,
+Base Area,615.7521601035994,mm^2
+Adjusted Area,615.7521601035994,mm^2
+Effective Preform Diameter,28.0,mm
+Selected Iris Diameter,32.0,mm
+Iris Gap Area,188.49555921538763,mm^2
+Entry Fiber Diameter,400.0,µm
+Target First Coating Diameter,560.0,µm
+Target Second Coating Diameter,650.0,µm
+First Coating Diameter (Theoretical),517.3539976926775,µm
+Second Coating Diameter (Theoretical),646.5257149608435,µm
+Primary Coating,Coating_OF_136,
+Secondary Coating,DP-1032,
+Primary Coating Temperature,28.0,°C
+Secondary Coating Temperature,28.0,°C
+Primary Die Diameter,641,µm
+Secondary Die Diameter,785,µm
+Primary Die Name,Die_641,
+Secondary Die Name,Die_785,
+Coating Die Selection Mode,Auto,
+Draw Speed,40.0,m/min
+P Gain (Diameter Control),1.0,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.12,mm
+Selected Drum,BN2,

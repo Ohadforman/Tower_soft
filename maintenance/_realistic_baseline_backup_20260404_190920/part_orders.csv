@@ -1,0 +1,10 @@
+Status,Part Name,Serial Number,Project Name,Details,Opened By,Approval Requested From,Approved,Approved By,Approval Date,Received Date,Received State,Ordered By,Date Ordered,Company,Inventory Synced,Maintenance Component,Maintenance Task,Maintenance Task ID,Wait ID
+Received,Die 140,345.0,,the first 140 is stuck,,,Yes,,2025-04-17,,Located in inventory,,2026-01-23,SG,Yes,,,,
+Ordered,coating DS,123.0,,tiger project need,Ohad,,Yes,,2026-03-30,,,,2026-03-30,,,,,,
+Ordered,coating OF,123.0,Tiger,tiger project need,Ohad,,Yes,,,,,,2025-05-08,,,,,,
+Received,גרפית לתנור,202225.0,,fd,אוהד,df,Yes,df,2026-03-28,,Waiting for inventory action,fd,2026-03-28,SG,Pending,,,,
+Ordered,Coating::Coating_KS_1-002,,,Auto-created from low stock alert,operator,,Yes,,2026-03-30,,,D OR E,2026-03-30,SG,,,,,
+Received,Coating::Coating_OF_136,,,Auto-created from low stock alert,operator,,Yes,,2026-03-30,2026-03-30,Located in inventory,,2026-03-30,,Yes,,,,
+Wait for Approval,Coating::DS-2015,,,Auto-created from low stock alert,operator,dfds,No,,,,,,,,,,,,
+Opened,Coating::DS-2042,,Maintenance,Auto-created from low stock alert,operator,,No,,,,,,,,,,,,
+Ordered,COAT X,123.0,TAMAM - TIGER,Hello,OHAD,,Yes,,2026-03-30,,,X2,2026-03-30,Desolite,,,,,

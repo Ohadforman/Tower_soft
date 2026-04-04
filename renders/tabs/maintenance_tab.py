@@ -1,5 +1,5 @@
 def render_maintenance_tab(P):
-    import os, json, glob, time
+    import os, json, glob, time, math
     import datetime as dt
     
     import numpy as np
@@ -9,6 +9,7 @@ def render_maintenance_tab(P):
     from renders.tabs.corr_outliers import render_corr_outliers_tab
     from helpers.activity_indicator import record_activity_start
     from helpers.duckdb_io import get_duckdb_conn
+    from helpers.maintenance_status import NORMALIZE_MAP, compute_maintenance_status_df
     from helpers.maintenance_readiness import compute_readiness, is_parts_conditional
     from helpers.maintenance_state import merge_state_into_df, set_task_state, set_tasks_state
     from helpers.maintenance_parts_reservation import (
@@ -68,6 +69,23 @@ def render_maintenance_tab(P):
           }
           .maint-help-green b{
             color: rgba(214,255,232,0.99);
+          }
+          .maint-lane-shell{
+            padding: 6px 0 4px 0;
+            margin: 8px 0 10px 0;
+            border: 0;
+            background: transparent;
+          }
+          .maint-lane-title{
+            font-size: 0.94rem;
+            font-weight: 840;
+            color: rgba(232,246,255,0.98);
+            margin: 0 0 1px 0;
+          }
+          .maint-lane-sub{
+            font-size: 0.78rem;
+            color: rgba(170,204,228,0.74);
+            margin: 0 0 6px 0;
           }
           .maint-section-title{
             margin: 10px 0 8px 0;
@@ -180,6 +198,65 @@ def render_maintenance_tab(P):
           div[data-testid="stTextArea"] textarea:hover,
           div[data-testid="stNumberInput"] input:hover{
             border-color: rgba(176,232,255,0.72) !important;
+          }
+          .maint-prep-grid{
+            display:grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin: 8px 0 12px 0;
+          }
+          .maint-prep-card{
+            border-radius: 14px;
+            padding: 12px 14px;
+            border: 1px solid rgba(128,206,255,0.20);
+            background: linear-gradient(180deg, rgba(14,32,56,0.30), rgba(8,16,28,0.22));
+          }
+          .maint-prep-card.k-blue{
+            border-color: rgba(116,194,255,0.35);
+          }
+          .maint-prep-card.k-green{
+            border-color: rgba(98,228,152,0.34);
+            background: linear-gradient(180deg, rgba(16,42,30,0.34), rgba(10,24,18,0.24));
+          }
+          .maint-prep-card.k-amber{
+            border-color: rgba(255,196,98,0.34);
+            background: linear-gradient(180deg, rgba(52,40,12,0.34), rgba(28,22,10,0.24));
+          }
+          .maint-prep-card.k-red{
+            border-color: rgba(255,112,112,0.34);
+            background: linear-gradient(180deg, rgba(48,18,18,0.34), rgba(26,10,10,0.24));
+          }
+          .maint-prep-k{
+            font-size: 0.76rem;
+            font-weight: 760;
+            color: rgba(188,224,248,0.90);
+            margin-bottom: 5px;
+          }
+          .maint-prep-v{
+            font-size: 1.9rem;
+            line-height: 1.0;
+            font-weight: 900;
+            margin-bottom: 4px;
+          }
+          .maint-prep-note{
+            font-size: 0.76rem;
+            color: rgba(184,214,234,0.78);
+          }
+          .maint-board-shell{
+            border: 1px solid rgba(132,214,255,0.18);
+            border-radius: 14px;
+            padding: 10px 12px;
+            background: linear-gradient(180deg, rgba(10,22,38,0.22), rgba(7,14,24,0.14));
+            margin: 6px 0 12px 0;
+          }
+          .maint-board-title{
+            font-size: 0.88rem;
+            font-weight: 780;
+            color: rgba(232,246,255,0.96);
+            margin: 0 0 6px 0;
+          }
+          @media (max-width: 1100px){
+            .maint-prep-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
           }
         </style>
         """,
@@ -698,6 +775,380 @@ def render_maintenance_tab(P):
         req_parts_tuple = tuple(req_parts or [])
         return _build_manual_context_cached(manuals_dir, signature, task_manual_file, req_parts_tuple)
 
+    def _maintenance_active_order_mask(
+        orders_df: pd.DataFrame,
+        *,
+        part_name: str,
+        maintenance_task_id: str = "",
+        wait_id: str = "",
+    ) -> pd.Series:
+        active_status = {"opened", "wait for approval", "approved", "ordered", "received"}
+        if orders_df is None or orders_df.empty:
+            return pd.Series(dtype=bool)
+        for col in ["Part Name", "Status", "Maintenance Task ID", "Wait ID"]:
+            if col not in orders_df.columns:
+                orders_df[col] = ""
+        base = (
+            orders_df["Part Name"].astype(str).str.strip().str.lower().eq(safe_str(part_name).strip().lower())
+            & orders_df["Status"].astype(str).str.strip().str.lower().isin(active_status)
+        )
+        wait_id_s = safe_str(wait_id).strip()
+        task_id_s = safe_str(maintenance_task_id).strip()
+        if wait_id_s:
+            wait_mask = orders_df["Wait ID"].astype(str).str.strip().eq(wait_id_s)
+            if (base & wait_mask).any():
+                return base & wait_mask
+        if task_id_s:
+            task_mask = orders_df["Maintenance Task ID"].astype(str).str.strip().eq(task_id_s)
+            if (base & task_mask).any():
+                return base & task_mask
+            # Maintenance-linked requests should not be blocked by unrelated tasks that need the same part name.
+            return base & task_mask
+        return base
+
+    def _maintenance_received_ready_mask(
+        orders_df: pd.DataFrame,
+        *,
+        part_name: str,
+        maintenance_task_id: str = "",
+        wait_id: str = "",
+    ) -> pd.Series:
+        if orders_df is None or orders_df.empty:
+            return pd.Series(dtype=bool)
+        for col in ["Inventory Synced"]:
+            if col not in orders_df.columns:
+                orders_df[col] = ""
+        linked_mask = _maintenance_active_order_mask(
+            orders_df,
+            part_name=part_name,
+            maintenance_task_id=maintenance_task_id,
+            wait_id=wait_id,
+        )
+        if linked_mask.any():
+            return linked_mask & orders_df["Status"].astype(str).str.strip().str.lower().eq("received") & orders_df["Inventory Synced"].astype(str).str.strip().str.lower().eq("yes")
+        # Fallback for older rows that predate maintenance linkage.
+        return (
+            orders_df["Part Name"].astype(str).str.strip().str.lower().eq(safe_str(part_name).strip().lower())
+            & orders_df["Status"].astype(str).str.strip().str.lower().eq("received")
+            & orders_df["Inventory Synced"].astype(str).str.strip().str.lower().eq("yes")
+        )
+
+    def _maintenance_linked_ready_count(
+        orders_df: pd.DataFrame,
+        *,
+        part_name: str,
+        maintenance_task_id: str = "",
+        wait_id: str = "",
+    ) -> int:
+        return int(
+            _maintenance_received_ready_mask(
+                orders_df,
+                part_name=part_name,
+                maintenance_task_id=maintenance_task_id,
+                wait_id=wait_id,
+            ).sum()
+        )
+
+    def _parse_part_qty_plan(raw_text: str) -> dict[str, int]:
+        plan: dict[str, int] = {}
+        raw = safe_str(raw_text).strip()
+        if not raw:
+            return plan
+        chunks = []
+        for piece in raw.replace("\n", ",").split(","):
+            pv = safe_str(piece).strip()
+            if pv:
+                chunks.append(pv)
+        for piece in chunks:
+            name = piece
+            qty = 1
+            for sep in ["=", " x", " X", "*"]:
+                if sep in piece:
+                    left, right = piece.rsplit(sep, 1)
+                    try:
+                        qv = int(float(safe_str(right).strip()))
+                    except Exception:
+                        qv = None
+                    if qv and qv > 0:
+                        name = safe_str(left).strip()
+                        qty = qv
+                        break
+            if not name:
+                continue
+            plan[name] = int(plan.get(name, 0)) + int(qty)
+        return plan
+
+    def _load_wait_part_plan(wait_row) -> dict[str, int]:
+        raw_json = safe_str(wait_row.get("requested_part_plan_json", "")).strip()
+        if raw_json:
+            try:
+                parsed = json.loads(raw_json)
+                if isinstance(parsed, dict):
+                    plan = {}
+                    for k, v in parsed.items():
+                        name = safe_str(k).strip()
+                        try:
+                            qty = int(float(v))
+                        except Exception:
+                            qty = 0
+                        if name and qty > 0:
+                            plan[name] = qty
+                    if plan:
+                        return plan
+            except Exception:
+                pass
+        fallback = {}
+        for name, qty in _parse_part_qty_plan(safe_str(wait_row.get("requested_part_name", ""))).items():
+            fallback[name] = int(fallback.get(name, 0)) + int(qty)
+        return fallback
+
+    def _split_required_parts(parts_raw: str) -> list[str]:
+        s = safe_str(parts_raw).strip()
+        if not s:
+            return []
+        out = []
+        seen = set()
+        for p in s.replace("\n", ",").replace(";", ",").replace("|", ",").split(","):
+            pv = safe_str(p).strip()
+            if not pv:
+                continue
+            lk = pv.lower()
+            if lk not in seen:
+                out.append(pv)
+                seen.add(lk)
+        return out
+
+    def _legacy_required_parts_are_conditional(row) -> bool:
+        task_text = " ".join(
+            [
+                safe_str(row.get("Task", "")),
+                safe_str(row.get("Task Name", "")),
+                safe_str(row.get("Procedure_Summary", "")),
+                safe_str(row.get("Safety/Notes", "")),
+                safe_str(row.get("Notes", "")),
+            ]
+        ).strip().lower()
+        if not task_text:
+            return False
+        conditional_markers = [
+            "if needed",
+            "replace if needed",
+            "if worn",
+            "if wear",
+            "if damaged",
+            "if damage",
+            "if inspection requires",
+            "if required",
+            "if condition met",
+            "on-condition",
+            "replace when",
+            "replace if",
+            "inspect and replace if needed",
+            "inspect for",
+        ]
+        return any(marker in task_text for marker in conditional_markers)
+
+    def _task_mandatory_parts(row) -> list[str]:
+        mandatory_raw = safe_str(row.get("Mandatory_Parts", "")).strip()
+        conditional_raw = safe_str(row.get("Conditional_Parts", "")).strip()
+        mandatory = _split_required_parts(mandatory_raw)
+        conditional = _split_required_parts(conditional_raw)
+        if mandatory:
+            return mandatory
+        if conditional:
+            return []
+        legacy_required = _split_required_parts(row.get("Required_Parts", ""))
+        if not legacy_required:
+            return []
+        if _legacy_required_parts_are_conditional(row):
+            return []
+        return legacy_required
+
+    def _task_conditional_parts(row) -> list[str]:
+        conditional_raw = safe_str(row.get("Conditional_Parts", "")).strip()
+        conditional = _split_required_parts(conditional_raw)
+        if conditional:
+            return conditional
+        mandatory_raw = safe_str(row.get("Mandatory_Parts", "")).strip()
+        if mandatory_raw:
+            return []
+        legacy_required = _split_required_parts(row.get("Required_Parts", ""))
+        if legacy_required and _legacy_required_parts_are_conditional(row):
+            return legacy_required
+        return []
+
+    def _task_preparation_lead_days(row) -> int:
+        try:
+            val = int(float(pd.to_numeric(row.get("Preparation_Lead_Days", np.nan), errors="coerce")))
+            return max(0, val)
+        except Exception:
+            return 7
+
+    def _task_parts_check_lead_days(row) -> int:
+        try:
+            val = int(float(pd.to_numeric(row.get("Parts_Check_Lead_Days", np.nan), errors="coerce")))
+            return max(0, val)
+        except Exception:
+            return 21
+
+    def _task_auto_order_mandatory(row) -> bool:
+        raw = safe_str(row.get("Auto_Order_Mandatory_Parts", "")).strip().lower()
+        if raw in {"", "yes", "true", "1", "auto", "y"}:
+            return True
+        if raw in {"no", "false", "0", "n"}:
+            return False
+        return True
+
+    def _load_inventory_effective_qty_map() -> dict[str, float]:
+        try:
+            inv_df = load_inventory_cached(P.parts_inventory_csv)
+        except Exception:
+            inv_df = pd.DataFrame()
+        if inv_df.empty:
+            return {}
+        inv_df["Part Name"] = inv_df["Part Name"].astype(str).str.strip().str.lower()
+        inv_df["Item Type"] = inv_df.get("Item Type", "").astype(str).str.strip().str.lower()
+        inv_df["Location"] = inv_df.get("Location", "").astype(str).str.strip().str.lower()
+        inv_df["Quantity"] = pd.to_numeric(inv_df.get("Quantity", 0), errors="coerce").fillna(0.0)
+        stock_df = inv_df[inv_df["Location"].ne("mounted")].copy()
+        mounted_df = inv_df[inv_df["Location"].eq("mounted")].copy()
+        inv_qty = stock_df.groupby("Part Name")["Quantity"].sum().to_dict()
+        inv_mounted_qty = mounted_df.groupby("Part Name")["Quantity"].sum().to_dict()
+        inv_tool_map = (
+            inv_df.groupby("Part Name")
+            .apply(
+                lambda g: bool(
+                    g["Item Type"].astype(str).str.strip().str.lower().eq("tool").any()
+                    or is_tool_like_part_name(g.name)
+                )
+            )
+            .to_dict()
+        )
+        eff = {}
+        for pn in set(inv_qty.keys()) | set(inv_mounted_qty.keys()) | set(inv_tool_map.keys()):
+            stock_q = float(inv_qty.get(pn, 0.0))
+            mounted_q = float(inv_mounted_qty.get(pn, 0.0))
+            eff[pn] = stock_q + mounted_q if bool(inv_tool_map.get(pn, False)) else stock_q
+        return eff
+
+    def _load_inventory_lead_time_map() -> dict[str, float]:
+        try:
+            inv_df = load_inventory_cached(P.parts_inventory_csv)
+        except Exception:
+            inv_df = pd.DataFrame()
+        if inv_df.empty:
+            return {}
+        inv_df["Part Name"] = inv_df["Part Name"].astype(str).str.strip().str.lower()
+        if "Lead Time Days" not in inv_df.columns:
+            inv_df["Lead Time Days"] = 0.0
+        inv_df["Lead Time Days"] = pd.to_numeric(inv_df["Lead Time Days"], errors="coerce").fillna(0.0)
+        lead_map = inv_df.groupby("Part Name")["Lead Time Days"].max().to_dict()
+        return {str(k).strip().lower(): float(v) for k, v in lead_map.items()}
+
+    def _build_maintenance_parts_watch_df(
+        df_rows: pd.DataFrame,
+        *,
+        current_date,
+        current_draw_count,
+    ) -> pd.DataFrame:
+        if df_rows is None or df_rows.empty:
+            return pd.DataFrame()
+        inv_effective_qty = _load_inventory_effective_qty_map()
+        lead_time_map = _load_inventory_lead_time_map()
+        if os.path.exists(P.parts_orders_csv):
+            try:
+                odf = _read_csv_keepna(P.parts_orders_csv)
+            except Exception:
+                odf = pd.DataFrame()
+        else:
+            odf = pd.DataFrame()
+        out_rows = []
+        today_ts = pd.Timestamp(current_date)
+        for _, rr in df_rows.iterrows():
+            req_parts = _task_mandatory_parts(rr)
+            if not req_parts:
+                continue
+            mode = mode_norm(rr.get("Tracking_Mode_norm", rr.get("Tracking_Mode", "")))
+            parts_check_days = _task_parts_check_lead_days(rr)
+            missing_parts = []
+            unordered_parts = []
+            late_parts = []
+            conditional_missing = []
+            task_id = safe_str(rr.get("Task_ID", "")).strip()
+            component = safe_str(rr.get("Component", "")).strip()
+            task_name = safe_str(rr.get("Task", "")).strip()
+            days_left = None
+            inside_parts_window = safe_str(rr.get("Status", "")).strip().upper() in {"OVERDUE", "DUE SOON"}
+            if mode == "calendar":
+                nd = pd.to_datetime(rr.get("Next_Due_Date", None), errors="coerce")
+                if pd.notna(nd):
+                    days_left = float((nd.normalize() - today_ts.normalize()).days)
+                    inside_parts_window = bool(days_left <= float(parts_check_days))
+            elif mode == "hours":
+                nh = pd.to_numeric(rr.get("Next_Due_Hours", None), errors="coerce")
+                cur_h = pd.to_numeric(pick_current_hours(rr.get("Hours_Source", "")), errors="coerce")
+                if pd.notna(nh) and pd.notna(cur_h):
+                    hours_left = float(nh) - float(cur_h)
+                    inside_parts_window = bool(hours_left <= float(max(1, parts_check_days * 24)))
+            elif mode == "draws":
+                nd = pd.to_numeric(rr.get("Next_Due_Draw", None), errors="coerce")
+                if pd.notna(nd):
+                    draws_left = float(nd) - float(current_draw_count)
+                    inside_parts_window = bool(draws_left <= float(max(1, parts_check_days)))
+
+            if not inside_parts_window:
+                continue
+            for part_name in req_parts:
+                if float(inv_effective_qty.get(part_name.lower(), 0.0)) > 0:
+                    continue
+                missing_parts.append(part_name)
+                lead_days = float(lead_time_map.get(part_name.lower(), 0.0))
+                has_active = _maintenance_active_order_mask(
+                    odf,
+                    part_name=part_name,
+                    maintenance_task_id=task_id,
+                    wait_id="",
+                ).any()
+                if not has_active:
+                    unordered_parts.append(part_name)
+                    if lead_days > 0:
+                        if days_left is None or lead_days >= max(0.0, float(days_left)):
+                            late_parts.append(part_name)
+            for part_name in _task_conditional_parts(rr):
+                if float(inv_effective_qty.get(part_name.lower(), 0.0)) <= 0:
+                    conditional_missing.append(part_name)
+            if not missing_parts:
+                if not conditional_missing:
+                    continue
+                risk_label = "Conditional part not in stock"
+            elif late_parts:
+                risk_label = "Late mandatory order"
+            elif unordered_parts:
+                risk_label = "Mandatory order should already be open"
+            else:
+                risk_label = "Mandatory part waiting on open order"
+            out_rows.append(
+                {
+                    "Status": safe_str(rr.get("Status", "")),
+                    "Component": component,
+                    "Task": task_name,
+                    "Task_ID": task_id,
+                    "Task_Group": safe_str(rr.get("Task_Group", "")),
+                    "Required_Parts": ", ".join(req_parts),
+                    "Conditional_Parts": ", ".join(_task_conditional_parts(rr)),
+                    "Missing Parts": ", ".join(missing_parts),
+                    "Conditional Missing": ", ".join(conditional_missing),
+                    "Needs Order": ", ".join(unordered_parts),
+                    "Late Order Risk": ", ".join(late_parts),
+                    "Has Active Orders": "Yes" if len(unordered_parts) < len(missing_parts) else "No",
+                    "Parts Risk": risk_label,
+                    "Problem Now": "Yes" if bool(late_parts) else "No",
+                    "Auto Order": "Yes" if _task_auto_order_mandatory(rr) else "No",
+                    "Source_File": safe_str(rr.get("Source_File", "")),
+                }
+            )
+        return pd.DataFrame(out_rows)
+
     def _create_or_open_parts_order_for_context(
         *,
         part_name: str,
@@ -709,8 +1160,11 @@ def render_maintenance_tab(P):
             "Status", "Part Name", "Serial Number",
             "Project Name", "Details",
             "Opened By",
+            "Approval Requested From",
             "Approved", "Approved By", "Approval Date",
+            "Received Date", "Received State",
             "Ordered By", "Date Ordered", "Company",
+            "Inventory Synced",
             "Maintenance Component", "Maintenance Task", "Maintenance Task ID", "Wait ID",
         ]
         os.makedirs(os.path.dirname(PARTS_ORDERS_CSV), exist_ok=True)
@@ -725,11 +1179,11 @@ def render_maintenance_tab(P):
             if c not in orders_df.columns:
                 orders_df[c] = ""
 
-        active_status = {"opened", "approved", "ordered", "shipped", "received"}
-        p_l = safe_str(part_name).strip().lower()
-        exists_active = (
-            orders_df["Part Name"].astype(str).str.strip().str.lower().eq(p_l)
-            & orders_df["Status"].astype(str).str.strip().str.lower().isin(active_status)
+        exists_active = _maintenance_active_order_mask(
+            orders_df,
+            part_name=part_name,
+            maintenance_task_id=safe_str(task_row.get("Task_ID", "")).strip(),
+            wait_id="",
         ).any()
         if exists_active:
             return "exists"
@@ -741,12 +1195,16 @@ def render_maintenance_tab(P):
             "Project Name": "Maintenance",
             "Details": safe_str(details).strip(),
             "Opened By": safe_str(actor_name).strip(),
+            "Approval Requested From": "",
             "Approved": "No",
             "Approved By": "",
             "Approval Date": "",
+            "Received Date": "",
+            "Received State": "",
             "Ordered By": "",
             "Date Ordered": "",
             "Company": "SG",
+            "Inventory Synced": "",
             "Maintenance Component": safe_str(task_row.get("Component", "")).strip(),
             "Maintenance Task": safe_str(task_row.get("Task", "")).strip(),
             "Maintenance Task ID": safe_str(task_row.get("Task_ID", "")).strip(),
@@ -972,6 +1430,7 @@ def render_maintenance_tab(P):
         "maintenance_task_id",
         "maintenance_source_file",
         "requested_part_name",
+        "requested_part_plan_json",
         "requested_project_name",
         "requested_company",
         "wait_reason",
@@ -1252,72 +1711,33 @@ def render_maintenance_tab(P):
     # =========================================================
     # Maintenance file loading
     # =========================================================
-    files = [f for f in os.listdir(MAINT_FOLDER) if f.lower().endswith((".xlsx", ".xls", ".csv"))]
+    ignore_maint_source_files = {
+        "faults_actions_log.csv",
+        "faults_log.csv",
+        "maintenance_actions_log.csv",
+        "maintenance_task_state.csv",
+        "maintenance_work_packages.csv",
+        "_app_state.json",
+        "maintenance_test_presets.json",
+        "tm_step_checklists.json",
+    }
+    files = [
+        f for f in os.listdir(MAINT_FOLDER)
+        if f.lower().endswith((".xlsx", ".xls", ".csv")) and f not in ignore_maint_source_files
+    ]
     if not files:
         st.warning("No maintenance files found in /maintenance folder.")
         st.stop()
     
-    normalize_map = {
-        "equipment": "Component",
-        "task name": "Task",
-        "task id": "Task_ID",
-        "group": "Task_Group",
-        "maintenance group": "Task_Group",
-        "todo group": "Task_Group",
-        "groups": "Task_Groups",
-        "task groups": "Task_Groups",
-        "maintenance groups": "Task_Groups",
-        "required parts": "Required_Parts",
-        "parts needed": "Required_Parts",
-        "needed parts": "Required_Parts",
-        "estimated duration min": "Est_Duration_Min",
-        "estimated duration (min)": "Est_Duration_Min",
-        "planning months": "Planning_Window_Months",
-        "window months": "Planning_Window_Months",
-        "interval type": "Interval_Type",
-        "interval value": "Interval_Value",
-        "interval unit": "Interval_Unit",
-        "tracking mode": "Tracking_Mode",
-        "hours source": "Hours_Source",
-        "trigger modes": "Trigger_Modes",
-        "trigger hours source": "Trigger_Hours_Source",
-        "trigger hours interval": "Trigger_Hours_Interval",
-        "trigger draws interval": "Trigger_Draws_Interval",
-        "trigger calendar value": "Trigger_Calendar_Value",
-        "trigger calendar unit": "Trigger_Calendar_Unit",
-        "calendar rule": "Calendar_Rule",
-        "due threshold (days)": "Due_Threshold_Days",
-        "document name": "Manual_Name",
-        "document file/link": "Document",
-        "manual page": "Page",
-        "procedure summary": "Procedure_Summary",
-        "safety/notes": "Notes",
-        "test fields": "Test_Fields",
-        "test inputs": "Test_Fields",
-        "monitor fields": "Test_Fields",
-        "test preset": "Test_Preset",
-        "monitor preset": "Test_Preset",
-        "test thresholds": "Test_Thresholds",
-        "threshold rules": "Test_Thresholds",
-        "condition text": "Test_Condition",
-        "condition trigger": "Test_Condition",
-        "if condition": "Test_Condition",
-        "condition action": "Test_Action",
-        "if met do": "Test_Action",
-        "owner": "Owner",
-        "last done date": "Last_Done_Date",
-        "last done hours": "Last_Done_Hours",
-        "last done draw": "Last_Done_Draw",
-        "last done hours uv1": "Last_Done_Hours_UV1",
-        "last done hours uv2": "Last_Done_Hours_UV2",
-        "last done hours furnace": "Last_Done_Hours_Furnace",
-    }
+    normalize_map = dict(NORMALIZE_MAP)
     inverse_map = {v: k for k, v in normalize_map.items()}
     
     REQUIRED = ["Component", "Task", "Tracking_Mode"]
     OPTIONAL = [
         "Task_ID",
-        "Task_Group", "Task_Groups", "Required_Parts", "Est_Duration_Min", "Planning_Window_Months",
+        "Task_Group", "Task_Groups", "Required_Parts", "Mandatory_Parts", "Conditional_Parts",
+        "Preparation_Lead_Days", "Parts_Check_Lead_Days", "Auto_Order_Mandatory_Parts",
+        "Est_Duration_Min", "Planning_Window_Months",
         "Interval_Type", "Interval_Value", "Interval_Unit",
         "Due_Threshold_Days",
         "Last_Done_Date", "Last_Done_Hours", "Last_Done_Draw",
@@ -1492,6 +1912,17 @@ def render_maintenance_tab(P):
     def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df.rename(columns={c: normalize_map.get(str(c).strip().lower(), c) for c in df.columns}, inplace=True)
+        if df.columns.duplicated().any():
+            merged = pd.DataFrame(index=df.index)
+            ordered_cols = list(dict.fromkeys(df.columns.tolist()))
+            for col in ordered_cols:
+                same_name = df.loc[:, df.columns == col]
+                if isinstance(same_name, pd.Series):
+                    merged[col] = same_name
+                else:
+                    # Coalesce legacy/new duplicate headers after normalization.
+                    merged[col] = same_name.bfill(axis=1).iloc[:, 0]
+            df = merged
         for r in REQUIRED:
             if r not in df.columns:
                 df[r] = np.nan
@@ -1700,6 +2131,8 @@ def render_maintenance_tab(P):
             return None
     
     def norm_source(s) -> str:
+        if isinstance(s, pd.Series):
+            s = s.iloc[0] if len(s) else ""
         s = "" if s is None or pd.isna(s) else str(s)
         return s.strip().lower()
     
@@ -1772,151 +2205,22 @@ def render_maintenance_tab(P):
     # =========================================================
     # Compute Next Due + Status
     # =========================================================
-    dfm["Last_Done_Date_parsed"] = dfm["Last_Done_Date"].apply(parse_date)
-    dfm["Last_Done_Hours_parsed"] = dfm["Last_Done_Hours"].apply(parse_float)
-    dfm["Last_Done_Draw_parsed"] = dfm["Last_Done_Draw"].apply(parse_int)
-    dfm["Current_Hours_For_Task"] = dfm["Hours_Source"].apply(pick_current_hours)
-    dfm["Tracking_Mode_norm"] = dfm["Tracking_Mode"].apply(mode_norm)
-    dfm["Trigger_Modes_norm"] = dfm.apply(_split_trigger_modes, axis=1)
+    dfm = compute_maintenance_status_df(
+        dfm,
+        current_draw_count=current_draw_count,
+        furnace_hours=furnace_hours,
+        uv1_hours=uv1_hours,
+        uv2_hours=uv2_hours,
+        warn_days=warn_days,
+        warn_hours=warn_hours,
+        current_date=current_date,
+    )
     dfm["Task_Groups_List"] = dfm.apply(row_task_groups, axis=1)
     dfm["Task_Groups_Key"] = dfm["Task_Groups_List"].apply(build_group_key)
     
-    def next_due_date(row):
-        modes = row.get("Trigger_Modes_norm", [])
-        if "calendar" not in modes:
-            return None
-        last = row.get("Last_Done_Date_parsed", None)
-        if last is None:
-            return None
-        try:
-            v = int(float(row.get("Trigger_Calendar_Value", row.get("Interval_Value", np.nan))))
-        except Exception:
-            return None
-
-        unit = str(row.get("Trigger_Calendar_Unit", row.get("Interval_Unit", ""))).strip().lower()
-        base = pd.Timestamp(last)
-        if pd.isna(base) or base is pd.NaT:
-            return None
-    
-        if "day" in unit:
-            out = base + pd.DateOffset(days=v)
-        elif "week" in unit:
-            out = base + pd.DateOffset(weeks=v)
-        elif "month" in unit:
-            out = base + pd.DateOffset(months=v)
-        elif "year" in unit:
-            out = base + pd.DateOffset(years=v)
-        else:
-            out = base + pd.DateOffset(days=v)
-    
-        if pd.isna(out) or out is pd.NaT:
-            return None
-        return out.date()
-    
-    def next_due_hours(row):
-        modes = row.get("Trigger_Modes_norm", [])
-        if "hours" not in modes:
-            return None
-        try:
-            v = float(row.get("Trigger_Hours_Interval", row.get("Interval_Value", np.nan)))
-        except Exception:
-            return None
-        if pd.isna(v):
-            return None
-        sources = _split_hours_sources(row)
-        due_rows = []
-        for src in sources:
-            last_h = _get_hours_baseline(row, src)
-            if last_h is None:
-                continue
-            due_h = float(last_h) + float(v)
-            cur_h = float(pick_current_hours(src))
-            due_rows.append((due_h - cur_h, due_h))
-        if not due_rows:
-            return None
-        due_rows.sort(key=lambda x: x[0])
-        return float(due_rows[0][1])
-    
-    def next_due_draw(row):
-        modes = row.get("Trigger_Modes_norm", [])
-        if "draws" not in modes:
-            return None
-        last_d = row.get("Last_Done_Draw_parsed", None)
-        if last_d is None:
-            return None
-        try:
-            v = int(float(row.get("Trigger_Draws_Interval", row.get("Interval_Value", np.nan))))
-        except Exception:
-            return None
-        return int(last_d) + int(v)
-    
-    dfm["Next_Due_Date"] = dfm.apply(next_due_date, axis=1)
-    dfm["Next_Due_Hours"] = dfm.apply(next_due_hours, axis=1)
-    dfm["Next_Due_Draw"] = dfm.apply(next_due_draw, axis=1)
-    
-    def status_row(row):
-        modes = row.get("Trigger_Modes_norm", [])
-        mode = row.get("Tracking_Mode_norm", "")
-        if mode == "event":
-            return "ROUTINE"
-    
-        overdue = False
-        due_soon = False
-    
-        nd = row.get("Next_Due_Date", None)
-        nh = row.get("Next_Due_Hours", None)
-        ndr = row.get("Next_Due_Draw", None)
-    
-        # calendar
-        if "calendar" in modes and nd is not None and not pd.isna(nd):
-            if nd < current_date:
-                overdue = True
-            else:
-                thresh = row.get("Due_Threshold_Days", np.nan)
-                try:
-                    thresh = int(float(thresh)) if not pd.isna(thresh) else int(warn_days)
-                except Exception:
-                    thresh = int(warn_days)
-                if (nd - current_date).days <= thresh:
-                    due_soon = True
-    
-        # hours (supports one-or-more sources; closest due wins)
-        if "hours" in modes:
-            try:
-                interval_h = float(row.get("Trigger_Hours_Interval", row.get("Interval_Value", np.nan)))
-            except Exception:
-                interval_h = np.nan
-            if not pd.isna(interval_h):
-                for src in _split_hours_sources(row):
-                    last_h = _get_hours_baseline(row, src)
-                    if last_h is None:
-                        continue
-                    due_h = float(last_h) + float(interval_h)
-                    cur_h = float(pick_current_hours(src))
-                    if due_h < cur_h:
-                        overdue = True
-                    elif (due_h - cur_h) <= float(warn_hours):
-                        due_soon = True
-
-        # draws
-        if "draws" in modes and ndr is not None and not pd.isna(ndr):
-            ndr = int(ndr)
-            if ndr < int(current_draw_count):
-                overdue = True
-            elif (ndr - int(current_draw_count)) <= 5:
-                due_soon = True
-    
-        if overdue:
-            return "OVERDUE"
-        if due_soon:
-            return "DUE SOON"
-        return "OK"
-    
-    dfm["Status"] = dfm.apply(status_row, axis=1)
-    
     st.session_state["maint_overdue"] = int((dfm["Status"] == "OVERDUE").sum())
     st.session_state["maint_due_soon"] = int((dfm["Status"] == "DUE SOON").sum())
-    
+
     # =========================================================
     # Dashboard metrics + Open Critical Faults
     # =========================================================
@@ -1939,10 +2243,27 @@ def render_maintenance_tab(P):
         open_total = int(len(open_df))
         return open_total, crit_open
     
-    def render_maintenance_dashboard_metrics(dfm):
+    def render_maintenance_dashboard_metrics(dfm, current_date, current_draw_count):
         st.markdown(
             """
             <style>
+              .maint-dash-band{
+                padding: 4px 0 2px 0;
+                margin: 10px 0 8px 0;
+                border: 0;
+                background: transparent;
+              }
+              .maint-dash-band-title{
+                font-size: 0.98rem;
+                font-weight: 860;
+                color: rgba(232,246,255,0.98);
+                margin: 0 0 1px 0;
+              }
+              .maint-dash-band-sub{
+                font-size: 0.78rem;
+                color: rgba(170,204,228,0.76);
+                margin: 0 0 6px 0;
+              }
               .maint-metrics-grid{
                 display:grid;
                 grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1971,8 +2292,41 @@ def render_maintenance_tab(P):
               .maint-v-orange{ color:#ffb84d; text-shadow:0 0 12px rgba(255,168,48,0.24); }
               .maint-v-green{ color:#6dff95; text-shadow:0 0 12px rgba(88,246,126,0.22); }
               .maint-v-blue{ color:#7ec6ff; text-shadow:0 0 12px rgba(86,180,255,0.22); }
+              .maint-status-sentence{
+                padding: 4px 0 0 0;
+                margin: 2px 0 2px 0;
+                color: rgba(194,224,242,0.86);
+                font-size: 0.80rem;
+                border: 0;
+                background: transparent;
+              }
+              .maint-status-sentence b{
+                color: rgba(238,249,255,0.98);
+              }
+              .maint-action-strip{
+                display:grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 8px;
+                margin: 4px 0 0 0;
+              }
+              .maint-action-card{
+                border-radius: 10px;
+                border: 1px solid rgba(128,206,255,0.10);
+                background: rgba(8,16,28,0.08);
+                padding: 8px 10px;
+              }
+              .maint-action-card b{
+                color: rgba(238,249,255,0.98);
+              }
+              .maint-action-card span{
+                display:block;
+                color: rgba(176,210,232,0.78);
+                font-size: 0.75rem;
+                margin-top: 2px;
+              }
               @media (max-width: 1100px){
                 .maint-metrics-grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+                .maint-action-strip{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
               }
             </style>
             """,
@@ -1990,6 +2344,14 @@ def render_maintenance_tab(P):
         open_cls = "maint-v-orange" if open_faults > 0 else "maint-v-green"
         crit_cls = "maint-v-red" if crit_faults > 0 else "maint-v-green"
 
+        st.markdown(
+            """
+            <div class="maint-dash-band">
+              <div class="maint-dash-band-title">Maintenance Health</div>
+              <div class="maint-dash-band-sub">See overall task urgency and fault pressure first.</div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown(
             f"""
             <div class="maint-metrics-grid">
@@ -2021,25 +2383,18 @@ def render_maintenance_tab(P):
             """,
             unsafe_allow_html=True,
         )
-
-        # Secondary KPI strip: lifecycle + reservation health.
-        lifecycle_df = pd.DataFrame()
-        if os.path.exists(MAINT_TASK_STATE_CSV):
-            try:
-                lifecycle_df = _read_csv_keepna(MAINT_TASK_STATE_CSV)
-            except Exception:
-                lifecycle_df = pd.DataFrame()
-        if "state" not in lifecycle_df.columns:
-            lifecycle_df["state"] = ""
-        st_map = lifecycle_df["state"].astype(str).str.upper()
-        in_progress_n = int(st_map.eq("IN_PROGRESS").sum())
-        blocked_parts_n = int(st_map.eq("BLOCKED_PARTS").sum())
-        prep_ready_n = int(st_map.eq("PREP_READY").sum())
-
-        k1, k2, k3 = st.columns(3)
-        k1.metric("In Progress", in_progress_n)
-        k2.metric("Blocked (Parts)", blocked_parts_n)
-        k3.metric("Prep Ready", prep_ready_n)
+        st.markdown(
+            f"""
+            <div class="maint-status-sentence">
+              <b>Picture now:</b> {overdue} overdue task(s), {due_soon} due soon, {open_faults} open fault(s), and {crit_faults} critical fault(s) still open.
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Use `1) Plan + Prepare` for scheduling and procurement, `2) Execute + Resolve Blocks` for waits, and the faults section for fault detail."
+        )
 
     def render_maintenance_test_monitor():
         cols = [
@@ -2085,65 +2440,6 @@ def render_maintenance_tab(P):
         focus_df["When"] = focus_df["test_ts"].dt.strftime("%Y-%m-%d %H:%M")
         view_cols = [c for c in ["When", "component", "task_id", "test_preset", "threshold_hits", "notes", "actor"] if c in focus_df.columns]
         st.dataframe(focus_df[view_cols].head(12), use_container_width=True, hide_index=True, height=min(340, 80 + 34 * len(focus_df.head(12))))
-
-        st.session_state.setdefault("maint_dash_focus", "")
-        b1, b2, b3, b4, b5, b6 = st.columns(6)
-        if b1.button("View OVERDUE", key="maint_dash_btn_overdue", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "OVERDUE"
-        if b2.button("View DUE SOON", key="maint_dash_btn_due_soon", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "DUE SOON"
-        if b3.button("View ROUTINE", key="maint_dash_btn_routine", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "ROUTINE"
-        if b4.button("View OK", key="maint_dash_btn_ok", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "OK"
-        if b5.button("View Open Faults", key="maint_dash_btn_open_faults", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "OPEN_FAULTS"
-        if b6.button("View Critical", key="maint_dash_btn_critical_faults", use_container_width=True):
-            st.session_state["maint_dash_focus"] = "CRITICAL_FAULTS"
-
-        focus = st.session_state.get("maint_dash_focus", "")
-        if focus:
-            c_left, c_right = st.columns([5, 1])
-            c_left.markdown(f"**Focused List: {focus}**")
-            if c_right.button("Clear", key="maint_dash_focus_clear", use_container_width=True):
-                st.session_state["maint_dash_focus"] = ""
-                st.rerun()
-
-            if focus in {"OVERDUE", "DUE SOON", "ROUTINE", "OK"}:
-                show_cols = [
-                    c for c in [
-                        "Status", "Component", "Task", "Task_ID", "Tracking_Mode",
-                        "Hours_Source", "Next_Due_Date", "Next_Due_Hours", "Next_Due_Draw", "Source_File"
-                    ] if c in dfm.columns
-                ]
-                view_df = dfm[dfm["Status"] == focus].copy()
-                st.dataframe(view_df[show_cols], use_container_width=True, hide_index=True, height=280)
-            else:
-                faults_csv = _read_csv_safe(FAULTS_CSV, FAULTS_COLS)
-                actions_csv = _read_csv_safe(FAULTS_ACTIONS_CSV, FAULTS_ACTIONS_COLS)
-                smap = _latest_fault_state(actions_csv)
-                if faults_csv.empty:
-                    st.info("No faults data.")
-                    return
-                faults_csv["fault_id"] = pd.to_numeric(faults_csv["fault_id"], errors="coerce")
-                faults_csv = faults_csv.dropna(subset=["fault_id"]).copy()
-                faults_csv["fault_id"] = faults_csv["fault_id"].astype(int)
-                faults_csv["_is_closed"] = faults_csv["fault_id"].apply(lambda fid: bool(smap.get(int(fid), {}).get("is_closed", False)))
-                open_df = faults_csv[~faults_csv["_is_closed"]].copy()
-
-                if focus == "OPEN_FAULTS":
-                    out = open_df[[
-                        "fault_ts", "fault_id", "fault_component", "fault_severity",
-                        "fault_title", "fault_description", "fault_related_draw"
-                    ]] if not open_df.empty else pd.DataFrame()
-                    st.dataframe(out, use_container_width=True, hide_index=True, height=280)
-                elif focus == "CRITICAL_FAULTS":
-                    crit = open_df[open_df["fault_severity"].astype(str).str.lower().eq("critical")].copy()
-                    out = crit[[
-                        "fault_ts", "fault_id", "fault_component", "fault_severity",
-                        "fault_title", "fault_description", "fault_related_draw"
-                    ]] if not crit.empty else pd.DataFrame()
-                    st.dataframe(out, use_container_width=True, hide_index=True, height=280)
     
     # =========================================================
     # Horizon selector + roadmaps
@@ -2753,17 +3049,28 @@ def render_maintenance_tab(P):
             opts.append(label)
             idx_map[label] = i
         if opts:
+            jump_task_id = safe_str(st.session_state.get("maint_open_task_id", "")).strip()
+            if jump_task_id:
+                for label, row_idx in idx_map.items():
+                    rr0 = work.loc[row_idx]
+                    if safe_str(rr0.get("Task_ID", "")).strip() == jump_task_id:
+                        st.session_state["maint_exec_workspace_pick"] = label
+                        break
+                st.session_state["maint_open_task_id"] = ""
             pick = st.selectbox("Open task workspace", options=opts, key="maint_exec_workspace_pick")
             rr = work.loc[idx_map[pick]]
             cached = readiness_cache.get(int(idx_map[pick]), {})
             rd = cached.get("readiness", {})
             pkg_row_cached = cached.get("pkg_row", {})
             task_id = safe_str(rr.get("Task_ID", "")).strip()
-            req_parts_raw = safe_str(rr.get("Required_Parts", "")).strip()
+            req_parts_raw = ", ".join(_task_mandatory_parts(rr))
             req_parts = _parts_list(req_parts_raw)
+            cond_parts_raw = ", ".join(_task_conditional_parts(rr))
             req_tools_raw = safe_str(pkg_row_cached.get("Required_Tools", "")).strip()
             req_tools = _parts_list(req_tools_raw)
             st.markdown(f"**Required parts:** {req_parts_raw if req_parts_raw else '_none_'}")
+            if cond_parts_raw:
+                st.markdown(f"**Conditional parts:** {cond_parts_raw}")
             st.markdown(f"**Required tools:** {req_tools_raw if req_tools_raw else '_none_'}")
             st.caption(
                 f"Lifecycle: {safe_str(rr.get('Lifecycle_State',''))} | "
@@ -3352,6 +3659,14 @@ def render_maintenance_tab(P):
                 safe_str(row.get("Task", "")).strip().lower(),
             )
 
+        def _task_duration_minutes(row):
+            est = pd.to_numeric(row.get("Est_Duration_Min", np.nan), errors="coerce")
+            if pd.isna(est) or float(est) <= 0:
+                est = 60.0
+            slot = max(1, int(slot_min))
+            rounded = int(math.ceil(float(est) / float(slot)) * slot)
+            return max(slot, rounded)
+
         def _parse_parts(parts_raw: str):
             s = safe_str(parts_raw).strip()
             if not s:
@@ -3440,12 +3755,30 @@ def render_maintenance_tab(P):
             "Owner", "Source_File",
         ]
         cols_show = [c for c in cols_show if c in todo.columns]
+        st.markdown(
+            """
+            <div class="maint-lane-shell">
+              <div class="maint-lane-title">Task Queue</div>
+              <div class="maint-lane-sub">Choose the task that needs action now. This is the live operator queue, filtered by status, component, group, and search.</div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.dataframe(todo[cols_show], use_container_width=True, height=320)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Waiting-for-parts tracker (auto-ready when parts are received + intake synced).
+        st.markdown(
+            """
+            <div class="maint-lane-shell">
+              <div class="maint-lane-title">Blocked Tasks Tracker</div>
+              <div class="maint-lane-sub">Track tasks already on wait for part, see linked order progress, and resolve them when all requested parts are ready.</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("##### ⏳ Waiting Parts Tracker")
         wait_df = _read_csv_safe(MAINT_WAIT_PARTS_CSV, MAINT_WAIT_PARTS_COLS)
         if not wait_df.empty:
-            open_wait = wait_df[wait_df["resolved_ts"].astype(str).str.strip().eq("")].copy()
+            open_wait = wait_df[wait_df["resolved_ts"].fillna("").astype(str).str.strip().eq("")].copy()
             if not open_wait.empty:
                 if os.path.exists(P.parts_orders_csv):
                     try:
@@ -3461,25 +3794,63 @@ def render_maintenance_tab(P):
                 odf["_st"] = odf["Status"].astype(str).str.strip().str.lower()
                 odf["_inv"] = odf["Inventory Synced"].astype(str).str.strip().str.lower()
 
-                def _wait_ready(parts_csv: str) -> bool:
-                    req = _parse_parts(parts_csv)
-                    if not req:
+                def _wait_ready(wait_row) -> bool:
+                    req_plan = _load_wait_part_plan(wait_row)
+                    if not req_plan:
                         return False
-                    for p in req:
-                        m = odf[odf["_part"].eq(p.lower())]
-                        if m.empty:
-                            return False
-                        ok = ((m["_st"] == "received") & (m["_inv"] == "yes")).any()
-                        if not ok:
+                    wait_id_v = safe_str(wait_row.get("wait_id", "")).strip()
+                    task_id_v = safe_str(wait_row.get("maintenance_task_id", "")).strip()
+                    for p, req_qty in req_plan.items():
+                        ready_qty = _maintenance_linked_ready_count(
+                            odf,
+                            part_name=p,
+                            maintenance_task_id=task_id_v,
+                            wait_id=wait_id_v,
+                        )
+                        if int(ready_qty) < int(req_qty):
                             return False
                     return True
 
-                open_wait["ready_now"] = open_wait["requested_part_name"].apply(_wait_ready)
+                def _wait_progress_text(wait_row) -> str:
+                    req_plan = _load_wait_part_plan(wait_row)
+                    if not req_plan:
+                        return ""
+                    wait_id_v = safe_str(wait_row.get("wait_id", "")).strip()
+                    task_id_v = safe_str(wait_row.get("maintenance_task_id", "")).strip()
+                    parts_progress = []
+                    for p, req_qty in req_plan.items():
+                        ready_qty = _maintenance_linked_ready_count(
+                            odf,
+                            part_name=p,
+                            maintenance_task_id=task_id_v,
+                            wait_id=wait_id_v,
+                        )
+                        parts_progress.append(f"{p}: {int(ready_qty)}/{int(req_qty)}")
+                    return " | ".join(parts_progress)
+
+                open_wait["ready_now"] = open_wait.apply(_wait_ready, axis=1)
+                open_wait["linked_progress"] = open_wait.apply(_wait_progress_text, axis=1)
                 ready_n = int(open_wait["ready_now"].sum())
                 st.caption(f"Waiting parts tracker: {len(open_wait)} open wait item(s), ready now: {ready_n}.")
+                wait_show_cols = [
+                    c for c in [
+                        "wait_id",
+                        "maintenance_component",
+                        "maintenance_task",
+                        "requested_part_name",
+                        "linked_progress",
+                        "ready_now",
+                    ] if c in open_wait.columns
+                ]
+                st.dataframe(
+                    open_wait[wait_show_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(240, 80 + 34 * len(open_wait)),
+                )
                 if ready_n > 0:
                     ready_rows = open_wait[open_wait["ready_now"]].copy()
-                    show_cols = [c for c in ["wait_id", "maintenance_component", "maintenance_task", "requested_part_name"] if c in ready_rows.columns]
+                    show_cols = [c for c in ["wait_id", "maintenance_component", "maintenance_task", "requested_part_name", "linked_progress"] if c in ready_rows.columns]
                     st.dataframe(ready_rows[show_cols], use_container_width=True, height=120)
                     ready_opts = [str(x) for x in ready_rows["wait_id"].tolist()]
                     pick_ready = st.selectbox("Mark ready wait item as resolved", options=[""] + ready_opts, key="maint_wait_ready_pick")
@@ -3492,6 +3863,11 @@ def render_maintenance_tab(P):
                             wait_df2.to_csv(MAINT_WAIT_PARTS_CSV, index=False)
                             st.success("Wait item resolved.")
                             st.rerun()
+            else:
+                st.caption("No open wait-for-part items yet.")
+        else:
+            st.caption("No wait-for-part items created yet.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
         def _task_label(r):
             return (
@@ -3506,6 +3882,14 @@ def render_maintenance_tab(P):
         if sel_idx is None:
             return
         sel = todo.loc[sel_idx]
+        st.markdown(
+            """
+            <div class="maint-lane-shell">
+              <div class="maint-lane-title">Task Action + Execution Workspace</div>
+              <div class="maint-lane-sub">Choose the active task, decide whether to complete it or block it on parts, then work inside the execution package with safety, manuals, tests, and reservations.</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         if safe_str(sel.get("Required_Parts", "")).strip():
             st.caption(f"Required parts from dataset: {safe_str(sel.get('Required_Parts', '')).strip()}")
@@ -3567,35 +3951,39 @@ def render_maintenance_tab(P):
                 extra_parts = st.text_input(
                     "Add extra part(s) (comma separated)",
                     key="maint_wait_parts_extra",
-                    placeholder="bearing A, valve B",
+                    placeholder="bearing A x2, valve B",
                 )
                 req_project = st.text_input("Project (optional)", key="maint_wait_project")
             with c2:
                 req_company = st.text_input("Company (optional)", key="maint_wait_company")
                 wait_reason = st.text_area("Reason", key="maint_wait_reason", height=110)
 
+            part_qty_plan: dict[str, int] = {}
+            if selected_parts:
+                st.markdown("##### Requested quantities")
+                qty_cols = st.columns(3)
+                for idx_part, part_name in enumerate(selected_parts):
+                    with qty_cols[idx_part % 3]:
+                        qty_val = st.number_input(
+                            f"{part_name}",
+                            min_value=1,
+                            step=1,
+                            value=1,
+                            key=f"maint_wait_qty_{safe_str(sel.get('Task_ID',''))}_{idx_part}_{part_name}",
+                        )
+                        part_qty_plan[safe_str(part_name).strip()] = int(qty_val)
+
             if st.button("🧾 Mark Wait For Part + Create Parts Order", key="maint_wait_create_btn", type="primary", use_container_width=True):
-                parts_all = []
-                for p in selected_parts:
-                    pv = safe_str(p).strip()
-                    if pv:
-                        parts_all.append(pv)
-                parts_all.extend(_parse_parts(extra_parts))
-                if not parts_all:
+                extra_plan = _parse_part_qty_plan(extra_parts)
+                for p_name, p_qty in extra_plan.items():
+                    part_qty_plan[p_name] = int(part_qty_plan.get(p_name, 0)) + int(p_qty)
+                if not part_qty_plan:
                     comp_fallback = safe_str(sel.get("Component", "")).strip()
                     if comp_fallback:
-                        parts_all = [comp_fallback]
-                if not parts_all:
+                        part_qty_plan = {comp_fallback: 1}
+                if not part_qty_plan:
                     st.error("Required part(s) are mandatory.")
                     return
-                # unique keep order
-                uniq_parts = []
-                seen_parts = set()
-                for p in parts_all:
-                    lk = p.lower()
-                    if lk not in seen_parts:
-                        uniq_parts.append(p)
-                        seen_parts.add(lk)
                 details = (
                     f"Maintenance hold: {safe_str(sel.get('Component',''))} — {safe_str(sel.get('Task',''))} "
                     f"(Task ID: {safe_str(sel.get('Task_ID',''))}). "
@@ -3614,18 +4002,24 @@ def render_maintenance_tab(P):
                     )
                 except Exception:
                     pass
-                for req_part_name in uniq_parts:
-                    _append_parts_order_from_maintenance(
-                        part_name=req_part_name,
-                        details=details,
-                        actor=actor,
-                        project_name=req_project,
-                        company=req_company,
-                        maintenance_component=safe_str(sel.get("Component", "")),
-                        maintenance_task=safe_str(sel.get("Task", "")),
-                        maintenance_task_id=safe_str(sel.get("Task_ID", "")),
-                        wait_id=str(wait_id),
-                    )
+                pretty_parts = []
+                for req_part_name, req_qty in part_qty_plan.items():
+                    pretty_parts.append(f"{req_part_name} x{int(req_qty)}")
+                    for idx_qty in range(int(req_qty)):
+                        order_details = details
+                        if int(req_qty) > 1:
+                            order_details = f"{details} | Request {idx_qty + 1}/{int(req_qty)}"
+                        _append_parts_order_from_maintenance(
+                            part_name=req_part_name,
+                            details=order_details,
+                            actor=actor,
+                            project_name=req_project,
+                            company=req_company,
+                            maintenance_component=safe_str(sel.get("Component", "")),
+                            maintenance_task=safe_str(sel.get("Task", "")),
+                            maintenance_task_id=safe_str(sel.get("Task_ID", "")),
+                            wait_id=str(wait_id),
+                        )
                 wait_row = pd.DataFrame([{
                     "wait_id": wait_id,
                     "wait_ts": dt.datetime.now(),
@@ -3633,7 +4027,8 @@ def render_maintenance_tab(P):
                     "maintenance_task": safe_str(sel.get("Task", "")),
                     "maintenance_task_id": safe_str(sel.get("Task_ID", "")),
                     "maintenance_source_file": safe_str(sel.get("Source_File", "")),
-                    "requested_part_name": ", ".join(uniq_parts),
+                    "requested_part_name": ", ".join(pretty_parts),
+                    "requested_part_plan_json": json.dumps(part_qty_plan, ensure_ascii=True),
                     "requested_project_name": safe_str(req_project).strip(),
                     "requested_company": safe_str(req_company).strip(),
                     "wait_reason": safe_str(wait_reason).strip(),
@@ -3653,7 +4048,8 @@ def render_maintenance_tab(P):
                     )
                 except Exception:
                     pass
-                st.success(f"Task marked as WAIT FOR PART and {len(uniq_parts)} parts order(s) created.")
+                st.success(f"Task marked as WAIT FOR PART and {sum(int(v) for v in part_qty_plan.values())} parts order(s) created.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     def render_quick_reschedule_panel(
         *,
@@ -3788,8 +4184,7 @@ def render_maintenance_tab(P):
         uv1_hours,
         uv2_hours,
     ):
-        st.caption("Auto-plan maintenance into free schedule slots, using task groups and parts readiness.")
-        st.caption("Default workweek rule: prioritize Thursday. Skip Friday/Saturday.")
+        st.caption("Automatic flow: check the summary, fix real problems only if they exist, then review the next preparation batch.")
 
         def _parse_parts(parts_raw: str):
             s = safe_str(parts_raw).strip()
@@ -3816,37 +4211,17 @@ def render_maintenance_tab(P):
                 safe_str(row.get("Task", "")).strip().lower(),
             )
 
-        # ---- Planning controls
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-        with c1:
-            horizon_days = st.number_input("Plan horizon (days)", min_value=3, max_value=90, value=14, step=1, key="maint_sched_horizon_days")
-        with c2:
-            slot_min = st.selectbox("Slot length (min)", options=[30, 45, 60, 90, 120], index=2, key="maint_sched_slot_minutes")
-        with c3:
-            day_start_h = st.number_input("Day start (hour)", min_value=0, max_value=23, value=8, step=1, key="maint_sched_day_start")
-        with c4:
-            day_end_h = st.number_input("Day end (hour)", min_value=1, max_value=23, value=18, step=1, key="maint_sched_day_end")
+        if False:
+            with st.expander("Advanced automatic rules", expanded=False):
+                pass
 
-        q1, q2, q3 = st.columns([1.5, 1, 1])
-        with q1:
-            queue_mode = st.selectbox(
-                "Queue source",
-                [
-                    "Urgent only",
-                    "Weekly",
-                    "3-Month",
-                    "6-Month",
-                    "Weeks ahead",
-                    "Task group",
-                    "From existing schedule",
-                    "All pending",
-                ],
-                key="maint_sched_queue_mode",
-            )
-        with q2:
-            weeks_ahead = st.number_input("Weeks ahead", min_value=1, max_value=52, value=4, step=1, key="maint_sched_weeks_ahead")
-        with q3:
-            include_routine = st.checkbox("Include ROUTINE", value=False, key="maint_sched_include_routine")
+        horizon_days = int(st.session_state.get("maint_sched_horizon_days", 14))
+        slot_min = int(st.session_state.get("maint_sched_slot_minutes", 60))
+        day_start_h = int(st.session_state.get("maint_sched_day_start", 8))
+        day_end_h = int(st.session_state.get("maint_sched_day_end", 18))
+        queue_mode = st.session_state.get("maint_sched_queue_mode", "Urgent only")
+        weeks_ahead = int(st.session_state.get("maint_sched_weeks_ahead", 4))
+        include_routine = bool(st.session_state.get("maint_sched_include_routine", False))
 
         group_options_set = set()
         for _, rr in dfm.iterrows():
@@ -3857,32 +4232,10 @@ def render_maintenance_tab(P):
         if queue_mode == "Task group":
             selected_task_group = st.selectbox("Task group", options=group_options or [""], key="maint_sched_task_group")
 
-        weekday_options = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"]
         weekday_to_idx = {"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Sunday": 6}
-        preferred_days = st.multiselect(
-            "Preferred maintenance day(s)",
-            options=weekday_options,
-            default=["Thursday"],
-            key="maint_sched_preferred_days",
-            help="Planner prefers these days first, then other working days.",
-        )
-        cpc1, cpc2 = st.columns([1, 1])
-        with cpc1:
-            add_parts_check_event = st.checkbox(
-                "Auto add Parts Check events",
-                value=True,
-                key="maint_sched_add_parts_check",
-                help="Create a pre-maintenance event to verify required parts in inventory.",
-            )
-        with cpc2:
-            parts_check_days_before = st.number_input(
-                "Parts Check days before",
-                min_value=1,
-                max_value=30,
-                value=7,
-                step=1,
-                key="maint_sched_parts_check_days_before",
-            )
+        preferred_days = st.session_state.get("maint_sched_preferred_days", ["Thursday"])
+        add_parts_check_event = bool(st.session_state.get("maint_sched_add_parts_check", True))
+        parts_check_days_before = int(st.session_state.get("maint_sched_parts_check_days_before", 7))
         if not preferred_days:
             preferred_days = ["Thursday"]
         preferred_idx = [weekday_to_idx[d] for d in preferred_days if d in weekday_to_idx]
@@ -3957,6 +4310,198 @@ def render_maintenance_tab(P):
             st.info(f"No candidate tasks for queue: {queue_mode}.")
             return
 
+        watch_df = _build_maintenance_parts_watch_df(
+            dfm,
+            current_date=current_date,
+            current_draw_count=current_draw_count,
+        )
+        parts_risk_n = int(len(watch_df))
+        problem_now_n = int(watch_df["Problem Now"].astype(str).str.strip().str.lower().eq("yes").sum()) if not watch_df.empty and "Problem Now" in watch_df.columns else 0
+        need_order_n = int(watch_df["Needs Order"].astype(str).str.strip().ne("").sum()) if not watch_df.empty else 0
+        waiting_orders_n = int(watch_df["Has Active Orders"].astype(str).str.strip().str.lower().eq("yes").sum()) if not watch_df.empty else 0
+
+        if not watch_df.empty:
+            auto_watch_df = watch_df[watch_df["Auto Order"].astype(str).str.strip().str.lower().eq("yes")].copy()
+        else:
+            auto_watch_df = pd.DataFrame()
+        auto_order_df = auto_watch_df[auto_watch_df["Needs Order"].astype(str).str.strip().ne("")].copy() if not auto_watch_df.empty else pd.DataFrame()
+        if not auto_order_df.empty:
+            if os.path.exists(P.parts_orders_csv):
+                try:
+                    odf_live = _read_csv_keepna(P.parts_orders_csv)
+                except Exception:
+                    odf_live = pd.DataFrame()
+            else:
+                odf_live = pd.DataFrame()
+            created_auto = 0
+            for _, r in auto_order_df.iterrows():
+                task_name = safe_str(r.get("Task", ""))
+                task_id = safe_str(r.get("Task_ID", ""))
+                component = safe_str(r.get("Component", ""))
+                for part_name in _split_required_parts(r.get("Needs Order", "")):
+                    if _maintenance_active_order_mask(
+                        odf_live,
+                        part_name=part_name,
+                        maintenance_task_id=task_id,
+                        wait_id="",
+                    ).any():
+                        continue
+                    details = (
+                        f"Auto maintenance planning: {component} — {task_name} "
+                        f"(Task ID: {task_id}). Mandatory part missing inside the task parts-check window."
+                    )
+                    _append_parts_order_from_maintenance(
+                        part_name=part_name,
+                        details=details,
+                        actor=actor,
+                        project_name="Maintenance",
+                        company="",
+                        maintenance_component=component,
+                        maintenance_task=task_name,
+                        maintenance_task_id=task_id,
+                        wait_id="",
+                    )
+                    created_auto += 1
+            if created_auto > 0:
+                st.info(f"Automatic maintenance ordering opened {created_auto} linked order(s) for missing mandatory parts.")
+                st.rerun()
+
+        plan_view_df = cand.copy()
+        if "Required_Parts" not in plan_view_df.columns:
+            plan_view_df["Required_Parts"] = ""
+        plan_view_df["Required_Parts"] = plan_view_df.apply(lambda r: ", ".join(_task_mandatory_parts(r)), axis=1)
+        if "Conditional_Parts" not in plan_view_df.columns:
+            plan_view_df["Conditional_Parts"] = ""
+        plan_view_df["Conditional_Parts"] = plan_view_df.apply(lambda r: ", ".join(_task_conditional_parts(r)), axis=1)
+        inv_effective_qty_preview = _load_inventory_effective_qty_map()
+        def _pack_parts_state(req_raw):
+            req_parts = _split_required_parts(req_raw)
+            if not req_parts:
+                return "No parts"
+            missing = [p for p in req_parts if float(inv_effective_qty_preview.get(str(p).strip().lower(), 0.0)) <= 0]
+            if missing:
+                return "Missing: " + ", ".join(missing)
+            return "Ready"
+        plan_view_df["Pack Parts State"] = plan_view_df["Required_Parts"].apply(_pack_parts_state)
+        day_pack_ready_n = int(plan_view_df["Pack Parts State"].astype(str).eq("Ready").sum())
+        day_pack_missing_n = int(plan_view_df["Pack Parts State"].astype(str).str.startswith("Missing:").sum())
+        suggested_pack_date = current_date
+        due_dates_pack = pd.to_datetime(plan_view_df.get("Next_Due_Date"), errors="coerce")
+        future_due = due_dates_pack[due_dates_pack.notna()]
+        if not future_due.empty:
+            suggested_pack_date = future_due.min().date()
+
+        problems_n = int(problem_now_n)
+        st.markdown(
+            f"""
+            <div class="maint-prep-grid">
+              <div class="maint-prep-card k-blue">
+                <div class="maint-prep-k">Upcoming tasks</div>
+                <div class="maint-prep-v maint-v-blue">{int(len(plan_view_df))}</div>
+                <div class="maint-prep-note">Automatic planning queue</div>
+              </div>
+              <div class="maint-prep-card {'k-red' if problems_n else 'k-green'}">
+                <div class="maint-prep-k">Problems</div>
+                <div class="maint-prep-v {'maint-v-red' if problems_n else 'maint-v-green'}">{problems_n}</div>
+                <div class="maint-prep-note">Late mandatory orders or blocked follow-up</div>
+              </div>
+              <div class="maint-prep-card {'k-green' if day_pack_ready_n else 'k-blue'}">
+                <div class="maint-prep-k">Ready to prepare</div>
+                <div class="maint-prep-v {'maint-v-green' if day_pack_ready_n else 'maint-v-blue'}">{day_pack_ready_n}</div>
+                <div class="maint-prep-note">Tasks already clear for preparation</div>
+              </div>
+              <div class="maint-prep-card {'k-amber' if waiting_orders_n else 'k-blue'}">
+                <div class="maint-prep-k">Waiting on orders</div>
+                <div class="maint-prep-v {'maint-v-orange' if waiting_orders_n else 'maint-v-blue'}">{waiting_orders_n}</div>
+                <div class="maint-prep-note">Linked orders already opened</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.session_state["maint_day_todo_date_prefill"] = suggested_pack_date
+        problem_watch_df = (
+            watch_df[watch_df["Problem Now"].astype(str).str.strip().str.lower().eq("yes")].copy()
+            if not watch_df.empty and "Problem Now" in watch_df.columns
+            else pd.DataFrame()
+        )
+        waiting_watch_df = (
+            watch_df[
+                watch_df["Parts Risk"].astype(str).str.strip().eq("Mandatory part waiting on open order")
+            ].copy()
+            if not watch_df.empty and "Parts Risk" in watch_df.columns
+            else pd.DataFrame()
+        )
+
+        if parts_risk_n == 0 and day_pack_missing_n == 0 and need_order_n == 0:
+            st.success(
+                f"The automatic flow is clear. {len(plan_view_df)} upcoming task(s) are already under control."
+            )
+        else:
+            alert_bits = []
+            if problem_now_n:
+                alert_bits.append(f"{problem_now_n} task(s) have late mandatory-part ordering")
+            if waiting_orders_n:
+                alert_bits.append(f"{waiting_orders_n} task(s) are waiting on already-open mandatory orders")
+            if problem_now_n:
+                st.warning("Needs attention: " + " | ".join(alert_bits))
+            elif waiting_orders_n:
+                st.caption("Background follow-up: " + " | ".join(alert_bits))
+
+        if problem_now_n > 0:
+            with st.expander(f"Problems to solve ({problem_now_n})", expanded=True):
+                if not problem_watch_df.empty:
+                    show_watch_cols = [c for c in ["Status", "Component", "Task", "Task_ID", "Missing Parts", "Conditional Missing", "Needs Order", "Parts Risk"] if c in watch_df.columns]
+                    st.dataframe(
+                        problem_watch_df[show_watch_cols].sort_values(["Status", "Component", "Task"]),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(260, 80 + 34 * len(problem_watch_df)),
+                    )
+                order_now_df = problem_watch_df[problem_watch_df["Needs Order"].astype(str).str.strip().ne("")].copy() if not problem_watch_df.empty else pd.DataFrame()
+                if not order_now_df.empty and st.button("🧾 Open missing parts orders now", key="maint_parts_watch_create_orders", use_container_width=True):
+                    if os.path.exists(P.parts_orders_csv):
+                        try:
+                            odf_live = _read_csv_keepna(P.parts_orders_csv)
+                        except Exception:
+                            odf_live = pd.DataFrame()
+                    else:
+                        odf_live = pd.DataFrame()
+                    created = 0
+                    for _, r in order_now_df.iterrows():
+                        task_name = safe_str(r.get("Task", ""))
+                        task_id = safe_str(r.get("Task_ID", ""))
+                        component = safe_str(r.get("Component", ""))
+                        for part_name in _split_required_parts(r.get("Needs Order", "")):
+                            if _maintenance_active_order_mask(
+                                odf_live,
+                                part_name=part_name,
+                                maintenance_task_id=task_id,
+                                wait_id="",
+                            ).any():
+                                continue
+                            details = (
+                                f"Procurement watch: {component} — {task_name} "
+                                f"(Task ID: {task_id}). Missing ahead of planned maintenance."
+                            )
+                            _append_parts_order_from_maintenance(
+                                part_name=part_name,
+                                details=details,
+                                actor=actor,
+                                project_name="Maintenance",
+                                company="",
+                                maintenance_component=component,
+                                maintenance_task=task_name,
+                                maintenance_task_id=task_id,
+                                wait_id="",
+                            )
+                            created += 1
+                    if created > 0:
+                        st.success(f"Created {created} parts order(s) from the automatic watch list.")
+                        st.rerun()
+                    else:
+                        st.info("No new watch-list orders were needed.")
+
         # ---- Parts readiness check (tool-aware: tools can be mounted and stay non-consumable)
         inv_qty = {}
         inv_mounted_qty = {}
@@ -4008,56 +4553,6 @@ def render_maintenance_tab(P):
         cand["Parts Ready"] = [x[1] for x in parts_eval]
         cand["Missing Parts"] = [x[2] for x in parts_eval]
 
-        pc1, pc2, pc3 = st.columns([1, 1, 1])
-        pc1.metric("Tasks in queue", int(len(cand)))
-        pc2.metric("Parts-ready tasks", int(cand["Parts Ready"].sum()))
-        pc3.metric("Tasks missing parts", int((~cand["Parts Ready"]).sum()))
-
-        require_parts_ready = st.checkbox(
-            "Schedule only tasks with ready parts",
-            value=True,
-            key="maint_sched_require_parts_ready",
-            help="If enabled, tasks with missing parts are excluded from scheduling suggestions.",
-        )
-        if require_parts_ready:
-            cand = cand[cand["Parts Ready"] == True].copy()
-            if cand.empty:
-                st.warning("No tasks left after parts-ready filter.")
-                return
-
-        # Optionally create missing part orders from this queue.
-        missing_rows = dfm.iloc[0:0].copy()
-        if not require_parts_ready:
-            missing_rows = cand[cand["Parts Ready"] == False].copy()
-        if not missing_rows.empty and st.button("🧾 Create missing parts orders for queue", key="maint_sched_create_missing_parts", use_container_width=True):
-            created = 0
-            for _, r in missing_rows.iterrows():
-                missing_list = _parse_parts(r.get("Missing Parts", ""))
-                if not missing_list:
-                    continue
-                for part_name in missing_list:
-                    details = (
-                        f"Auto from scheduler queue '{queue_mode}': "
-                        f"{safe_str(r.get('Component',''))} — {safe_str(r.get('Task',''))} "
-                        f"(Task ID: {safe_str(r.get('Task_ID',''))}). Missing for planned maintenance."
-                    )
-                    _append_parts_order_from_maintenance(
-                        part_name=part_name,
-                        details=details,
-                        actor=actor,
-                        project_name="Maintenance",
-                        company="",
-                        maintenance_component=safe_str(r.get("Component", "")),
-                        maintenance_task=safe_str(r.get("Task", "")),
-                        maintenance_task_id=safe_str(r.get("Task_ID", "")),
-                        wait_id="",
-                    )
-                    created += 1
-            if created > 0:
-                st.success(f"Created {created} parts order(s) for missing items.")
-            else:
-                st.info("No missing part entries to create.")
-
         def _urgency_score(row):
             score = 0.0
             status = str(row.get("Status", "")).upper()
@@ -4095,7 +4590,7 @@ def render_maintenance_tab(P):
         cand["_urgency"] = cand.apply(_urgency_score, axis=1)
         cand = cand.sort_values(["_urgency", "Component", "Task"], ascending=[False, True, True]).reset_index(drop=True)
 
-        max_tasks = st.number_input("Max tasks to plan", min_value=1, max_value=100, value=min(12, len(cand)), step=1, key="maint_sched_max_tasks")
+        max_tasks = int(st.session_state.get("maint_sched_max_tasks", min(12, len(cand))))
         cand = cand.head(int(max_tasks)).copy()
 
         # ---- Read schedule and build busy intervals
@@ -4165,10 +4660,30 @@ def render_maintenance_tab(P):
 
         def _build_plan_df(slot_rows):
             plan_rows = []
-            for i, (_, task) in enumerate(cand.iterrows()):
-                if i >= len(slot_rows):
+            scheduled = []
+            for _, task in cand.iterrows():
+                est = pd.to_numeric(task.get("Est_Duration_Min", np.nan), errors="coerce")
+                if pd.isna(est) or float(est) <= 0:
+                    est = 60.0
+                slot = max(1, int(slot_min))
+                duration_min = max(slot, int(math.ceil(float(est) / float(slot)) * slot))
+                duration_td = pd.Timedelta(minutes=int(duration_min))
+                chosen = None
+                for pref_class, pref_rank, s, _ in slot_rows:
+                    e = s + duration_td
+                    day_end = s.normalize() + pd.Timedelta(hours=int(day_end_h))
+                    if e > day_end:
+                        continue
+                    if any(_overlaps(s, e, b0, b1) for b0, b1 in busy):
+                        continue
+                    if any(_overlaps(s, e, x0, x1) for x0, x1 in scheduled):
+                        continue
+                    chosen = (pref_class, pref_rank, s, e)
+                    scheduled.append((s, e))
                     break
-                pref_class, pref_rank, s, e = slot_rows[i]
+                if chosen is None:
+                    continue
+                pref_class, pref_rank, s, e = chosen
                 comp = safe_str(task.get("Component", "")).strip()
                 tname = safe_str(task.get("Task", "")).strip()
                 tid = safe_str(task.get("Task_ID", "")).strip()
@@ -4189,7 +4704,11 @@ def render_maintenance_tab(P):
                         "Status": status,
                         "Urgency": float(task.get("_urgency", 0.0)),
                         "Task_Group": safe_str(task.get("Task_Group", "")),
-                        "Required_Parts": safe_str(task.get("Required_Parts", "")),
+                        "Duration_Min": int(duration_min),
+                        "Required_Parts": ", ".join(_task_mandatory_parts(task)),
+                        "Conditional_Parts": ", ".join(_task_conditional_parts(task)),
+                        "Preparation_Lead_Days": _task_preparation_lead_days(task),
+                        "Parts_Check_Lead_Days": _task_parts_check_lead_days(task),
                         "Parts Status": safe_str(task.get("Parts Status", "")),
                         "Missing Parts": safe_str(task.get("Missing Parts", "")),
                         "_pref_class": int(pref_class),
@@ -4238,60 +4757,300 @@ def render_maintenance_tab(P):
             st.warning("Could not build schedule options for this queue.")
             return
 
-        st.markdown("**Suggested maintenance schedule options (ranked)**")
-        opt_labels = [
-            f"{p['name']} • score {p['score']:.1f} • tasks {len(p['plan_df'])}"
-            for p in ranked
-        ]
-        pick_idx = st.selectbox("Select option", options=list(range(len(opt_labels))), format_func=lambda i: opt_labels[int(i)], key="maint_sched_option_pick")
-        plan_df = ranked[int(pick_idx)]["plan_df"].copy()
-        st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
-        try:
-            p_ts = pd.to_datetime(plan_df["Start DateTime"], errors="coerce")
-            valid_ts = p_ts.dropna()
-            days_used = int(valid_ts.dt.date.nunique()) if not valid_ts.empty else 0
-            earliest = valid_ts.min().strftime("%Y-%m-%d %H:%M") if not valid_ts.empty else "-"
-            latest = valid_ts.max().strftime("%Y-%m-%d %H:%M") if not valid_ts.empty else "-"
-        except Exception:
-            days_used, earliest, latest = 0, "-", "-"
-        om1, om2, om3, om4 = st.columns(4)
-        om1.metric("Option Score", f"{ranked[int(pick_idx)]['score']:.1f}")
-        om2.metric("Tasks Planned", int(len(plan_df)))
-        om3.metric("Days Used", days_used)
-        om4.metric("Window", f"{earliest} → {latest}")
-        st.dataframe(plan_df.drop(columns=[c for c in ["_pref_class", "_pref_rank"] if c in plan_df.columns]), use_container_width=True, hide_index=True, height=280)
-        st.caption(f"Preferred day order: {', '.join(preferred_days)}")
+        plan_df = ranked[0]["plan_df"].copy()
 
-        # Visual schedule plot for suggestions.
-        if not plan_df.empty:
+        planning_details_label = "Schedule now"
+        planning_details_help = f"Rules first: the planner uses the current task state and preferred workday order: {', '.join(preferred_days)}."
+        with st.expander(planning_details_label, expanded=False):
+            st.caption(planning_details_help)
+            st.markdown("**What is next now**")
+            st.caption("This is the current maintenance queue before you change any scheduling rules.")
+            coming_df = cand.copy()
+            if "Tracking_Mode_norm" not in coming_df.columns:
+                coming_df["Tracking_Mode_norm"] = coming_df.get("Tracking_Mode", "")
+            coming_df["Next by date"] = pd.to_datetime(coming_df.get("Next_Due_Date"), errors="coerce").dt.strftime("%Y-%m-%d")
+            coming_df["Next by date"] = coming_df["Next by date"].fillna("")
+            coming_df["Next by hours"] = pd.to_numeric(coming_df.get("Next_Due_Hours"), errors="coerce").round(1)
+            coming_df["Next by draws"] = pd.to_numeric(coming_df.get("Next_Due_Draw"), errors="coerce").round(1)
+            coming_view_cols = [c for c in ["Status", "Component", "Task", "Tracking_Mode_norm", "Next by date", "Next by hours", "Next by draws"] if c in coming_df.columns]
+            st.dataframe(
+                coming_df[coming_view_cols].head(12),
+                use_container_width=True,
+                hide_index=True,
+                height=260,
+            )
             try:
-                import plotly.express as px
+                import plotly.graph_objects as go
 
-                vis = plan_df.copy()
-                vis["start_ts"] = pd.to_datetime(vis["Start DateTime"], errors="coerce")
-                vis["end_ts"] = pd.to_datetime(vis["End DateTime"], errors="coerce")
-                vis["Task Label"] = vis["Component"].astype(str) + " - " + vis["Task"].astype(str)
-                vis = vis.dropna(subset=["start_ts", "end_ts"]).copy()
+                coming_plot_df = coming_df.copy()
+                coming_plot_df["Task Label"] = (
+                    coming_plot_df["Component"].astype(str).str.strip()
+                    + " - "
+                    + coming_plot_df["Task"].astype(str).str.strip()
+                )
 
-                if not vis.empty:
-                    fig = px.timeline(
-                        vis,
-                        x_start="start_ts",
-                        x_end="end_ts",
-                        y="Task Label",
-                        color="Status",
-                        hover_data=["Task_ID", "Urgency", "Start DateTime", "End DateTime"],
-                        title="Suggested Maintenance Timeline (Thu prioritized, Fri/Sat excluded)",
+                def _norm_hours_group(v: str) -> str:
+                    s = safe_str(v).strip().upper()
+                    if s in {"UV1", "UV 1", "SYSTEM1"}:
+                        return "UV1"
+                    if s in {"UV2", "UV 2", "SYSTEM2"}:
+                        return "UV2"
+                    return "FURNACE"
+
+                def _status_color(s):
+                    s = safe_str(s).strip().upper()
+                    if s == "OVERDUE":
+                        return "#ff5a5f"
+                    if s == "DUE SOON":
+                        return "#ffb347"
+                    return "#69d2e7"
+
+                def _roadmap(x0, x1, title, xlabel, df_plot, xcol, hover_col):
+                    fig = go.Figure()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[x0, x1],
+                            y=[0, 0],
+                            mode="lines",
+                            line=dict(width=8, color="rgba(120,170,220,0.18)"),
+                            hoverinfo="skip",
+                            showlegend=False,
+                        )
                     )
-                    fig.update_yaxes(autorange="reversed")
-                    fig.update_layout(height=360, margin=dict(l=8, r=8, t=42, b=8))
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig.add_vline(x=x0, line_dash="dash", line_color="rgba(255,255,255,0.35)")
+                    if df_plot is not None and not df_plot.empty:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=df_plot[xcol],
+                                y=[0] * len(df_plot),
+                                mode="markers",
+                                marker=dict(
+                                    size=14,
+                                    color=[_status_color(v) for v in df_plot["Status"]],
+                                    line=dict(width=1, color="rgba(255,255,255,0.65)"),
+                                ),
+                                text=df_plot[hover_col],
+                                hovertemplate="%{text}<extra></extra>",
+                                showlegend=False,
+                            )
+                        )
+                    else:
+                        mid = x0 + (x1 - x0) / 2
+                        fig.add_annotation(x=mid, y=0, text="No tasks in view", showarrow=False)
+                    fig.update_layout(
+                        title=title,
+                        height=210,
+                        yaxis=dict(visible=False),
+                        xaxis=dict(title=xlabel),
+                        margin=dict(l=8, r=8, t=36, b=8),
+                    )
+                    return fig
+
+                coming_plot_df["Hours Group"] = coming_plot_df.get("Hours_Source", "").apply(_norm_hours_group)
+                coming_plot_df["Next Date TS"] = pd.to_datetime(coming_plot_df.get("Next_Due_Date"), errors="coerce")
+                coming_plot_df["Next Hours"] = pd.to_numeric(coming_plot_df.get("Next_Due_Hours"), errors="coerce")
+                coming_plot_df["Next Draws"] = pd.to_numeric(coming_plot_df.get("Next_Due_Draw"), errors="coerce")
+                coming_plot_df["Hover"] = (
+                    coming_plot_df["Task Label"].astype(str)
+                    + "<br>Status: "
+                    + coming_plot_df["Status"].astype(str)
+                )
+
+                st.markdown("**Visual timeline**")
+
+                date_df = coming_plot_df[coming_plot_df["Next Date TS"].notna()].copy()
+                d0 = pd.Timestamp(current_date)
+                if not date_df.empty:
+                    d1 = max(d0 + pd.Timedelta(days=14), date_df["Next Date TS"].max())
+                else:
+                    d1 = d0 + pd.Timedelta(days=14)
+
+                dc1, dc2 = st.columns([1.2, 1.8])
+                with dc1:
+                    st.markdown(
+                        f"""
+                        <div class="maint-board-shell" style="padding:12px 14px; min-height: 120px;">
+                          <div class="maint-board-title">Calendar tasks</div>
+                          <div class="maint-prep-v maint-v-blue" style="font-size: 28px; margin-bottom: 6px;">{int(date_df.shape[0])}</div>
+                          <div class="maint-prep-note">Tasks with due dates on the calendar timeline</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with dc2:
+                    st.plotly_chart(
+                        _roadmap(d0, d1, "Next by date", "Date", date_df, "Next Date TS", "Hover"),
+                        use_container_width=True,
+                    )
+
+                hours_df = coming_plot_df[coming_plot_df["Next Hours"].notna()].copy()
+                hc1, hc2, hc3 = st.columns(3)
+                hour_groups = [
+                    ("FURNACE", furnace_hours, hc1),
+                    ("UV1", uv1_hours, hc2),
+                    ("UV2", uv2_hours, hc3),
+                ]
+                for group_name, current_h, col in hour_groups:
+                    group_df = hours_df[hours_df["Hours Group"].eq(group_name)].copy()
+                    x0 = float(current_h)
+                    x1 = max(x0 + 100.0, float(group_df["Next Hours"].max())) if not group_df.empty else x0 + 100.0
+                    with col:
+                        st.markdown(
+                            f"""
+                            <div class="maint-board-shell" style="padding:10px 12px; min-height: 100px; margin-bottom: 8px;">
+                              <div class="maint-board-title">{group_name}</div>
+                              <div class="maint-prep-v maint-v-blue" style="font-size: 24px; margin-bottom: 4px;">{int(group_df.shape[0])}</div>
+                              <div class="maint-prep-note">Upcoming hours-based tasks in this source</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.plotly_chart(
+                            _roadmap(x0, x1, group_name, "Hours", group_df, "Next Hours", "Hover"),
+                            use_container_width=True,
+                        )
+
+                draws_df = coming_plot_df[coming_plot_df["Next Draws"].notna()].copy()
+                x0_draw = float(current_draw_count)
+                x1_draw = max(x0_draw + 20.0, float(draws_df["Next Draws"].max())) if not draws_df.empty else x0_draw + 20.0
+                st.markdown(
+                    f"""
+                    <div class="maint-board-shell" style="padding:10px 12px; min-height: 100px; margin-bottom: 8px;">
+                      <div class="maint-board-title">Draw tasks</div>
+                      <div class="maint-prep-v maint-v-blue" style="font-size: 24px; margin-bottom: 4px;">{int(draws_df.shape[0])}</div>
+                      <div class="maint-prep-note">Upcoming draw-based tasks on the timeline</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.plotly_chart(
+                    _roadmap(x0_draw, x1_draw, "Next by draws", "Draw count", draws_df, "Next Draws", "Hover"),
+                    use_container_width=True,
+                )
             except Exception:
                 pass
 
-        st.caption(f"Current state used: draw_count={current_draw_count}, furnace={furnace_hours:.1f}, uv1={uv1_hours:.1f}, uv2={uv2_hours:.1f}")
+            st.markdown("**Schedule rules**")
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+            with c1:
+                st.number_input("Plan horizon (days)", min_value=3, max_value=90, value=int(st.session_state.get("maint_sched_horizon_days", 14)), step=1, key="maint_sched_horizon_days")
+            with c2:
+                slot_options = [30, 45, 60, 90, 120]
+                slot_value = int(st.session_state.get("maint_sched_slot_minutes", 60))
+                slot_index = slot_options.index(slot_value) if slot_value in slot_options else 2
+                st.selectbox("Slot length (min)", options=slot_options, index=slot_index, key="maint_sched_slot_minutes")
+            with c3:
+                st.number_input("Day start (hour)", min_value=0, max_value=23, value=int(st.session_state.get("maint_sched_day_start", 8)), step=1, key="maint_sched_day_start")
+            with c4:
+                st.number_input("Day end (hour)", min_value=1, max_value=23, value=int(st.session_state.get("maint_sched_day_end", 18)), step=1, key="maint_sched_day_end")
 
-        if st.button("💾 Add Selected Schedule Option", key="maint_sched_apply_btn", type="primary", use_container_width=True):
+            q1, q2, q3 = st.columns([1.5, 1, 1])
+            queue_options = [
+                "Urgent only",
+                "Weekly",
+                "3-Month",
+                "6-Month",
+                "Weeks ahead",
+                "Task group",
+                "From existing schedule",
+                "All pending",
+            ]
+            queue_value = st.session_state.get("maint_sched_queue_mode", "Urgent only")
+            queue_index = queue_options.index(queue_value) if queue_value in queue_options else 0
+            with q1:
+                st.selectbox("Queue source", queue_options, index=queue_index, key="maint_sched_queue_mode")
+            with q2:
+                st.number_input("Weeks ahead", min_value=1, max_value=52, value=int(st.session_state.get("maint_sched_weeks_ahead", 4)), step=1, key="maint_sched_weeks_ahead")
+            with q3:
+                st.checkbox("Include ROUTINE", value=bool(st.session_state.get("maint_sched_include_routine", False)), key="maint_sched_include_routine")
+
+            weekday_options = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"]
+            preferred_default = st.session_state.get("maint_sched_preferred_days", ["Thursday"])
+            st.multiselect(
+                "Preferred maintenance day(s)",
+                options=weekday_options,
+                default=preferred_default,
+                key="maint_sched_preferred_days",
+                help="Planner prefers these days first, then other working days.",
+            )
+            cpc1, cpc2 = st.columns([1, 1])
+            with cpc1:
+                st.checkbox(
+                    "Auto add Parts Check events",
+                    value=bool(st.session_state.get("maint_sched_add_parts_check", True)),
+                    key="maint_sched_add_parts_check",
+                    help="Create a pre-maintenance event to verify required parts in inventory.",
+                )
+            with cpc2:
+                st.number_input(
+                    "Fallback parts-check days before",
+                    min_value=1,
+                    max_value=30,
+                    value=int(st.session_state.get("maint_sched_parts_check_days_before", 7)),
+                    step=1,
+                    key="maint_sched_parts_check_days_before",
+                )
+
+            st.markdown("**Automatic schedule result**")
+            opt_labels = [
+                f"{p['name']} • score {p['score']:.1f} • tasks {len(p['plan_df'])}"
+                for p in ranked
+            ]
+            pick_idx = st.selectbox("Select option", options=list(range(len(opt_labels))), format_func=lambda i: opt_labels[int(i)], key="maint_sched_option_pick")
+            plan_df = ranked[int(pick_idx)]["plan_df"].copy()
+            st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+            try:
+                p_ts = pd.to_datetime(plan_df["Start DateTime"], errors="coerce")
+                valid_ts = p_ts.dropna()
+                days_used = int(valid_ts.dt.date.nunique()) if not valid_ts.empty else 0
+                earliest = valid_ts.min().strftime("%Y-%m-%d %H:%M") if not valid_ts.empty else "-"
+                latest = valid_ts.max().strftime("%Y-%m-%d %H:%M") if not valid_ts.empty else "-"
+            except Exception:
+                days_used, earliest, latest = 0, "-", "-"
+            om1, om2, om3, om4 = st.columns(4)
+            om1.metric("Option Score", f"{ranked[int(pick_idx)]['score']:.1f}")
+            om2.metric("Tasks Planned", int(len(plan_df)))
+            om3.metric("Days Used", days_used)
+            om4.metric("Window", f"{earliest} → {latest}")
+
+            if not plan_df.empty:
+                try:
+                    import plotly.express as px
+
+                    vis = plan_df.copy()
+                    vis["start_ts"] = pd.to_datetime(vis["Start DateTime"], errors="coerce")
+                    vis["end_ts"] = pd.to_datetime(vis["End DateTime"], errors="coerce")
+                    vis["Task Label"] = vis["Component"].astype(str) + " - " + vis["Task"].astype(str)
+                    vis = vis.dropna(subset=["start_ts", "end_ts"]).copy()
+
+                    if not vis.empty:
+                        fig = px.timeline(
+                            vis,
+                            x_start="start_ts",
+                            x_end="end_ts",
+                            y="Task Label",
+                            color="Status",
+                            hover_data=["Task_ID", "Urgency", "Start DateTime", "End DateTime"],
+                            title="Suggested Maintenance Timeline",
+                        )
+                        fig.update_yaxes(autorange="reversed")
+                        fig.update_layout(height=360, margin=dict(l=8, r=8, t=42, b=8))
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    pass
+
+            st.dataframe(plan_df.drop(columns=[c for c in ["_pref_class", "_pref_rank"] if c in plan_df.columns]), use_container_width=True, hide_index=True, height=280)
+            st.caption(f"Current state used: draw_count={current_draw_count}, furnace={furnace_hours:.1f}, uv1={uv1_hours:.1f}, uv2={uv2_hours:.1f}")
+
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+            apply_schedule_inside = st.button(
+                "💾 Apply automatic schedule",
+                key="maint_sched_apply_btn",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if apply_schedule_inside:
             if plan_df.empty:
                 st.info("No suggestions to save.")
                 return
@@ -4300,23 +5059,41 @@ def render_maintenance_tab(P):
             if add_parts_check_event:
                 check_rows = []
                 for _, rr in plan_df.iterrows():
-                    req_parts = safe_str(rr.get("Required_Parts", "")).strip()
-                    if not req_parts:
-                        continue
                     st_ts = pd.to_datetime(rr.get("Start DateTime", ""), errors="coerce")
                     en_ts = pd.to_datetime(rr.get("End DateTime", ""), errors="coerce")
                     if pd.isna(st_ts) or pd.isna(en_ts):
                         continue
                     dur = en_ts - st_ts
-                    chk_start = st_ts - pd.Timedelta(days=int(parts_check_days_before))
-                    chk_end = chk_start + dur
+                    req_parts = safe_str(rr.get("Required_Parts", "")).strip()
+                    cond_parts = safe_str(rr.get("Conditional_Parts", "")).strip()
+                    if req_parts:
+                        row_parts_check_days = pd.to_numeric(rr.get("Parts_Check_Lead_Days", parts_check_days_before), errors="coerce")
+                        chk_days = int(row_parts_check_days) if pd.notna(row_parts_check_days) else int(parts_check_days_before)
+                        chk_start = st_ts - pd.Timedelta(days=max(0, chk_days))
+                        chk_end = chk_start + dur
+                        check_rows.append({
+                            "Event Type": "Maintenance Parts Check",
+                            "Start DateTime": chk_start.strftime("%Y-%m-%d %H:%M:%S"),
+                            "End DateTime": chk_end.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Description": (
+                                f"[AUTO-PARTS-CHECK] {safe_str(rr.get('Component',''))} - {safe_str(rr.get('Task',''))} "
+                                f"(ID:{safe_str(rr.get('Task_ID',''))}) | mandatory={req_parts}"
+                            ),
+                            "Recurrence": "",
+                        })
+                    row_prep_days = pd.to_numeric(rr.get("Preparation_Lead_Days", 7), errors="coerce")
+                    prep_days = int(row_prep_days) if pd.notna(row_prep_days) else 7
+                    prep_start = st_ts - pd.Timedelta(days=max(0, prep_days))
+                    prep_end = prep_start + dur
                     check_rows.append({
-                        "Event Type": "Maintenance Parts Check",
-                        "Start DateTime": chk_start.strftime("%Y-%m-%d %H:%M:%S"),
-                        "End DateTime": chk_end.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Event Type": "Maintenance Preparation",
+                        "Start DateTime": prep_start.strftime("%Y-%m-%d %H:%M:%S"),
+                        "End DateTime": prep_end.strftime("%Y-%m-%d %H:%M:%S"),
                         "Description": (
-                            f"[AUTO-PARTS-CHECK] {safe_str(rr.get('Component',''))} - {safe_str(rr.get('Task',''))} "
-                            f"(ID:{safe_str(rr.get('Task_ID',''))}) | parts={req_parts}"
+                            f"[AUTO-PREP] {safe_str(rr.get('Component',''))} - {safe_str(rr.get('Task',''))} "
+                            f"(ID:{safe_str(rr.get('Task_ID',''))})"
+                            + (f" | mandatory={req_parts}" if req_parts else "")
+                            + (f" | conditional={cond_parts}" if cond_parts else "")
                         ),
                         "Recurrence": "",
                     })
@@ -4353,6 +5130,7 @@ def render_maintenance_tab(P):
             out.to_csv(sched_path, index=False)
             st.success(f"Added {len(add_rows)} maintenance event(s) to schedule.")
             st.rerun()
+
 
     def render_maintenance_work_package_builder(tasks_df, actor, header_md="### 🧩 Maintenance Work Package"):
         st.markdown(header_md)
@@ -4496,12 +5274,98 @@ def render_maintenance_tab(P):
                     return False
                 if "Required_Parts" not in df_src.columns:
                     df_src["Required_Parts"] = ""
+                if "Mandatory_Parts" not in df_src.columns:
+                    df_src["Mandatory_Parts"] = ""
                 df_src.loc[mask, "Required_Parts"] = safe_str(new_required_parts).strip()
+                df_src.loc[mask, "Mandatory_Parts"] = safe_str(new_required_parts).strip()
                 out_src = templateize_df(df_src, list(raw_src.columns))
                 write_file(path, out_src)
                 return True
             except Exception as e:
                 st.error(f"Failed to update Required_Parts: {e}")
+                return False
+
+        def _save_automatic_flow_for_task(
+            mandatory_parts_txt: str,
+            conditional_parts_txt: str,
+            prep_lead_days: int,
+            parts_check_lead_days: int,
+            auto_order_enabled: bool,
+        ):
+            src = safe_str(rr.get("Source_File", "")).strip()
+            if not src:
+                st.error("Task has no Source_File, cannot update automatic flow.")
+                return False
+            path = os.path.join(MAINT_FOLDER, src)
+            if not os.path.exists(path):
+                st.error(f"Source file missing: {path}")
+                return False
+            try:
+                raw_src = read_file(path)
+                df_src = normalize_df(raw_src)
+                mask = pd.Series([False] * len(df_src), index=df_src.index)
+                if "Task_ID" in df_src.columns and task_id:
+                    mask = df_src["Task_ID"].astype(str).str.strip().eq(task_id)
+                if not mask.any():
+                    mask = (
+                        df_src["Component"].astype(str).str.strip().eq(task_component)
+                        & df_src["Task"].astype(str).str.strip().eq(task_name)
+                    )
+                if not mask.any():
+                    st.error("Task row was not found in source file.")
+                    return False
+                for c in [
+                    "Required_Parts",
+                    "Mandatory_Parts",
+                    "Conditional_Parts",
+                    "Preparation_Lead_Days",
+                    "Parts_Check_Lead_Days",
+                    "Auto_Order_Mandatory_Parts",
+                ]:
+                    if c not in df_src.columns:
+                        df_src[c] = ""
+                mand_txt = safe_str(mandatory_parts_txt).strip()
+                cond_txt = safe_str(conditional_parts_txt).strip()
+                df_src.loc[mask, "Required_Parts"] = mand_txt
+                df_src.loc[mask, "Mandatory_Parts"] = mand_txt
+                df_src.loc[mask, "Conditional_Parts"] = cond_txt
+                df_src.loc[mask, "Preparation_Lead_Days"] = int(max(0, int(prep_lead_days)))
+                df_src.loc[mask, "Parts_Check_Lead_Days"] = int(max(0, int(parts_check_lead_days)))
+                df_src.loc[mask, "Auto_Order_Mandatory_Parts"] = "Yes" if auto_order_enabled else "No"
+                out_src = templateize_df(df_src, list(raw_src.columns))
+                write_file(path, out_src)
+                return True
+            except Exception as e:
+                st.error(f"Failed to update automatic flow: {e}")
+                return False
+
+        def _save_est_duration_for_task(new_est_duration_min: float):
+            src = safe_str(rr.get("Source_File", "")).strip()
+            if not src:
+                return False
+            path = os.path.join(MAINT_FOLDER, src)
+            if not os.path.exists(path):
+                return False
+            try:
+                raw_src = read_file(path)
+                df_src = normalize_df(raw_src)
+                mask = pd.Series([False] * len(df_src), index=df_src.index)
+                if "Task_ID" in df_src.columns and task_id:
+                    mask = df_src["Task_ID"].astype(str).str.strip().eq(task_id)
+                if not mask.any():
+                    mask = (
+                        df_src["Component"].astype(str).str.strip().eq(task_component)
+                        & df_src["Task"].astype(str).str.strip().eq(task_name)
+                    )
+                if not mask.any():
+                    return False
+                if "Est_Duration_Min" not in df_src.columns:
+                    df_src["Est_Duration_Min"] = ""
+                df_src.loc[mask, "Est_Duration_Min"] = float(max(0.0, float(new_est_duration_min)))
+                out_src = templateize_df(df_src, list(raw_src.columns))
+                write_file(path, out_src)
+                return True
+            except Exception:
                 return False
 
         def _save_required_tools_for_task(new_required_tools: str):
@@ -4812,6 +5676,11 @@ def render_maintenance_tab(P):
         has_pkg = not pkg_match.empty
         pkg_row = pkg_match.iloc[0] if has_pkg else pd.Series(dtype=object)
         required_tools_txt = safe_str(pkg_row.get("Required_Tools", "")).strip() if "Required_Tools" in pkg_row.index else ""
+        mandatory_parts_txt = ", ".join(_task_mandatory_parts(rr))
+        conditional_parts_txt = ", ".join(_task_conditional_parts(rr))
+        prep_lead_default = _task_preparation_lead_days(rr)
+        parts_check_lead_default = _task_parts_check_lead_days(rr)
+        auto_order_default = _task_auto_order_mandatory(rr)
         existing_photo_rel = []
         if has_pkg:
             raw_photos = safe_str(pkg_row.get("Procedure_Photos", "")).strip()
@@ -5302,6 +6171,62 @@ def render_maintenance_tab(P):
                 )
                 if ok:
                     st.success("Timing updated. Triggers reset from current baseline.")
+                    st.rerun()
+
+        with st.expander("🤖 Automatic Parts + Preparation Flow", expanded=False):
+            st.caption("Define the automatic flow once. Mandatory parts drive automatic ordering. Conditional parts stay visible for inspection/execution, but do not auto-order.")
+            af1, af2 = st.columns(2)
+            with af1:
+                auto_mandatory = st.text_area(
+                    "Mandatory parts",
+                    value=mandatory_parts_txt,
+                    height=120,
+                    key="maint_pkg_auto_mandatory_parts",
+                    help="These parts are always required for the task and are used for automatic parts checks and ordering.",
+                )
+            with af2:
+                auto_conditional = st.text_area(
+                    "Conditional parts",
+                    value=conditional_parts_txt,
+                    height=120,
+                    key="maint_pkg_auto_conditional_parts",
+                    help="These parts may be needed after inspection or fault correlation. They stay visible, but do not auto-order.",
+                )
+            af3, af4, af5 = st.columns([1, 1, 1.1])
+            with af3:
+                prep_lead_days = st.number_input(
+                    "Preparation lead (days)",
+                    min_value=0,
+                    max_value=365,
+                    value=int(prep_lead_default),
+                    step=1,
+                    key="maint_pkg_auto_prep_lead_days",
+                )
+            with af4:
+                parts_check_lead_days = st.number_input(
+                    "Parts-check lead (days)",
+                    min_value=0,
+                    max_value=365,
+                    value=int(parts_check_lead_default),
+                    step=1,
+                    key="maint_pkg_auto_parts_check_lead_days",
+                )
+            with af5:
+                auto_order_enabled = st.checkbox(
+                    "Auto-order mandatory parts",
+                    value=bool(auto_order_default),
+                    key="maint_pkg_auto_order_enabled",
+                    help="If mandatory parts are missing inside the parts-check window, open linked orders automatically.",
+                )
+            if st.button("💾 Save Automatic Flow", key="maint_pkg_auto_flow_save_btn", use_container_width=True, type="primary"):
+                if _save_automatic_flow_for_task(
+                    mandatory_parts_txt=auto_mandatory,
+                    conditional_parts_txt=auto_conditional,
+                    prep_lead_days=int(prep_lead_days),
+                    parts_check_lead_days=int(parts_check_lead_days),
+                    auto_order_enabled=bool(auto_order_enabled),
+                ):
+                    st.success("Automatic task flow saved.")
                     st.rerun()
 
         with st.expander("🧪 Test + Condition Capture", expanded=False):
@@ -5818,77 +6743,75 @@ def render_maintenance_tab(P):
                         else:
                             pkg_df = pd.concat([pkg_df, pd.DataFrame([new_row])], ignore_index=True)
                         pkg_df.to_csv(pkg_file, index=False)
+                        _save_est_duration_for_task(float(est_stop_min))
                         st.success("Work package saved.")
                         st.rerun()
         
     def render_maintenance_day_todo_pack(dfm, current_date, actor):
-        st.markdown("**🗓️ Maintenance Day TODO Pack**")
-        c0, c1, c2 = st.columns([1.2, 1, 1])
-        with c0:
-            prep_scope = st.radio(
-                "Prepare scope",
-                ["Due by date", "Group package"],
-                horizontal=True,
-                key="maint_day_prepare_scope",
-            )
-        with c1:
-            todo_day = st.date_input("TODO date", value=current_date, key="maint_day_todo_date")
-        with c2:
-            include_routine_day = st.checkbox("Include ROUTINE", value=False, key="maint_day_include_routine")
+        st.markdown("**🗓️ Next Preparation Batch**")
+        st.caption("This shows the next scheduled maintenance tasks the shift should prepare for automatically.")
+        base_day = pd.Timestamp(current_date).normalize()
 
-        d0 = pd.Timestamp(todo_day)
-        statuses = ["OVERDUE", "DUE SOON"] + (["ROUTINE"] if include_routine_day else [])
-        day_df = dfm[dfm["Status"].isin(statuses)].copy()
-        next_due = pd.to_datetime(day_df.get("Next_Due_Date"), errors="coerce")
-
-        package_context_label = f"Day TODO {d0.strftime('%Y-%m-%d')}"
-        if prep_scope == "Due by date":
-            day_df = day_df[(day_df["Status"] == "OVERDUE") | (next_due.notna() & (next_due <= d0))].copy()
+        sched_path = P.schedule_csv
+        if os.path.exists(sched_path):
+            try:
+                sched_df = _read_csv_keepna(sched_path)
+            except Exception:
+                sched_df = pd.DataFrame()
         else:
-            all_groups_set = set()
-            for _, rr in day_df.iterrows():
-                for g in row_task_groups(rr):
-                    all_groups_set.add(g)
-            all_groups = sorted(all_groups_set)
-            g1, g2, g3 = st.columns([1.8, 1.0, 1.0])
-            with g1:
-                package_groups = st.multiselect(
-                    "Package group(s)",
-                    options=all_groups,
-                    default=[g for g in ["3-Month"] if g in all_groups],
-                    key="maint_day_package_groups",
-                )
-            with g2:
-                package_window_days = st.number_input(
-                    "Window (days ahead)",
-                    min_value=1,
-                    max_value=365,
-                    value=30,
-                    step=1,
-                    key="maint_day_package_window_days",
-                )
-            with g3:
-                include_undated = st.checkbox(
-                    "Include tasks without due date",
-                    value=True,
-                    key="maint_day_package_include_undated",
-                )
+            sched_df = pd.DataFrame()
+        for col in ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]:
+            if col not in sched_df.columns:
+                sched_df[col] = ""
+        sched_df["_start"] = pd.to_datetime(sched_df["Start DateTime"], errors="coerce")
+        prep_events = sched_df[
+            sched_df["Event Type"].astype(str).str.strip().eq("Maintenance Preparation")
+            & sched_df["_start"].notna()
+            & (sched_df["_start"].dt.normalize() >= base_day)
+        ].copy()
 
-            if package_groups:
-                day_df = filter_df_by_groups(day_df, package_groups)
-            horizon = d0 + pd.Timedelta(days=int(package_window_days))
-            mask_due = (day_df["Status"] == "OVERDUE") | (next_due.notna() & (next_due <= horizon))
-            if include_undated:
-                mask_due = mask_due | next_due.isna()
-            day_df = day_df[mask_due].copy()
-            package_context_label = (
-                f"Group package ({', '.join(package_groups) if package_groups else 'all groups'}) "
-                f"until {horizon.strftime('%Y-%m-%d')}"
-            )
-            st.caption(f"Preparing package: {package_context_label}")
+        if prep_events.empty:
+            st.info("No automatic preparation events are scheduled yet. Apply the automatic plan first, then return here.")
+            return
 
+        next_prep_day = prep_events["_start"].dt.normalize().min()
+        prep_events = prep_events[prep_events["_start"].dt.normalize().eq(next_prep_day)].copy()
+        st.caption(f"Next preparation batch date: {pd.Timestamp(next_prep_day).date()}")
+
+        def _parse_sched_task(desc: str):
+            body = safe_str(desc).strip()
+            if "] " in body:
+                body = body.split("] ", 1)[1]
+            left = body.split(" | ", 1)[0].strip()
+            comp = ""
+            task = ""
+            task_id_local = ""
+            if " - " in left:
+                comp, task = left.split(" - ", 1)
+            if "(ID:" in body:
+                task_id_local = body.split("(ID:", 1)[1].split(")", 1)[0].strip()
+            return comp.strip(), task.strip(), task_id_local.strip()
+
+        selected_rows = []
+        if not prep_events.empty:
+            for _, er in prep_events.sort_values("_start").iterrows():
+                comp, task, task_id_local = _parse_sched_task(er.get("Description", ""))
+                match = pd.DataFrame()
+                if task_id_local and "Task_ID" in dfm.columns:
+                    match = dfm[dfm["Task_ID"].astype(str).str.strip().eq(task_id_local)].copy()
+                if match.empty:
+                    match = dfm[
+                        dfm["Component"].astype(str).str.strip().eq(comp)
+                        & dfm["Task"].astype(str).str.strip().eq(task)
+                    ].copy()
+                if match.empty:
+                    continue
+                row = match.iloc[0].copy()
+                row["Prep Event Start"] = safe_str(er.get("Start DateTime", "")).strip()
+                selected_rows.append(row)
+        day_df = pd.DataFrame(selected_rows)
         if day_df.empty:
-            st.info("No tasks for selected preparation scope.")
+            st.info("No maintenance tasks were matched for the next scheduled preparation batch.")
             return
 
         try:
@@ -5937,8 +6860,8 @@ def render_maintenance_tab(P):
                     seen.add(lk)
             return uniq
 
-        def _parts_ready(req):
-            parts = _parts_list(req)
+        def _parts_ready(row):
+            parts = _task_mandatory_parts(row)
             if not parts:
                 return "No parts"
             missing = []
@@ -5949,20 +6872,156 @@ def render_maintenance_tab(P):
                 return "Ready"
             return "Missing: " + ", ".join(missing)
 
-        day_df["Parts Readiness"] = day_df.get("Required_Parts", "").apply(_parts_ready)
-        out_cols = [
-            "Status", "Component", "Task", "Task_ID", "Task_Group", "Required_Parts", "Parts Readiness", "Source_File"
-        ]
+        if os.path.exists(P.parts_orders_csv):
+            try:
+                day_orders_df = _read_csv_keepna(P.parts_orders_csv)
+            except Exception:
+                day_orders_df = pd.DataFrame()
+        else:
+            day_orders_df = pd.DataFrame()
+        for col in ["Part Name", "Status", "Maintenance Task ID", "Wait ID", "Inventory Synced", "Received State"]:
+            if col not in day_orders_df.columns:
+                day_orders_df[col] = ""
+
+        def _task_parts_flow_state(row) -> str:
+            req_parts = _task_mandatory_parts(row)
+            cond_parts = _task_conditional_parts(row)
+            if not req_parts:
+                cond_missing = [
+                    p for p in cond_parts
+                    if float(inv_effective_qty.get(p.lower(), 0.0)) <= 0
+                ]
+                if cond_missing:
+                    return "Ready to run: conditional part is not in stock if inspection requires it"
+                return "Ready to run: no mandatory parts required"
+            task_id = safe_str(row.get("Task_ID", "")).strip()
+            linked_rows = day_orders_df[
+                day_orders_df["Maintenance Task ID"].astype(str).str.strip().eq(task_id)
+            ].copy() if task_id and not day_orders_df.empty else pd.DataFrame()
+            missing_parts = [
+                p for p in req_parts
+                if float(inv_effective_qty.get(p.lower(), 0.0)) <= 0
+            ]
+            if not missing_parts:
+                return "Ready to run: required parts are already available"
+            if linked_rows.empty:
+                return "Missing parts, no linked order yet"
+            linked_open = linked_rows[
+                linked_rows["Status"].astype(str).str.strip().isin(["Opened", "Wait for Approval", "Approved", "Ordered"])
+            ].copy()
+            linked_recv_pending = linked_rows[
+                linked_rows["Status"].astype(str).str.strip().eq("Received")
+                & linked_rows["Inventory Synced"].astype(str).str.strip().str.lower().ne("yes")
+            ].copy()
+            linked_ready = linked_rows[
+                linked_rows["Status"].astype(str).str.strip().eq("Received")
+                & linked_rows["Inventory Synced"].astype(str).str.strip().str.lower().eq("yes")
+            ].copy()
+            if not linked_recv_pending.empty:
+                return "Received, waiting inventory action"
+            if not linked_open.empty:
+                return "Missing parts, linked order already open"
+            if not linked_ready.empty:
+                return "Linked parts received and inventory-synced"
+            return "Missing parts, review linked orders"
+
+        day_df["Required_Parts"] = day_df.apply(lambda r: ", ".join(_task_mandatory_parts(r)), axis=1)
+        day_df["Conditional_Parts"] = day_df.apply(lambda r: ", ".join(_task_conditional_parts(r)), axis=1)
+        day_df["Parts Readiness"] = day_df.apply(_parts_ready, axis=1)
+        day_df["Task Flow State"] = day_df.apply(_task_parts_flow_state, axis=1)
+        def _parts_signal(pr: str) -> str:
+            s = str(pr).strip()
+            if s == "Ready":
+                return "🟢 Ready"
+            if s == "No parts":
+                return "🔵 No parts"
+            if s.startswith("Missing:"):
+                return "🟠 Missing"
+            return "⚪ Review"
+        def _flow_signal(flow: str) -> str:
+            s = str(flow).strip()
+            if "Ready to run" in s or "inventory-synced" in s:
+                return "🟢 Ready"
+            if "no linked order yet" in s:
+                return "🔴 Need order"
+            if "already open" in s:
+                return "🟠 Order open"
+            if "waiting inventory action" in s:
+                return "🟡 Pending inventory"
+            return "⚪ Review"
+        def _next_action(flow: str) -> str:
+            s = str(flow).strip()
+            if "no linked order yet" in s:
+                return "Open parts order"
+            if "already open" in s:
+                return "Wait for order"
+            if "waiting inventory action" in s:
+                return "Do inventory action"
+            if "conditional part is not in stock" in s:
+                return "Inspect first, then decide"
+            return "Prepare task"
+        day_df["Parts Signal"] = day_df["Parts Readiness"].apply(_parts_signal)
+        day_df["Flow Signal"] = day_df["Task Flow State"].apply(_flow_signal)
+        day_df["Next Action"] = day_df["Task Flow State"].apply(_next_action)
+        ready_n = int(day_df["Parts Readiness"].astype(str).eq("Ready").sum())
+        need_order_n = int(day_df["Task Flow State"].astype(str).eq("Missing parts, no linked order yet").sum())
+        pending_inventory_n = int(day_df["Task Flow State"].astype(str).eq("Received, waiting inventory action").sum())
+        problems_n = int(max(need_order_n, pending_inventory_n))
+        st.markdown(
+            f"""
+            <div class="maint-prep-grid">
+              <div class="maint-prep-card k-blue">
+                <div class="maint-prep-k">Tasks to prepare</div>
+                <div class="maint-prep-v maint-v-blue">{int(len(day_df))}</div>
+                <div class="maint-prep-note">Maintenance tasks coming in the next prep batch</div>
+              </div>
+              <div class="maint-prep-card {'k-green' if ready_n else 'k-blue'}">
+                <div class="maint-prep-k">Ready</div>
+                <div class="maint-prep-v {'maint-v-green' if ready_n else 'maint-v-blue'}">{ready_n}</div>
+                <div class="maint-prep-note">Can be prepared without waiting</div>
+              </div>
+              <div class="maint-prep-card {'k-red' if need_order_n else 'k-blue'}">
+                <div class="maint-prep-k">Need order</div>
+                <div class="maint-prep-v {'maint-v-red' if need_order_n else 'maint-v-blue'}">{need_order_n}</div>
+                <div class="maint-prep-note">Missing mandatory parts with no order yet</div>
+              </div>
+              <div class="maint-prep-card {'k-amber' if pending_inventory_n else 'k-blue'}">
+                <div class="maint-prep-k">Pending inventory</div>
+                <div class="maint-prep-v {'maint-v-orange' if pending_inventory_n else 'maint-v-blue'}">{pending_inventory_n}</div>
+                <div class="maint-prep-note">Received items still need inventory action</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        out_cols = ["Prep Event Start", "Task", "Parts Signal", "Flow Signal", "Next Action"]
         out_cols = [c for c in out_cols if c in day_df.columns]
+        sort_cols = [c for c in ["Prep Event Start", "Component", "Task"] if c in day_df.columns]
+        day_view = day_df[out_cols].sort_values(sort_cols).copy()
         st.dataframe(
-            day_df[out_cols].sort_values(["Status", "Component", "Task"]),
+            day_view,
             use_container_width=True,
             height=240,
         )
+        if problems_n == 0:
+            st.success("Preparation is clear for this day. The shift can prepare and move on.")
+        else:
+            st.warning("Some preparation items still need action before the shift is fully ready.")
+        dp_act1, dp_act2, dp_act3 = st.columns(3)
+        with dp_act1:
+            if st.button("🛠️ Open Tower Parts", key="maint_day_open_tower_parts", use_container_width=True):
+                st.session_state["selected_tab"] = "🛠️ Tower Parts"
+                st.rerun()
+        with dp_act2:
+            if st.button("📦 Open Planning Lane", key="maint_day_open_planning_lane", use_container_width=True):
+                st.session_state["maint_flow_step"] = "1) Plan + Prepare"
+                st.rerun()
+        with dp_act3:
+            if st.button("🧰 Open Execution Lane", key="maint_day_open_exec_lane", use_container_width=True):
+                st.session_state["maint_flow_step"] = "2) Execute + Resolve Blocks"
+                st.rerun()
 
-        st.caption("Work Package section moved to Builder lane: `0) Builder (Tasks + BOM)`.")
-
-        # Quick missing-parts order creation from selected TODO day.
+        # Quick missing-parts order creation from scheduled preparation day.
         missing_df = day_df[day_df["Parts Readiness"].astype(str).str.startswith("Missing:")].copy()
         if not missing_df.empty:
             st.caption(f"Missing parts tasks on selected day: {len(missing_df)}")
@@ -5993,7 +7052,6 @@ def render_maintenance_tab(P):
                 return odf_local
 
             def _build_orders_preview(rows_df: pd.DataFrame, odf_local: pd.DataFrame) -> pd.DataFrame:
-                active_status = {"opened", "approved", "ordered", "shipped"}
                 out_rows = []
                 for _, rr in rows_df.iterrows():
                     req_parts = _parts_list(rr.get("Required_Parts", ""))
@@ -6001,10 +7059,11 @@ def render_maintenance_tab(P):
                     task_id = safe_str(rr.get("Task_ID", ""))
                     component = safe_str(rr.get("Component", ""))
                     for part_name in req_parts:
-                        p_l = part_name.strip().lower()
-                        exists_active = (
-                            odf_local["Part Name"].astype(str).str.strip().str.lower().eq(p_l)
-                            & odf_local["Status"].astype(str).str.strip().str.lower().isin(active_status)
+                        exists_active = _maintenance_active_order_mask(
+                            odf_local,
+                            part_name=part_name,
+                            maintenance_task_id=task_id,
+                            wait_id="",
                         ).any()
                         out_rows.append(
                             {
@@ -6065,14 +7124,14 @@ def render_maintenance_tab(P):
             def _create_orders_for_rows(rows_df):
                 created = 0
                 odf = _load_active_orders_df()
-                active_status = {"opened", "approved", "ordered", "shipped"}
                 for _, rr in rows_df.iterrows():
                     req_parts = _parts_list(rr.get("Required_Parts", ""))
                     for part_name in req_parts:
-                        p_l = part_name.strip().lower()
-                        exists_active = (
-                            odf["Part Name"].astype(str).str.strip().str.lower().eq(p_l)
-                            & odf["Status"].astype(str).str.strip().str.lower().isin(active_status)
+                        exists_active = _maintenance_active_order_mask(
+                            odf,
+                            part_name=part_name,
+                            maintenance_task_id=safe_str(rr.get("Task_ID", "")),
+                            wait_id="",
                         ).any()
                         if exists_active:
                             continue
@@ -6103,7 +7162,6 @@ def render_maintenance_tab(P):
                     return created
 
                 odf = _load_active_orders_df()
-                active_status = {"opened", "approved", "ordered", "shipped"}
                 picked = preview_rows_df[
                     preview_rows_df["_row_key"].astype(str).isin(selected_row_keys)
                     & preview_rows_df["Action"].astype(str).eq("Create order")
@@ -6112,10 +7170,11 @@ def render_maintenance_tab(P):
                     part_name = safe_str(rr.get("Part", "")).strip()
                     if not part_name:
                         continue
-                    p_l = part_name.lower()
-                    exists_active = (
-                        odf["Part Name"].astype(str).str.strip().str.lower().eq(p_l)
-                        & odf["Status"].astype(str).str.strip().str.lower().isin(active_status)
+                    exists_active = _maintenance_active_order_mask(
+                        odf,
+                        part_name=part_name,
+                        maintenance_task_id=safe_str(rr.get("Task_ID", "")),
+                        wait_id="",
                     ).any()
                     if exists_active:
                         continue
@@ -6185,8 +7244,11 @@ def render_maintenance_tab(P):
             "Status", "Part Name", "Serial Number",
             "Project Name", "Details",
             "Opened By",
+            "Approval Requested From",
             "Approved", "Approved By", "Approval Date",
+            "Received Date", "Received State",
             "Ordered By", "Date Ordered", "Company",
+            "Inventory Synced",
             "Maintenance Component", "Maintenance Task", "Maintenance Task ID", "Wait ID",
         ]
         os.makedirs(os.path.dirname(PARTS_ORDERS_CSV), exist_ok=True)
@@ -6209,12 +7271,16 @@ def render_maintenance_tab(P):
             "Project Name": safe_str(project_name).strip(),
             "Details": safe_str(details).strip(),
             "Opened By": safe_str(actor).strip(),
+            "Approval Requested From": "",
             "Approved": "No",
             "Approved By": "",
             "Approval Date": "",
+            "Received Date": "",
+            "Received State": "",
             "Ordered By": "",
             "Date Ordered": "",
             "Company": safe_str(company).strip(),
+            "Inventory Synced": "",
             "Maintenance Component": safe_str(maintenance_component).strip(),
             "Maintenance Task": safe_str(maintenance_task).strip(),
             "Maintenance Task ID": safe_str(maintenance_task_id).strip(),
@@ -7160,6 +8226,16 @@ def render_maintenance_tab(P):
                 base_for_editor = df[show_cols].copy()
                 if "Required_Parts" not in base_for_editor.columns:
                     base_for_editor["Required_Parts"] = ""
+                if "Mandatory_Parts" not in base_for_editor.columns:
+                    base_for_editor["Mandatory_Parts"] = base_for_editor["Required_Parts"]
+                if "Conditional_Parts" not in base_for_editor.columns:
+                    base_for_editor["Conditional_Parts"] = ""
+                if "Preparation_Lead_Days" not in base_for_editor.columns:
+                    base_for_editor["Preparation_Lead_Days"] = 7
+                if "Parts_Check_Lead_Days" not in base_for_editor.columns:
+                    base_for_editor["Parts_Check_Lead_Days"] = 21
+                if "Auto_Order_Mandatory_Parts" not in base_for_editor.columns:
+                    base_for_editor["Auto_Order_Mandatory_Parts"] = "Yes"
                 if "Task_Groups" not in base_for_editor.columns:
                     base_for_editor["Task_Groups"] = ""
 
@@ -7178,6 +8254,8 @@ def render_maintenance_tab(P):
                         continue
                     if row_idx in base_for_editor.index:
                         base_for_editor.at[row_idx, "Required_Parts"] = safe_str(v).strip()
+                        if "Mandatory_Parts" in base_for_editor.columns:
+                            base_for_editor.at[row_idx, "Mandatory_Parts"] = safe_str(v).strip()
                 for k, v in list(pending_groups_map.items()):
                     if not str(k).startswith(file_prefix):
                         continue
@@ -7199,8 +8277,8 @@ def render_maintenance_tab(P):
                     key="maint_tasks_editor_grid",
                 )
 
-                st.markdown("##### 📦 Add Required Parts From Inventory")
-                st.caption("Pick a task row, filter inventory, then append selected parts to `Required_Parts`.")
+                st.markdown("##### 📦 Add Mandatory Parts From Inventory")
+                st.caption("Pick a task row, filter inventory, then append selected parts to the task mandatory parts list.")
 
                 task_labels = []
                 task_idx_map = {}
@@ -7295,7 +8373,7 @@ def render_maintenance_tab(P):
                         )
 
                         if st.button(
-                            "➕ Append to task Required_Parts",
+                            "➕ Append to task mandatory parts",
                             key="maint_editor_parts_append_btn",
                             use_container_width=True,
                         ):
@@ -7306,7 +8384,8 @@ def render_maintenance_tab(P):
                                 if row_idx is None or row_idx not in edited.index:
                                     st.error("Selected task row not found.")
                                 else:
-                                    cur_txt = safe_str(edited.at[row_idx, "Required_Parts"]).strip()
+                                    base_col = "Mandatory_Parts" if "Mandatory_Parts" in edited.columns else "Required_Parts"
+                                    cur_txt = safe_str(edited.at[row_idx, base_col]).strip()
                                     merged_parts = []
                                     seen_merge = set()
                                     for token in (cur_txt.replace("\n", ",").replace(";", ",").replace("|", ",").split(",")):
@@ -7330,7 +8409,7 @@ def render_maintenance_tab(P):
 
                                     new_required = ", ".join(merged_parts)
                                     st.session_state["maint_editor_pending_required_parts"][f"{pick}::{row_idx}"] = new_required
-                                    st.success("Added to task. Save file to persist.")
+                                    st.success("Added to task mandatory parts. Save file to persist.")
                                     st.rerun()
 
                 st.caption("Task groups are managed in Work Package Builder to keep one unified flow.")
@@ -7584,51 +8663,11 @@ def render_maintenance_tab(P):
     # UI flow
     # =========================================================
     st.markdown('<div class="maint-section-title">📊 Dashboard</div>', unsafe_allow_html=True)
-    render_maintenance_dashboard_metrics(dfm)
-    render_maintenance_test_monitor()
+    render_maintenance_dashboard_metrics(dfm, current_date, current_draw_count)
+    show_test_monitor = st.toggle("Show Test Monitor", value=False, key="maint_show_test_monitor")
+    if show_test_monitor:
+        render_maintenance_test_monitor()
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-    st.markdown(
-        """
-        <style>
-          .maint-group-wrap{
-            display:grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap:10px;
-            margin: 4px 0 10px 0;
-          }
-          .maint-group-card{
-            border-radius:12px;
-            border:1px solid rgba(132,214,255,0.28);
-            background: linear-gradient(180deg, rgba(14,32,56,0.34), rgba(8,16,28,0.24));
-            padding:8px 10px;
-          }
-          .maint-group-title{
-            font-size:0.95rem;
-            font-weight:800;
-            color:rgba(230,246,255,0.98);
-          }
-          .maint-group-sub{
-            font-size:0.78rem;
-            color:rgba(188,224,248,0.88);
-            margin-top:3px;
-          }
-          @media (max-width: 1100px){
-            .maint-group-wrap{ grid-template-columns: 1fr; }
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div class="maint-group-wrap">
-          <div class="maint-group-card"><div class="maint-group-title">🧰 Maintenance</div><div class="maint-group-sub">Tasks, schedule, reschedule, planning, history, editors</div></div>
-          <div class="maint-group-card"><div class="maint-group-title">🚨 Faults</div><div class="maint-group-sub">Open incidents, close/reopen, notes, actions log</div></div>
-          <div class="maint-group-card"><div class="maint-group-title">📈 Correlation & Outliers</div><div class="maint-group-sub">Rolling correlation and outlier tracking from logs + maintenance events</div></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     st.session_state.setdefault("maint_main_group", "maintenance")
     if st.session_state.get("maint_main_group") == "gas":
@@ -7647,29 +8686,16 @@ def render_maintenance_tab(P):
     group = st.session_state.get("maint_main_group", "maintenance")
 
     if group == "maintenance":
-        st.caption("Maintenance flow: pick one step and work there.")
-        st.markdown(
-            """
-            <div class="maint-help-green">
-              <b>Quick guide</b><br/>
-              0) <b>Builder</b>: define maintenance tasks, Required_Parts (BOM), and source files.<br/>
-              1) <b>Prepare Day Pack</b>: check today tasks + parts readiness + work package (prep/safety/procedure).<br/>
-              2) <b>Schedule + Forecast</b>: build schedule and auto-add pre-check events for parts.<br/>
-              3) <b>Execute + Records</b>: run the task, capture measurements/tests, mark done, and keep history clean.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.caption("Flow: Builder -> Plan + Prepare -> Execute + Resolve Blocks")
         flow_options = [
             "0) Builder (Tasks + BOM)",
-            "1) Prepare Day Pack",
-            "2) Schedule + Forecast",
-            "3) Execute + Records",
+            "1) Plan + Prepare",
+            "2) Execute + Resolve Blocks",
         ]
         st.session_state.setdefault("maint_flow_step", flow_options[0])
         if st.session_state.get("maint_flow_step") not in flow_options:
             st.session_state["maint_flow_step"] = flow_options[0]
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2, f3 = st.columns(3)
         if f1.button(
             flow_options[0],
             key="maint_flow_btn_0",
@@ -7694,29 +8720,10 @@ def render_maintenance_tab(P):
         ):
             st.session_state["maint_flow_step"] = flow_options[2]
             st.rerun()
-        if f4.button(
-            flow_options[3],
-            key="maint_flow_btn_3",
-            use_container_width=True,
-            type="primary" if st.session_state["maint_flow_step"] == flow_options[3] else "secondary",
-        ):
-            st.session_state["maint_flow_step"] = flow_options[3]
-            st.rerun()
         flow_step = st.session_state.get("maint_flow_step", flow_options[0])
 
         if flow_step == "0) Builder (Tasks + BOM)":
-            st.markdown(
-                """
-                <div class="maint-help-green">
-                  <b>Builder lane</b><br/>
-                  Unified maintenance edit flow:<br/>
-                  1) Select task + update <b>groups</b> and <b>BOM</b><br/>
-                  2) Update work package (prep, safety, procedure, stop plan)<br/>
-                  3) Optional source/manual QA below
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.caption("Edit tasks, groups, BOM, and work package here.")
             st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
             st.markdown("#### 1) 🧩 Task + Group + BOM + Work Package")
             show_builder = st.toggle("Open Unified Builder", value=False, key="maint_open_unified_builder")
@@ -7741,45 +8748,20 @@ def render_maintenance_tab(P):
             else:
                 st.caption("Manuals browser folded.")
 
-        elif flow_step == "1) Prepare Day Pack":
-            st.markdown(
-                """
-                <div class="maint-help-green">
-                  <b>Step 1 tips</b><br/>
-                  Use this step at shift start: check parts readiness, create missing orders, then send intake to Tower Parts.<br/>
-                  If task is blocked, use <b>Wait for Part</b> from Step 3 execution flow and resolve after intake.
-                </div>
-                """,
-                unsafe_allow_html=True,
+        elif flow_step == "1) Plan + Prepare":
+            st.caption("Mostly automatic. Use this lane to monitor the plan, solve real problems, and review the automatic preparation list.")
+            render_maintenance_scheduler_bridge(
+                dfm=dfm,
+                current_date=current_date,
+                current_draw_count=current_draw_count,
+                furnace_hours=furnace_hours,
+                uv1_hours=uv1_hours,
+                uv2_hours=uv2_hours,
             )
+            st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
             render_maintenance_day_todo_pack(dfm, current_date, actor)
-
-        elif flow_step == "2) Schedule + Forecast":
-            st.markdown(
-                """
-                <div class="maint-help-green">
-                  <b>Step 2 tips</b><br/>
-                  Build schedule from urgency/groups, then save events. Keep <b>Parts Check</b> enabled to verify stock before maintenance day.<br/>
-                  Use preferred days to align with real tower operations.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            show_sched_bridge = st.toggle("Open Maintenance Scheduler Bridge", value=False, key="maint_open_sched_bridge")
-            if show_sched_bridge:
-                render_maintenance_scheduler_bridge(
-                    dfm=dfm,
-                    current_date=current_date,
-                    current_draw_count=current_draw_count,
-                    furnace_hours=furnace_hours,
-                    uv1_hours=uv1_hours,
-                    uv2_hours=uv2_hours,
-                )
-            else:
-                st.caption("Maintenance Scheduler Bridge folded.")
-            show_future_schedule = st.toggle("Open Future Schedule", value=False, key="maint_open_future_schedule")
-            if show_future_schedule:
-                st.caption("Choose type to show timeline.")
+            with st.expander("Long-range view", expanded=False):
+                st.caption("Optional future timeline view.")
                 horizon_hours, horizon_days, horizon_draws = render_maintenance_horizon_selector(current_draw_count)
                 focus = render_future_schedule_focus_selector()
                 render_maintenance_roadmaps(
@@ -7794,21 +8776,29 @@ def render_maintenance_tab(P):
                     horizon_draws,
                     focus=focus,
                 )
-            else:
-                st.caption("Future Schedule folded.")
 
         else:
-            st.markdown(
-                """
-                <div class="maint-help-green">
-                  <b>Step 3 tips</b><br/>
-                  Mark completed tasks here to update source files, logs, and inventory consumption automatically.<br/>
-                  If the task has measurement/test fields, capture them inside the execution workspace before you finish the task.<br/>
-                  Review history to confirm execution quality and traceability.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.caption("Choose the live task, act on it now, and keep waits, execution records, and history together.")
+            st.markdown('<div class="maint-lane-shell"><div class="maint-lane-title">Task Action Center</div><div class="maint-lane-sub">Pick the task that needs action now. This lane includes the live queue, blocked-task tracker, and execution workspace.</div>', unsafe_allow_html=True)
+            show_smart_todo = st.toggle("Open Task Action Center", value=False, key="maint_open_smart_todo")
+            if show_smart_todo:
+                render_smart_maintenance_todo(
+                    dfm=dfm,
+                    current_date=current_date,
+                    current_draw_count=current_draw_count,
+                    actor=actor,
+                    con=con,
+                    read_file=read_file,
+                    write_file=write_file,
+                    normalize_df=normalize_df,
+                    templateize_df=templateize_df,
+                    pick_current_hours=pick_current_hours,
+                    mode_norm=mode_norm,
+                )
+            else:
+                st.caption("Task Action Center folded.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown('<div class="maint-lane-shell"><div class="maint-lane-title">Batch Completion</div><div class="maint-lane-sub">Use this when several tasks were completed and you want to update source files, logs, and consumption in one batch.</div>', unsafe_allow_html=True)
             show_mark_done = st.toggle("Open Mark Tasks Done", value=False, key="maint_open_mark_done")
             if show_mark_done:
                 edited = render_maintenance_done_editor(
@@ -7837,12 +8827,14 @@ def render_maintenance_tab(P):
                 )
             else:
                 st.caption("Mark Tasks Done folded.")
-            # These renderers already contain their own expanders; avoid wrapping to prevent nested-expander errors.
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown('<div class="maint-lane-shell"><div class="maint-lane-title">Execution History</div><div class="maint-lane-sub">Use this lane to review what was done, check traceability, and verify the quality of recent execution records.</div>', unsafe_allow_html=True)
             show_exec_history = st.toggle("Open Execution History", value=False, key="maint_open_exec_history")
             if show_exec_history:
                 render_maintenance_history(con)
             else:
                 st.caption("Execution History folded.")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     elif group == "faults":
         show_faults = st.toggle("Open Faults workspace", value=False, key="maint_open_faults_workspace")

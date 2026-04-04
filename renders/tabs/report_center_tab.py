@@ -942,7 +942,7 @@ def _prepare_parts_orders(parts_orders_csv_path: str) -> tuple[pd.DataFrame, pd.
     if df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    status_order = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
+    status_order = ["Opened", "Wait for Approval", "Approved", "Ordered", "Received"]
     counts = (
         df.assign(_status=df["Status"].where(df["Status"].isin(status_order), "Opened"))
         .groupby("_status", as_index=False)
@@ -1498,7 +1498,7 @@ def render_report_center_tab(P) -> None:
         ):
             st.session_state["report_center_dev_pdf_name"] = suggested_name
         dev_pdf_name = d2.text_input(
-            "Report filename",
+            "Output filename",
             value=st.session_state.get("report_center_dev_pdf_name", suggested_name),
             key="report_center_dev_pdf_name",
         )
@@ -1553,7 +1553,7 @@ def render_report_center_tab(P) -> None:
                     st.error(f"Failed to build development markdown: {e}")
 
         st.markdown("---")
-        st.markdown("**Recent Development Reports**")
+        st.markdown("**Recent Development Markdown Reports**")
         md_files = _glob_reports_cached(P.report_center_dir, "*.md", _mtime(P.report_center_dir))
         if not md_files:
             st.info("No development markdown reports yet.")

@@ -1090,7 +1090,7 @@ def render_dashboard_tab(P):
         # SAVE
         # ==========================================================
         st.markdown("---")
-        st.subheader("💾 Save Zones + T&M Cut/Save Instructions → Dataset CSV")
+        st.markdown("### 💾 Save Zones + T&M Instructions to Dataset CSV")
         
         if not recent_dataset_csvs:
             st.warning("No dataset CSV files found in data_set_csv/. Create one in Process Setup first.")
@@ -1211,7 +1211,7 @@ def render_dashboard_tab(P):
         st.markdown("---")
         show_math_lab = st.toggle("Open Math Lab (advanced)", value=False, key="dash_open_math_lab")
         if show_math_lab:
-            st.subheader("A) f(x,y) vs time")
+            st.markdown("#### A) f(x,y) vs time")
             math_numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
             if len(math_numeric_cols) < 1:
                 st.info("No numeric columns found in this log.")

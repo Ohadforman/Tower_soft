@@ -463,7 +463,7 @@ def render_parts_orders_home_all():
     ORDER_FILE = P.parts_orders_csv
 
     # ✅ NEW canonical statuses (Needed -> Opened)
-    status_order = ["Opened", "Approved", "Ordered", "Shipped", "Received", "Installed"]
+    status_order = ["Opened", "Wait for Approval", "Approved", "Ordered", "Received"]
 
     # ✅ display columns (remove Purpose, keep single Details)
     column_order = [
@@ -506,6 +506,7 @@ def render_parts_orders_home_all():
     # ---------------- Counts ----------------
     status_lower = orders_df["Status"].astype(str).str.lower()
     opened_count = int((status_lower == "opened").sum())
+    wait_approval_count = int((status_lower == "wait for approval").sum())
     approved_count = int((status_lower == "approved").sum())
     ordered_count = int((status_lower == "ordered").sum())
     received_count = int((status_lower == "received").sum())
@@ -620,7 +621,7 @@ def render_parts_orders_home_all():
     )
 
     # ---------------- KPI Cards (symmetric) ----------------
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1])
 
     opened_class = "kpi-card kpi-opened" if opened_count > 0 else "kpi-card"
     with c1:
@@ -638,6 +639,17 @@ def render_parts_orders_home_all():
         st.markdown(
             f"""
             <div class="kpi-card">
+                <div class="kpi-title">🟠 Wait Approval</div>
+                <div class="kpi-value">{wait_approval_count}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with c3:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
                 <div class="kpi-title">🟢 Approved</div>
                 <div class="kpi-value">{approved_count}</div>
             </div>
@@ -645,7 +657,7 @@ def render_parts_orders_home_all():
             unsafe_allow_html=True
         )
 
-    with c3:
+    with c4:
         st.markdown(
             f"""
             <div class="kpi-card">
@@ -657,7 +669,7 @@ def render_parts_orders_home_all():
         )
 
     received_class = "kpi-card kpi-received" if received_count > 0 else "kpi-card"
-    with c4:
+    with c5:
         st.markdown(
             f"""
             <div class="{received_class}">

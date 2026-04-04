@@ -1,0 +1,7 @@
+Parameter Name,Value,Units
+Draw Name,T061_p2,
+Draw Date,2025-08-18 08:54:40.114541,
+P Gain (Diameter Control),0.4,
+I Gain (Diameter Control),1.0,
+TF Mode,Winder,
+Increment TF Value,0.128,mm

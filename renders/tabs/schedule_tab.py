@@ -47,6 +47,18 @@ def render_schedule_tab(P):
     
     SCHEDULE_FILE = P.schedule_csv
     required_columns = ["Event Type", "Start DateTime", "End DateTime", "Description", "Recurrence"]
+
+    @st.cache_data(show_spinner=False)
+    def _read_schedule_csv_cached(path: str, file_mtime: float) -> pd.DataFrame:
+        if not os.path.exists(path):
+            return pd.DataFrame()
+        return pd.read_csv(path)
+
+    def _schedule_mtime(path: str) -> float:
+        try:
+            return os.path.getmtime(path)
+        except Exception:
+            return 0.0
     
     # =========================================================
     # Ensure schedule file exists + required columns
@@ -55,7 +67,7 @@ def render_schedule_tab(P):
         pd.DataFrame(columns=required_columns).to_csv(SCHEDULE_FILE, index=False)
         st.warning("Schedule file was missing. New file with required columns created.")
     
-    schedule_df = pd.read_csv(SCHEDULE_FILE)
+    schedule_df = _read_schedule_csv_cached(SCHEDULE_FILE, _schedule_mtime(SCHEDULE_FILE))
 
     # Ensure required columns exist
     needs_persist = False

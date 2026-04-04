@@ -348,249 +348,249 @@ def render_order_draw_tab(P):
             st.warning(f"⚠️ SAP Rods Set inventory is LOW: **{sap_cnt:g}** sets (under 1).")
         else:
             st.success(f"🧪 SAP Rods Set inventory available: **{sap_cnt:g}** sets.")
-    
-    # =========================================================
-    # 1) TABLE FIRST (with colors)
-    # =========================================================
-    st.markdown('<div class="od-section">📋 Existing Draw Orders</div>', unsafe_allow_html=True)
-    
-    if not os.path.exists(orders_file):
-        st.info("No orders submitted yet.")
-        df = pd.DataFrame()
-    else:
-        df = _read_csv_cached(orders_file, keep_default_na=False, file_mtime=_mtime(orders_file))
-    
-    if not df.empty:
-        if "Timestamp" in df.columns:
-            df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-    
-        for col, default in {
-            "Status": "Pending",
-            "Priority": "Normal",
-            PROJECTS_COL: "",
-            "Order Opener": "",
-            "Preform Number": "",
-            FIBER_GEOMETRY_COL: "",
-            TIGER_CUT_COL: "",
-            OCT_F2F_COL: "",
-            "Done CSV": "",
-            "Done Description": "",
-            "Active CSV": "",
-            "T&M Moved": False,
-            "T&M Moved Timestamp": "",
-            "Required Length (m) (for T&M+costumer)": "",
-            GOOD_ZONES_COL: "",
-            "Notes": "",
-            "Main Coating": "",
-            "Secondary Coating": "",
-            MAIN_COAT_TEMP_COL: "",
-            SEC_COAT_TEMP_COL: "",
-            "Fiber Diameter (µm)": "",
-            FIBER_D_TOL_COL: "",
-            "Main Coating Diameter (µm)": "",
-            MAIN_D_TOL_COL: "",
-            "Secondary Coating Diameter (µm)": "",
-            SEC_D_TOL_COL: "",
-            "Tension (g)": "",
-            "Draw Speed (m/min)": "",
-        }.items():
-            if col not in df.columns:
-                df[col] = default
-    
-        if "T&M Moved" in df.columns:
-            df["T&M Moved"] = df["T&M Moved"].apply(
-                lambda x: str(x).strip().lower() in ("true", "1", "yes", "y", "moved")
-            )
-        df_visible = df[~df["T&M Moved"]].copy() if "T&M Moved" in df.columns else df.copy()
-    
-    
-        styled_df = (
-            df_visible.style
-            .applymap(color_status, subset=["Status"] if "Status" in df_visible.columns else None)
-            .applymap(color_priority, subset=["Priority"] if "Priority" in df_visible.columns else None)
-        )
-    
-        st.dataframe(styled_df, use_container_width=True)
-    else:
-        df_visible = pd.DataFrame()
-    
-    # =========================================================
-    # ✅ Pending → Schedule (quick)
-    # =========================================================
-    st.markdown("---")
-    st.markdown('<div class="od-section">🕒 Pending → Schedule (quick)</div>', unsafe_allow_html=True)
-    
-    if df_visible is None or df_visible.empty:
-        st.info("No orders to schedule.")
-    else:
-        df_pending = df_visible[df_visible["Status"].astype(str).str.strip() == "Pending"].copy()
-    
-        if df_pending.empty:
-            st.info("No Pending orders.")
+
+    def _render_existing_orders_workspace():
+        st.markdown("---")
+        st.markdown('<div class="od-section">📋 Existing Draw Orders</div>', unsafe_allow_html=True)
+
+        if not os.path.exists(orders_file):
+            st.info("No orders submitted yet.")
+            df = pd.DataFrame()
         else:
-            pending_indices = df_pending.index.tolist()
-    
-            def _fmt_pending(i: int) -> str:
-                try:
-                    prj = str(df_pending.loc[i, PROJECTS_COL]).strip()
-                    pref = str(df_pending.loc[i, "Preform Number"]).strip()
-                    pri = str(df_pending.loc[i, "Priority"]).strip()
-                    ts = df_pending.loc[i, "Timestamp"] if "Timestamp" in df_pending.columns else ""
-                    return f"#{i} | {prj} | Preform: {pref} | Priority: {pri} | {ts}"
-                except Exception:
-                    return f"#{i}"
-    
-            selected_idx = st.selectbox(
-                "Select Pending order",
-                options=pending_indices,
-                format_func=_fmt_pending,
-                key="pending_to_schedule_selectbox",
-            )
-    
-            sel_row = df.loc[selected_idx]  # ORIGINAL df row
-    
-            with st.expander("📅 Schedule selected Pending order", expanded=True):
-                preform_now = str(sel_row.get("Preform Number", "")).strip()
-                need_preform = (preform_now == "" or preform_now == "0" or preform_now.lower() == "none")
-    
-                preform_real = ""
-                if need_preform:
-                    preform_real = st.text_input(
-                        "Preform Number (required for scheduling — cannot be 0)",
-                        placeholder="e.g., P0888",
-                        key="pending_sched_real_preform_input",
-                    )
-    
-                pwd2 = st.text_input("Scheduling password", type="password", key="pending_sched_pwd2")
-                sched_ok2 = (pwd2 == SCHEDULE_PASSWORD)
-                if pwd2.strip():
-                    (st.success if sched_ok2 else st.error)("Password OK ✅" if sched_ok2 else "Wrong password ❌")
-    
-                default_date2 = pd.Timestamp.today().date()
-                preset2 = st.radio(
-                    "Preset",
-                    ["All day (08:00–16:00)", "Before lunch (08:00–12:00)", "After lunch (12:00–16:00)"],
-                    horizontal=True,
-                    key="pending_sched_preset2",
-                    label_visibility="collapsed",
+            df = _read_csv_cached(orders_file, keep_default_na=False, file_mtime=_mtime(orders_file))
+
+        if not df.empty:
+            if "Timestamp" in df.columns:
+                df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+
+            for col, default in {
+                "Status": "Pending",
+                "Priority": "Normal",
+                PROJECTS_COL: "",
+                "Order Opener": "",
+                "Preform Number": "",
+                FIBER_GEOMETRY_COL: "",
+                TIGER_CUT_COL: "",
+                OCT_F2F_COL: "",
+                "Done CSV": "",
+                "Done Description": "",
+                "Active CSV": "",
+                "T&M Moved": False,
+                "T&M Moved Timestamp": "",
+                "Required Length (m) (for T&M+costumer)": "",
+                GOOD_ZONES_COL: "",
+                "Notes": "",
+                "Main Coating": "",
+                "Secondary Coating": "",
+                MAIN_COAT_TEMP_COL: "",
+                SEC_COAT_TEMP_COL: "",
+                "Fiber Diameter (µm)": "",
+                FIBER_D_TOL_COL: "",
+                "Main Coating Diameter (µm)": "",
+                MAIN_D_TOL_COL: "",
+                "Secondary Coating Diameter (µm)": "",
+                SEC_D_TOL_COL: "",
+                "Tension (g)": "",
+                "Draw Speed (m/min)": "",
+            }.items():
+                if col not in df.columns:
+                    df[col] = default
+
+            if "T&M Moved" in df.columns:
+                df["T&M Moved"] = df["T&M Moved"].apply(
+                    lambda x: str(x).strip().lower() in ("true", "1", "yes", "y", "moved")
                 )
-    
-                if preset2.startswith("All day"):
-                    preset_start2 = dt.time(8, 0)
-                    preset_duration2 = 8 * 60
-                elif preset2.startswith("Before lunch"):
-                    preset_start2 = dt.time(8, 0)
-                    preset_duration2 = 4 * 60
-                else:
-                    preset_start2 = dt.time(12, 0)
-                    preset_duration2 = 4 * 60
-    
-                cA2, cB2, cC2 = st.columns([1, 1, 1], vertical_alignment="bottom")
-                with cA2:
-                    sched_date2 = st.date_input("Schedule Date", value=default_date2, key="pending_sched_date2")
-                with cB2:
-                    sched_start2 = st.time_input("Start Time", value=preset_start2, key="pending_sched_start2")
-                with cC2:
-                    sched_dur2 = st.number_input(
-                        "Duration (min)",
-                        min_value=1,
-                        step=5,
-                        value=int(preset_duration2),
-                        key="pending_sched_dur2",
-                    )
-    
-                start_dt2 = pd.to_datetime(f"{sched_date2} {sched_start2}")
-                end_dt2 = start_dt2 + pd.to_timedelta(int(sched_dur2), unit="m")
-    
-                if st.button("✅ Schedule this Pending Order", key="pending_schedule_confirm_btn"):
-                    if not sched_ok2:
-                        st.error("Not scheduled: password missing/wrong.")
-                        st.stop()
-    
-                    if need_preform and not str(preform_real).strip():
-                        st.error("Please enter a real Preform Number (cannot schedule with 0).")
-                        st.stop()
-    
-                    existing2 = pd.read_csv(SCHEDULE_FILE) if os.path.exists(SCHEDULE_FILE) else pd.DataFrame()
-                    for c in schedule_required_cols:
-                        if c not in existing2.columns:
-                            existing2[c] = ""
-                    existing2 = existing2[schedule_required_cols]
-    
-                    geom2 = str(sel_row.get(FIBER_GEOMETRY_COL, "")).strip()
-                    prj2 = str(sel_row.get(PROJECTS_COL, "")).strip()
-                    pri2 = str(sel_row.get("Priority", "")).strip()
-                    pref2 = str(preform_real).strip() if need_preform else preform_now
-    
-                    length2 = sel_row.get("Required Length (m) (for T&M+costumer)", "")
-                    zones2 = sel_row.get(GOOD_ZONES_COL, "")
-    
-                    tiger2 = to_float(sel_row.get(TIGER_CUT_COL, 0.0), 0.0)
-                    oct2 = to_float(sel_row.get(OCT_F2F_COL, 0.0), 0.0)
-    
-                    mtemp2 = to_float(sel_row.get(MAIN_COAT_TEMP_COL, 0.0), 0.0)
-                    stemp2 = to_float(sel_row.get(SEC_COAT_TEMP_COL, 0.0), 0.0)
-    
-                    notes2 = str(sel_row.get("Notes", "")).strip()
-    
-                    fd2 = to_float(sel_row.get("Fiber Diameter (µm)", 0.0), 0.0)
-                    md2 = to_float(sel_row.get("Main Coating Diameter (µm)", 0.0), 0.0)
-                    sd2 = to_float(sel_row.get("Secondary Coating Diameter (µm)", 0.0), 0.0)
-                    fdt2 = to_float(sel_row.get(FIBER_D_TOL_COL, 0.0), 0.0)
-                    mdt2 = to_float(sel_row.get(MAIN_D_TOL_COL, 0.0), 0.0)
-                    sdt2 = to_float(sel_row.get(SEC_D_TOL_COL, 0.0), 0.0)
-    
-                    diam_bits2 = []
-                    s_fd2 = _fmt_pm(fd2, fdt2)
-                    s_md2 = _fmt_pm(md2, mdt2)
-                    s_sd2 = _fmt_pm(sd2, sdt2)
-                    if s_fd2:
-                        diam_bits2.append(f"Fiber {s_fd2}")
-                    if s_md2:
-                        diam_bits2.append(f"Coat1 {s_md2}")
-                    if s_sd2:
-                        diam_bits2.append(f"Coat2 {s_sd2}")
-    
-                    desc_lines2 = [
-                        f"ORDER #{selected_idx} | Priority: {pri2}",
-                        f"Fiber: {prj2} | Geometry: {geom2} | Preform: {pref2}",
-                        f"Required Length: {length2} m | Good Zones Count: {zones2}",
-                    ]
-                    if diam_bits2:
-                        desc_lines2.append("Diameters: " + " | ".join(diam_bits2))
-    
-                    if geom2 == "TIGER - PM" and tiger2 > 0:
-                        desc_lines2.append(f"Tiger Cut: {tiger2:.1f}%")
-                    if geom2 == "Octagonal" and oct2 > 0:
-                        desc_lines2.append(f"Oct F2F: {oct2:.2f} mm")
-    
-                    if mtemp2 > 0:
-                        desc_lines2.append(f"Main Coat Temp: {mtemp2:.0f}°C")
-                    if stemp2 > 0:
-                        desc_lines2.append(f"Sec Coat Temp: {stemp2:.0f}°C")
-                    if notes2:
-                        desc_lines2.append(f"Notes: {notes2}")
-    
-                    event_description2 = " | ".join([x for x in desc_lines2 if str(x).strip()])
-    
-                    new_event2 = pd.DataFrame([{
-                        "Event Type": "Drawing",
-                        "Start DateTime": start_dt2,
-                        "End DateTime": end_dt2,
-                        "Description": event_description2,
-                        "Recurrence": "None",
-                    }])
-    
-                    pd.concat([existing2, new_event2], ignore_index=True).to_csv(SCHEDULE_FILE, index=False)
-    
+            df_visible = df[~df["T&M Moved"]].copy() if "T&M Moved" in df.columns else df.copy()
+
+            styled_df = (
+                df_visible.style
+                .applymap(color_status, subset=["Status"] if "Status" in df_visible.columns else None)
+                .applymap(color_priority, subset=["Priority"] if "Priority" in df_visible.columns else None)
+            )
+
+            st.dataframe(styled_df, use_container_width=True)
+        else:
+            df_visible = pd.DataFrame()
+
+        st.markdown("---")
+        st.markdown('<div class="od-section">🕒 Pending → Schedule (quick)</div>', unsafe_allow_html=True)
+
+        if df_visible is None or df_visible.empty:
+            st.info("No orders to schedule.")
+        else:
+            df_pending = df_visible[df_visible["Status"].astype(str).str.strip() == "Pending"].copy()
+
+            if df_pending.empty:
+                st.info("No Pending orders.")
+            else:
+                pending_indices = df_pending.index.tolist()
+
+                def _fmt_pending(i: int) -> str:
+                    try:
+                        prj = str(df_pending.loc[i, PROJECTS_COL]).strip()
+                        pref = str(df_pending.loc[i, "Preform Number"]).strip()
+                        pri = str(df_pending.loc[i, "Priority"]).strip()
+                        ts = df_pending.loc[i, "Timestamp"] if "Timestamp" in df_pending.columns else ""
+                        return f"#{i} | {prj} | Preform: {pref} | Priority: {pri} | {ts}"
+                    except Exception:
+                        return f"#{i}"
+
+                selected_idx = st.selectbox(
+                    "Select Pending order",
+                    options=pending_indices,
+                    format_func=_fmt_pending,
+                    key="pending_to_schedule_selectbox",
+                )
+
+                sel_row = df.loc[selected_idx]
+
+                with st.expander("📅 Schedule selected Pending order", expanded=True):
+                    preform_now = str(sel_row.get("Preform Number", "")).strip()
+                    need_preform = (preform_now == "" or preform_now == "0" or preform_now.lower() == "none")
+
+                    preform_real = ""
                     if need_preform:
-                        df.at[selected_idx, "Preform Number"] = pref2
-                    df.at[selected_idx, "Status"] = "Scheduled"
-                    df.to_csv(orders_file, index=False)
-    
-                    st.success("✅ Scheduled + moved Status to Scheduled.")
-                    st.rerun()
-    
+                        preform_real = st.text_input(
+                            "Preform Number (required for scheduling — cannot be 0)",
+                            placeholder="e.g., P0888",
+                            key="pending_sched_real_preform_input",
+                        )
+
+                    pwd2 = st.text_input("Scheduling password", type="password", key="pending_sched_pwd2")
+                    sched_ok2 = (pwd2 == SCHEDULE_PASSWORD)
+                    if pwd2.strip():
+                        (st.success if sched_ok2 else st.error)("Password OK ✅" if sched_ok2 else "Wrong password ❌")
+
+                    default_date2 = pd.Timestamp.today().date()
+                    preset2 = st.radio(
+                        "Preset",
+                        ["All day (08:00–16:00)", "Before lunch (08:00–12:00)", "After lunch (12:00–16:00)"],
+                        horizontal=True,
+                        key="pending_sched_preset2",
+                        label_visibility="collapsed",
+                    )
+
+                    if preset2.startswith("All day"):
+                        preset_start2 = dt.time(8, 0)
+                        preset_duration2 = 8 * 60
+                    elif preset2.startswith("Before lunch"):
+                        preset_start2 = dt.time(8, 0)
+                        preset_duration2 = 4 * 60
+                    else:
+                        preset_start2 = dt.time(12, 0)
+                        preset_duration2 = 4 * 60
+
+                    cA2, cB2, cC2 = st.columns([1, 1, 1], vertical_alignment="bottom")
+                    with cA2:
+                        sched_date2 = st.date_input("Schedule Date", value=default_date2, key="pending_sched_date2")
+                    with cB2:
+                        sched_start2 = st.time_input("Start Time", value=preset_start2, key="pending_sched_start2")
+                    with cC2:
+                        sched_dur2 = st.number_input(
+                            "Duration (min)",
+                            min_value=1,
+                            step=5,
+                            value=int(preset_duration2),
+                            key="pending_sched_dur2",
+                        )
+
+                    start_dt2 = pd.to_datetime(f"{sched_date2} {sched_start2}")
+                    end_dt2 = start_dt2 + pd.to_timedelta(int(sched_dur2), unit="m")
+
+                    if st.button("✅ Schedule this Pending Order", key="pending_schedule_confirm_btn"):
+                        if not sched_ok2:
+                            st.error("Not scheduled: password missing/wrong.")
+                            st.stop()
+
+                        if need_preform and not str(preform_real).strip():
+                            st.error("Please enter a real Preform Number (cannot schedule with 0).")
+                            st.stop()
+
+                        existing2 = pd.read_csv(SCHEDULE_FILE) if os.path.exists(SCHEDULE_FILE) else pd.DataFrame()
+                        for c in schedule_required_cols:
+                            if c not in existing2.columns:
+                                existing2[c] = ""
+                        existing2 = existing2[schedule_required_cols]
+
+                        geom2 = str(sel_row.get(FIBER_GEOMETRY_COL, "")).strip()
+                        prj2 = str(sel_row.get(PROJECTS_COL, "")).strip()
+                        pri2 = str(sel_row.get("Priority", "")).strip()
+                        pref2 = str(preform_real).strip() if need_preform else preform_now
+
+                        length2 = sel_row.get("Required Length (m) (for T&M+costumer)", "")
+                        zones2 = sel_row.get(GOOD_ZONES_COL, "")
+
+                        tiger2 = to_float(sel_row.get(TIGER_CUT_COL, 0.0), 0.0)
+                        oct2 = to_float(sel_row.get(OCT_F2F_COL, 0.0), 0.0)
+
+                        mtemp2 = to_float(sel_row.get(MAIN_COAT_TEMP_COL, 0.0), 0.0)
+                        stemp2 = to_float(sel_row.get(SEC_COAT_TEMP_COL, 0.0), 0.0)
+
+                        notes2 = str(sel_row.get("Notes", "")).strip()
+
+                        fd2 = to_float(sel_row.get("Fiber Diameter (µm)", 0.0), 0.0)
+                        md2 = to_float(sel_row.get("Main Coating Diameter (µm)", 0.0), 0.0)
+                        sd2 = to_float(sel_row.get("Secondary Coating Diameter (µm)", 0.0), 0.0)
+                        fdt2 = to_float(sel_row.get(FIBER_D_TOL_COL, 0.0), 0.0)
+                        mdt2 = to_float(sel_row.get(MAIN_D_TOL_COL, 0.0), 0.0)
+                        sdt2 = to_float(sel_row.get(SEC_D_TOL_COL, 0.0), 0.0)
+
+                        diam_bits2 = []
+                        s_fd2 = _fmt_pm(fd2, fdt2)
+                        s_md2 = _fmt_pm(md2, mdt2)
+                        s_sd2 = _fmt_pm(sd2, sdt2)
+                        if s_fd2:
+                            diam_bits2.append(f"Fiber {s_fd2}")
+                        if s_md2:
+                            diam_bits2.append(f"Coat1 {s_md2}")
+                        if s_sd2:
+                            diam_bits2.append(f"Coat2 {s_sd2}")
+
+                        desc_lines2 = [
+                            f"ORDER #{selected_idx} | Priority: {pri2}",
+                            f"Fiber: {prj2} | Geometry: {geom2} | Preform: {pref2}",
+                            f"Required Length: {length2} m | Good Zones Count: {zones2}",
+                        ]
+                        if diam_bits2:
+                            desc_lines2.append("Diameters: " + " | ".join(diam_bits2))
+
+                        if geom2 == "TIGER - PM" and tiger2 > 0:
+                            desc_lines2.append(f"Tiger Cut: {tiger2:.1f}%")
+                        if geom2 == "Octagonal" and oct2 > 0:
+                            desc_lines2.append(f"Oct F2F: {oct2:.2f} mm")
+
+                        if mtemp2 > 0:
+                            desc_lines2.append(f"Main Coat Temp: {mtemp2:.0f}°C")
+                        if stemp2 > 0:
+                            desc_lines2.append(f"Sec Coat Temp: {stemp2:.0f}°C")
+                        if notes2:
+                            desc_lines2.append(f"Notes: {notes2}")
+
+                        event_description2 = " | ".join([x for x in desc_lines2 if str(x).strip()])
+
+                        new_event2 = pd.DataFrame([{
+                            "Event Type": "Drawing",
+                            "Start DateTime": start_dt2,
+                            "End DateTime": end_dt2,
+                            "Description": event_description2,
+                            "Recurrence": "None",
+                        }])
+
+                        pd.concat([existing2, new_event2], ignore_index=True).to_csv(SCHEDULE_FILE, index=False)
+
+                        if need_preform:
+                            df.at[selected_idx, "Preform Number"] = pref2
+                        df.at[selected_idx, "Status"] = "Scheduled"
+                        df.to_csv(orders_file, index=False)
+
+                        st.success("✅ Scheduled + moved Status to Scheduled.")
+                        st.rerun()
+
+    # =========================================================
+    # 1) EXISTING ORDERS / SCHEDULING FIRST
+    # =========================================================
+    _render_existing_orders_workspace()
+
     # =========================================================
     # 2) CREATE NEW ORDER (UI + tolerances + notes recommended)
     #   IMPORTANT FIX: Schedule UI is OUTSIDE the form
@@ -606,19 +606,21 @@ def render_order_draw_tab(P):
     if "show_new_order_form" not in st.session_state:
         st.session_state["show_new_order_form"] = False
 
+    start_builder = False
     b1, b2, b3 = st.columns([1.3, 1.1, 2.6], vertical_alignment="center")
     with b1:
         if not st.session_state["show_new_order_form"]:
-            if st.button("➕ Start New Order", key="order_start_builder_btn", use_container_width=True, type="primary"):
-                st.session_state["show_new_order_form"] = True
-                st.rerun()
+            start_builder = st.button("➕ Start New Order", key="order_start_builder_btn", use_container_width=True, type="primary")
     with b2:
         if st.session_state["show_new_order_form"]:
             if st.button("✖ Close Builder", key="order_close_builder_btn", use_container_width=True):
                 st.session_state["show_new_order_form"] = False
                 st.rerun()
     with b3:
-        st.caption("Use the builder to create and optionally schedule a draw order.")
+        st.caption("Use this as a clean create flow: choose project, build the order, then optionally schedule it.")
+
+    if start_builder:
+        st.session_state["show_new_order_form"] = True
 
     if st.session_state["show_new_order_form"]:
         st.markdown(
@@ -666,11 +668,12 @@ def render_order_draw_tab(P):
             projects = load_projects()
     
             # Project row (outside form to support template auto-apply)
-            st.markdown('<div class="od-order-subhead">Project & template source</div>', unsafe_allow_html=True)
+            st.markdown('<div class="od-order-subhead">1. Choose Fiber Project</div>', unsafe_allow_html=True)
+            st.caption("This is the main project choice. Selecting it can auto-load the saved project template.")
             selA, selB = st.columns([2.6, 1.0], vertical_alignment="bottom")
             with selA:
                 selected_project = st.selectbox(
-                    "Project * (auto-fills if template exists)",
+                    "Fiber Project *",
                     options=[""] + projects,
                     index=0,
                     key="order_project_select",
@@ -698,7 +701,19 @@ def render_order_draw_tab(P):
     
             if str(selected_project).strip():
                 tpl_exists = bool(get_template_for_project(selected_project))
-                st.caption("✅ Template exists for this project." if tpl_exists else "ℹ️ No template yet for this project.")
+                st.markdown(
+                    (
+                        '<div class="od-order-help"><b>Template:</b> saved defaults found for this project and loaded into the form.</div>'
+                        if tpl_exists
+                        else '<div class="od-order-help"><b>Template:</b> no saved template yet for this project. Fill the form manually or save a new template later.</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    '<div class="od-order-help"><b>Next:</b> choose a Fiber Project first. The rest of the order should be built from that choice.</div>',
+                    unsafe_allow_html=True,
+                )
     
             # -----------------------------
             # FORM (single submit)
@@ -724,12 +739,17 @@ def render_order_draw_tab(P):
                             help="Use 0 if preform does not exist yet.",
                         )
                     with c2:
-                        st.text_input(
-                            "Fiber Project *",
-                            value=str(selected_project),
-                            disabled=True,
-                            key="order_fiber_project_disabled",
-                        )
+                        st.markdown("**Fiber Project**")
+                        if str(selected_project).strip():
+                            st.markdown(
+                                f"<div class='od-order-help'><b>{selected_project}</b><br><span style='font-size:0.8rem;'>Project is selected above and drives the template/defaults for this order.</span></div>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(
+                                "<div class='od-order-help'><b>No project selected yet.</b><br><span style='font-size:0.8rem;'>Choose the Fiber Project above before submitting the order.</span></div>",
+                                unsafe_allow_html=True,
+                            )
                     with c3:
                         st.selectbox("Priority *", ["Low", "Normal", "High"], index=1, key="order_priority")
                     with c4:
@@ -1135,4 +1155,6 @@ def render_order_draw_tab(P):
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.caption("Click `Start New Order` to open the builder.")
+
+    # =========================================================
     # ------------------ Tower Parts Tab ------------------
