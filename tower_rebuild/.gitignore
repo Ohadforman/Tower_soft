@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Runtime output owned by the app
+backups/
+reports/
+state/
+logs/
+development_media/
+
+# User-generated / local content
+static/uploads/
+
+# Local helper artifacts
+tools/__pycache__/
